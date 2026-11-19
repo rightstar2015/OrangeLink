@@ -37,7 +37,7 @@ Rust + egui 的 Windows 素材管理程式。下面每條規則都對應一個�
   2. 每個參數都要驗證。
   3. `fuzz_tests::every_tool_survives_bad_arguments` 會從登錄表自動測新工具:不能 panic、回傳錯誤時不能改到資源庫、名稱和標籤要在上限內。工具有自己特殊的規則時,再加一個專門的測試。
   4. 會跑很久的工具要在 `get_status` 裡回報進度。
-  5. 更新 README 的工具列表。
+  5. 更新 `docs/FEATURES.md` 的 MCP 工具列表。
 - 對外部文字切片之前先確認是 char boundary(`#aébbb` 曾經讓 UI 執行緒 panic)。
 
 ## 持久化(library.rs、config.rs、備份、刪除)
@@ -77,7 +77,7 @@ Rust + egui 的 Windows 素材管理程式。下面每條規則都對應一個�
 - 一個 commit 只做一件事,不要一次塞很多個項目。
 - Commit 訊息用英文,第一行描述使用者看得到的行為。
 - 功能要用邊界素材驗證,不只是手邊的典型素材:直式影片、GBK 字幕、超過片尾的時間點、空字串、很大的資源庫。
-- README 宣稱的能力要有對應的測試或手動測試項目。
+- README 和 `docs/FEATURES.md` 宣稱的能力要有對應的測試或手動測試項目。README 裡的快速鍵表要和 `src/ui/shortcuts.rs` 一致（有測試檢查）。
 
 ## 編輯檔案
 

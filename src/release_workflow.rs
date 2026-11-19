@@ -9,7 +9,12 @@
 //!   (a tag named `v1$(…)` would run as a command);
 //! - in release.yml only the job that creates the draft may write, the tag is
 //!   checked against `vX.Y.Z`, and an existing release is never overwritten;
-//! - Rust comes from rust-toolchain.toml, not whatever `stable` is that day.
+//! - Rust comes from rust-toolchain.toml, not whatever `stable` is that day;
+//! - the README in the zip starts with a pointer to the project page.
+
+/// The sentence the zip's README starts with, and the page it links to.
+const ZIP_README_NOTE: &str = "完整說明與圖片請見 GitHub 專案頁面";
+const PROJECT_PAGE: &str = "https://github.com/rightstar2015/OrangeLink";
 
 /// The indentation of a YAML line.
 fn indent(line: &str) -> usize {
@@ -137,6 +142,11 @@ fn release_problems(yml: &str) -> Vec<String> {
                 out.push(format!("release.yml: job {job} uses the tag without checking it is vX.Y.Z"));
             }
         }
+        // The README in the zip points to the project page, because the images it
+        // shows (docs/images) are not packaged.
+        if body.contains("README.md") && !(body.contains(ZIP_README_NOTE) && body.contains(PROJECT_PAGE)) {
+            out.push(format!("release.yml: job {job} packages the README without the pointer to the project page"));
+        }
     }
     if !blocks.iter().any(|(_, b)| b.contains("contents: write")) {
         out.push("release.yml: no job can create the draft".into());
@@ -230,6 +240,21 @@ mod tests {
         let end = release.find("          gh release create").unwrap();
         let late = format!("{}{}{}", &release[..start], &release[end..], &release[start..end]);
         assert!(release_problems(&late).join("\n").contains("before publishing"));
+    }
+
+    #[test]
+    fn the_zip_readme_points_to_the_project_page() {
+        let release = RELEASE.replace("\r\n", "\n");
+        assert!(release_problems(&release).is_empty());
+        let rule = "without the pointer to the project page";
+        // Back to copying the README as it is.
+        let plain = release.replace(ZIP_README_NOTE, "");
+        assert!(release_problems(&plain).join("\n").contains(rule));
+        // A pointer that leads somewhere else.
+        let elsewhere = release.replace(PROJECT_PAGE, "https://example.com");
+        assert!(release_problems(&elsewhere).join("\n").contains(rule));
+        // The note is really written in front of the README's own text.
+        assert!(release.contains(r#"$note + [IO.File]::ReadAllText("$PWD/README.md")"#));
     }
 
     #[test]

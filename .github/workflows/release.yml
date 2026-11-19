@@ -58,7 +58,10 @@ jobs:
           $name = "OrangeLink-$env:TAG-windows-x64"
           New-Item -ItemType Directory -Force dist/OrangeLink | Out-Null
           Copy-Item target/release/orangelink.exe dist/OrangeLink/OrangeLink.exe
-          Copy-Item README.md dist/OrangeLink/
+          # The README in the zip starts with a pointer to the project page: the
+          # screenshots it shows are not packaged (src/release_workflow.rs checks this).
+          $note = "> [完整說明與圖片請見 GitHub 專案頁面](https://github.com/rightstar2015/OrangeLink)`n`n"
+          [IO.File]::WriteAllText("$PWD/dist/OrangeLink/README.md", $note + [IO.File]::ReadAllText("$PWD/README.md"))
           Copy-Item LICENSE, THIRD_PARTY_NOTICES.md dist/OrangeLink/
           # Licence texts of every crate in the exe (see THIRD_PARTY_NOTICES.md).
           # PowerShell 7.4+ passes bytes between native commands and into `>` unchanged.

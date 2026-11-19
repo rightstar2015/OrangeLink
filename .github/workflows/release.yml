@@ -1,0 +1,131 @@
+# Pushing a version tag (e.g. `git tag v0.1.6 && git push origin v0.1.6`) builds the
+# Windows exe, runs the tests and attaches the zip to a draft release for that tag.
+# The draft is published by hand after latest.json is signed (see README).
+#
+# Two jobs, so the token that can write releases never meets the build: `build`
+# compiles and tests (and so runs every dependency's build script, proc-macro and
+# test) with a read-only token that is not kept in .git/config; `publish` only
+# downloads the packaged files and creates the draft. A tag that already has a
+# release, draft or published, fails here instead of replacing its files.
+# src/release_workflow.rs checks these rules, and CI runs zizmor on this file.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions: {}
+
+jobs:
+  build:
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    env:
+      TAG: ${{ github.ref_name }}
+      # Rust writes source paths into the exe (panic messages). Replace the
+      # checkout and the runner's home (cargo's registry) so the zip carries
+      # no build-machine paths.
+      RUSTFLAGS: --remap-path-prefix=${{ github.workspace }}=. --remap-path-prefix=C:\Users\runneradmin=~
+    steps:
+      - name: Check the tag
+        shell: pwsh
+        run: |
+          if ($env:TAG -cnotmatch '^v[0-9]+\.[0-9]+\.[0-9]+$') { throw "tag '$env:TAG' is not vX.Y.Z" }
+
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      # The version in rust-toolchain.toml.
+      - name: Rust
+        run: rustup toolchain install
+
+      - name: Check the version
+        shell: pwsh
+        run: |
+          $version = (cargo metadata --format-version 1 --no-deps --locked | ConvertFrom-Json).packages[0].version
+          if ("v$version" -cne $env:TAG) { throw "Cargo.toml is $version, the tag is $env:TAG" }
+
+      - name: Build and test
+        run: |
+          cargo build --release --locked
+          cargo test --release --locked
+
+      - name: Package
+        shell: pwsh
+        run: |
+          $name = "OrangeLink-$env:TAG-windows-x64"
+          New-Item -ItemType Directory -Force dist/OrangeLink | Out-Null
+          Copy-Item target/release/orangelink.exe dist/OrangeLink/OrangeLink.exe
+          Copy-Item README.md dist/OrangeLink/
+          Copy-Item LICENSE, THIRD_PARTY_NOTICES.md dist/OrangeLink/
+          # Licence texts of every crate in the exe (see THIRD_PARTY_NOTICES.md).
+          # PowerShell 7.4+ passes bytes between native commands and into `>` unchanged.
+          cargo metadata --format-version 1 --locked --filter-platform x86_64-pc-windows-msvc |
+            cargo run --release --locked --example third_party_licenses > dist/OrangeLink/THIRD_PARTY_LICENSES.txt
+          if ($LASTEXITCODE -ne 0) { throw "third_party_licenses failed" }
+          Compress-Archive -Path dist/OrangeLink -DestinationPath "dist/$name.zip"
+          Remove-Item -Recurse dist/OrangeLink
+          # `sha256sum` format, for checking a download (and for the updater).
+          $sums = Get-ChildItem dist/*.zip | Get-FileHash -Algorithm SHA256 |
+            ForEach-Object { "$($_.Hash.ToLower())  $(Split-Path $_.Path -Leaf)`n" }
+          [IO.File]::WriteAllText("$PWD/dist/SHA256SUMS.txt", -join $sums)
+          # latest.json for the updater. `sig` is left out: the release is created as
+          # a draft, the release key signs the zip on the release computer
+          # (README, "發布新版本"), and the signed latest.json replaces this one
+          # before the draft is published. Without `sig` the app only shows that a
+          # new version exists. WriteAllText writes UTF-8 without a BOM.
+          $hash = (Get-FileHash -Algorithm SHA256 "dist/$name.zip").Hash.ToLower()
+          $latest = [ordered]@{ version = $env:TAG.Substring(1); asset = "$name.zip"; sha256 = $hash; notes = "" }
+          [IO.File]::WriteAllText("$PWD/dist/latest.json", ($latest | ConvertTo-Json))
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release
+          path: dist/
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      TAG: ${{ github.ref_name }}
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: release
+          path: dist
+
+      - name: Create the draft
+        run: |
+          if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then echo "::error::tag '$TAG' is not vX.Y.Z"; exit 1; fi
+          # Never replace the files of an existing release: a published one would
+          # lose its signed latest.json. To rebuild a draft, delete it first.
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            echo "::error::release $TAG already exists; delete the draft to rebuild it (a published release is never rebuilt)"
+            exit 1
+          fi
+          # Exactly the three files the build job packages, nothing more: a build
+          # that added another zip, or anything else, gets no release.
+          expected=$(printf '%s\n' "OrangeLink-$TAG-windows-x64.zip" SHA256SUMS.txt latest.json | LC_ALL=C sort)
+          actual=$(cd dist && find . -mindepth 1 -printf '%P\n' | LC_ALL=C sort)
+          if [ "$expected" != "$actual" ]; then
+            echo "::error::the build job uploaded other files than the zip, SHA256SUMS.txt and latest.json:"
+            echo "$actual"
+            exit 1
+          fi
+          # The three agree with each other: the zip matches SHA256SUMS.txt, and
+          # latest.json names this version, this zip and its hash.
+          zip="OrangeLink-$TAG-windows-x64.zip"
+          (cd dist && sha256sum --check --strict SHA256SUMS.txt)
+          hash=$(sha256sum "dist/$zip" | cut -d ' ' -f 1)
+          if ! jq -e --arg asset "$zip" --arg sha "$hash" --arg version "${TAG#v}" '.asset == $asset and .sha256 == $sha and .version == $version' dist/latest.json > /dev/null; then
+            echo "::error::latest.json does not name $zip, its SHA-256 and version ${TAG#v}"
+            exit 1
+          fi
+          gh release create "$TAG" "dist/OrangeLink-$TAG-windows-x64.zip" dist/SHA256SUMS.txt dist/latest.json --draft --generate-notes --title "OrangeLink $TAG"

@@ -1,0 +1,12 @@
+# OrangeLink release public keys (Ed25519), one per line as 64 hex digits.
+# The app builds this file in (src/self_update.rs) and tools/sign_release reads
+# the same file: an update is installed only when its latest.json is signed by
+# one of these keys. `sign_release keygen` prints a new key's line.
+#
+# Two keys: the primary signs every release; the backup is kept offline and
+# signs only if the primary is lost (SECURITY.md, "發版金鑰外洩與輪替").
+#
+# primary
+0c7e67d92e0c5b8515f373829ac9ee2e522faab1ff810ca0bce1bda036660bb1
+# backup (kept offline)
+44d87c886cb64aedbbd3cd06cd8669609cdbf6f1999a9c4b2403cda3aa7b58c2

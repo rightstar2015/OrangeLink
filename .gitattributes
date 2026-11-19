@@ -1,0 +1,7 @@
+# Line ends fixed to LF whatever core.autocrlf says, so a fresh clone has the
+# same bytes everywhere (tests read workflow and toolchain files with include_str!).
+*.rs   text eol=lf
+*.toml text eol=lf
+*.yml  text eol=lf
+*.yaml text eol=lf
+*.txt  text eol=lf

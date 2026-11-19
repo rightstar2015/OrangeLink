@@ -1,0 +1,6 @@
+# The Rust version CI and release builds use (and rustup picks for local builds).
+# Raise it on purpose, in its own commit: a new version can bring new clippy lints.
+[toolchain]
+channel = "1.99.1"
+components = ["clippy"]
+profile = "minimal"

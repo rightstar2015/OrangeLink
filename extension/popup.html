@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<style>
+  body { width: 280px; margin: 0; padding: 12px; font: 13px system-ui, sans-serif; background: #1c1c1c; color: #e6e6e6; }
+  h1 { font-size: 14px; margin: 0 0 8px; }
+  #status { margin: 0 0 10px; color: #aaa; }
+  #status.ok { color: #6ec878; }
+  #status.bad { color: #ff8a80; }
+  button { width: 100%; padding: 7px; border: 0; border-radius: 4px; background: #e0701a; color: #fff; font: inherit; cursor: pointer; }
+  button.plain { background: #3a3a3a; margin-top: 6px; }
+  button:disabled { opacity: .5; cursor: default; }
+  input { width: 100%; box-sizing: border-box; padding: 6px; border: 1px solid #444; border-radius: 4px; background: #111; color: #e6e6e6; font: inherit; }
+  label { display: block; margin: 12px 0 4px; color: #aaa; }
+  small { display: block; margin-top: 6px; color: #888; }
+</style>
+</head>
+<body>
+  <h1>OrangeLink</h1>
+  <p id="status">檢查連線中…</p>
+  <button id="yt">用 yt-dlp 下載此頁面</button>
+  <label for="code">配對碼</label>
+  <input id="code" placeholder="從 OrangeLink 設定複製" autocomplete="off" spellcheck="false">
+  <button id="save" class="plain">儲存並測試</button>
+  <small>在網頁的圖片、影片或連結上按右鍵，選「加入 OrangeLink」。</small>
+  <script src="popup.js"></script>
+</body>
+</html>

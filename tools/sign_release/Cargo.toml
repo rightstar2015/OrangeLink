@@ -1,0 +1,21 @@
+# The release signing tool, kept out of OrangeLink's dependency tree. It names
+# two dependencies; on Windows they pull in 10 more small crates (12 in all,
+# Cargo.lock), of which generic-array and getrandom run build scripts and none
+# is a proc-macro. The app's ~600 dependencies are never built here.
+# Run from this folder: cargo run --release --locked -- <command>
+[package]
+name = "sign_release"
+version = "0.2.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+ed25519-compact = { version = "2", default-features = false, features = ["random", "std"] }
+sha2 = "0.10"
+
+# Not part of the OrangeLink package in the folder above.
+[workspace]
+
+# The key derivation runs 600,000 SHA-256 rounds: keep sha2 fast in test builds.
+[profile.dev.package."*"]
+opt-level = 2

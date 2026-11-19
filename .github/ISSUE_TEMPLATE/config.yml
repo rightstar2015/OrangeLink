@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 回報安全性問題
+    url: https://github.com/rightstar2015/OrangeLink/security/advisories/new
+    about: 請用私人漏洞回報,不要開公開的 issue。

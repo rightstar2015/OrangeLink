@@ -1,0 +1,6 @@
+/target
+*.tmp
+/_test_sandbox
+/.claude/
+/.impeccable/
+/tools/sign_release/target

@@ -1,0 +1,96 @@
+# Every push to main and every pull request: build, clippy and the tests, with
+# FFmpeg installed so the tests that need it run instead of skipping.
+# (Releases are built by release.yml when a version tag is pushed.)
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    env:
+      # A test that needs FFmpeg fails instead of skipping (see media::ffmpeg_for_test).
+      ORANGELINK_REQUIRE_FFMPEG: "1"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Cache cargo
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: cargo-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: cargo-${{ runner.os }}-
+
+      # Chocolatey puts small launcher exes on PATH; the tests stop FFmpeg
+      # midway, and stopping a launcher leaves the real FFmpeg running. Put the
+      # real binaries first.
+      - name: Install FFmpeg
+        shell: pwsh
+        run: |
+          choco install ffmpeg -y --no-progress
+          $bin = Get-ChildItem C:\ProgramData\chocolatey\lib\ffmpeg -Recurse -Filter ffmpeg.exe | Select-Object -First 1
+          $bin.DirectoryName | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          & (Join-Path $bin.DirectoryName ffmpeg.exe) -version | Select-Object -First 1
+
+      # The version in rust-toolchain.toml.
+      - name: Rust
+        run: rustup toolchain install
+
+      # Any warning fails the build. A new Rust release can bring new lints: fix
+      # them, or allow one where it is wrong, with the reason next to it.
+      # The code is not laid out by rustfmt, so there is no `cargo fmt --check`.
+      - name: Clippy
+        run: cargo clippy --locked --all-targets -- -D warnings
+
+      - name: Test
+        run: cargo test --locked
+
+      # The release signing tool is a crate of its own (not in the app's tree).
+      - name: Signing tool
+        run: |
+          cargo clippy --locked --all-targets --manifest-path tools/sign_release/Cargo.toml -- -D warnings
+          cargo test --locked --manifest-path tools/sign_release/Cargo.toml
+
+  # Known vulnerabilities in the dependencies (RustSec advisory database).
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: taiki-e/install-action@ab49d3c64680143e184118bed66a46419fc15519 # v2.90.5
+        with:
+          tool: cargo-audit
+      - name: Audit
+        run: cargo audit
+
+  # The workflows keep their security rules: actions pinned to commits, no token
+  # left in .git/config, no ${{ }} pasted into scripts, least permissions.
+  # src/release_workflow.rs checks the release-specific rules in cargo test.
+  zizmor:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: zizmorcore/zizmor-action@45d7276c9ca790aabd705e31ca99c6185c3e76dd # v0.8.1
+        with:
+          version: 1.32.0
+          # Fail the job on a finding instead of uploading to the Security tab.
+          advanced-security: false

@@ -1,0 +1,9 @@
+# Calls that broke OrangeLink before, made into errors (CI runs clippy with
+# -D warnings). Each has one allowed place; see CLAUDE.md.
+disallowed-methods = [
+    # A windowed build has no console handles: tools need stdin null and no
+    # console window. One helper keeps every call site right.
+    { path = "std::process::Command::new", reason = "use crate::process::hidden (tools OrangeLink drives) or crate::process::visible (programs the user sees)" },
+    # One thread panicking poisoned the lock for every other thread.
+    { path = "std::sync::Mutex::lock", reason = "use crate::lock, which still works after another thread panicked" },
+]

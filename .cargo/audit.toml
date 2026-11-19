@@ -1,0 +1,10 @@
+# Read by `cargo audit` (the audit job in .github/workflows/ci.yml).
+# Only advisories for crates that are not built into the Windows app are ignored
+# here: `cargo tree -i <crate> -e normal` on Windows prints nothing for them.
+[advisories]
+ignore = [
+    # quick-xml 0.30, through eframe 0.29 -> accesskit_unix (Linux accessibility
+    # only). Goes away when eframe is upgraded.
+    "RUSTSEC-2026-0194",
+    "RUSTSEC-2026-0195",
+]

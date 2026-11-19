@@ -1,0 +1,21 @@
+#!/bin/sh
+# Warns (never blocks) when a commit says it fixes something but adds no test.
+# Installed with: git config core.hooksPath scripts/hooks
+# A fix that truly can't have a test: put [no-test] and the reason in the message.
+
+msg_file="$1"
+body=$(grep -v '^#' "$msg_file" | grep -vi '^Co-Authored-By:')
+
+# Not a fix, or explicitly without a test: nothing to say.
+echo "$body" | grep -qiE '\bfix|\bbug|regress|QA|修正|修復|修好|#[0-9]+|\bN[0-9]+\b' || exit 0
+echo "$body" | grep -q '\[no-test\]' && exit 0
+
+# Only code changes need a test.
+git diff --cached --name-only | grep -q '^src/.*\.rs$' || exit 0
+
+if ! git diff --cached -U0 -- 'src/*.rs' 'src/**/*.rs' | grep -qE '^\+.*#\[test\]'; then
+    echo "commit-msg: this looks like a fix, but no #[test] was added." >&2
+    echo "            Add a test that fails without the fix, or say why not with [no-test]." >&2
+    echo "            (Warning only; the commit goes ahead.)" >&2
+fi
+exit 0

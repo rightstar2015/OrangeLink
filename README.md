@@ -165,7 +165,7 @@ OrangeLink 是 Windows 上的素材管理與影片剪輯工作流工具。你可
 cargo build --release --locked
 ```
 
-執行檔在 `target\release\orangelink.exe`。開發時請用 `.\scripts\dev-sandbox.ps1` 執行，它會把設定和資源庫放在 `_test_sandbox\` 而不是你真實的 `%APPDATA%`。測試、commit 規則和參與開發的方式見 [CONTRIBUTING.md](CONTRIBUTING.md)。發布與簽章是維護者的工作，見 [docs/RELEASING.md](docs/RELEASING.md)。
+執行檔在 `target\release\orangelink.exe`。開發時請用 `.\scripts\dev-sandbox.ps1` 執行，它會把設定和資源庫放在 `_test_sandbox\` 而不是你真實的 `%APPDATA%`。測試、commit 規則和參與開發的方式見 [CONTRIBUTING.md](CONTRIBUTING.md)。發布是維護者的工作，見 [docs/RELEASING.md](docs/RELEASING.md)。
 
 ## 授權、致謝與免責聲明
 

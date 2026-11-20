@@ -1,6 +1,6 @@
 # 參與開發
 
-OrangeLink 是 Rust + [egui](https://github.com/emilk/egui) 寫的 Windows 程式。這份文件說明怎麼建置、測試和送出修改。每條規則背後的原因和更細的規定（子程序、路徑、外部輸入、持久化、背景工作與鎖、UI 執行緒）寫在 [CLAUDE.md](CLAUDE.md)，動手前請先看過；對使用者資料的保證列在 [docs/persistence-invariants.md](docs/persistence-invariants.md)，狀態機的說明在 [STATE_MACHINES.md](STATE_MACHINES.md)。發布和簽章是維護者的工作，見 [docs/RELEASING.md](docs/RELEASING.md)。
+OrangeLink 是 Rust + [egui](https://github.com/emilk/egui) 寫的 Windows 程式。這份文件說明怎麼建置、測試和送出修改。每條規則背後的原因和更細的規定（子程序、路徑、外部輸入、持久化、背景工作與鎖、UI 執行緒）寫在 [CLAUDE.md](CLAUDE.md)，動手前請先看過；對使用者資料的保證列在 [docs/persistence-invariants.md](docs/persistence-invariants.md)，狀態機的說明在 [STATE_MACHINES.md](STATE_MACHINES.md)。發布是維護者的工作，見 [docs/RELEASING.md](docs/RELEASING.md)。
 
 ## 建置與執行
 

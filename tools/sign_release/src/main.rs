@@ -33,8 +33,8 @@
 //! The tool depends on ed25519-compact and sha2 only; with their own
 //! dependencies that is 12 small crates on Windows (two with build scripts,
 //! generic-array and getrandom; no proc-macros), not the app's ~600. Build and
-//! run it in a Windows account kept for signing, with its own CARGO_HOME
-//! (docs/RELEASING.md, "在獨立的簽章帳號簽章"): what is built there can reach the key and password.
+//! run it in a Windows account kept for signing, with its own CARGO_HOME:
+//! what is built in an everyday account can reach the key and password.
 
 mod latest;
 
@@ -490,7 +490,7 @@ fn run(args: &[&str]) -> Result<()> {
             println!("encrypted key file: {}", path.display());
             println!("public key, one line for release_keys.txt:");
             println!("{}", release_keys::hex(&pk));
-            println!("Back it up in at least two places before it is used (docs/RELEASING.md, \"金鑰的保管\").");
+            println!("Back it up in at least two places before it is used.");
         }
         ["check", file] => {
             let path = PathBuf::from(file);

@@ -1,6 +1,6 @@
 # Pushing a version tag (e.g. `git tag v0.1.6 && git push origin v0.1.6`) builds the
 # Windows exe, runs the tests and attaches the zip to a draft release for that tag.
-# The draft is published by hand after latest.json is signed (see README).
+# The draft is published by hand after latest.json is signed (docs/RELEASING.md).
 #
 # Two jobs, so the token that can write releases never meets the build: `build`
 # compiles and tests (and so runs every dependency's build script, proc-macro and
@@ -76,7 +76,7 @@ jobs:
           [IO.File]::WriteAllText("$PWD/dist/SHA256SUMS.txt", -join $sums)
           # latest.json for the updater. `sig` is left out: the release is created as
           # a draft, the release key signs the zip on the release computer
-          # (README, "發布新版本"), and the signed latest.json replaces this one
+          # (docs/RELEASING.md), and the signed latest.json replaces this one
           # before the draft is published. Without `sig` the app only shows that a
           # new version exists. WriteAllText writes UTF-8 without a BOM.
           $hash = (Get-FileHash -Algorithm SHA256 "dist/$name.zip").Hash.ToLower()

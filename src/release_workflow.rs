@@ -242,6 +242,15 @@ mod tests {
         assert!(release_problems(&late).join("\n").contains("before publishing"));
     }
 
+    /// The licence a crate registry or `cargo metadata` shows is the one in LICENSE.
+    #[test]
+    fn the_cargo_license_matches_the_license_file() {
+        let cargo = include_str!("../Cargo.toml");
+        let license = include_str!("../LICENSE");
+        assert!(cargo.lines().any(|l| l.trim_end() == "license = \"MIT\""), "Cargo.toml names no MIT licence");
+        assert!(license.starts_with("MIT License"), "LICENSE is not the MIT licence");
+    }
+
     #[test]
     fn the_zip_readme_points_to_the_project_page() {
         let release = RELEASE.replace("\r\n", "\n");

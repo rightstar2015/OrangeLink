@@ -2,6 +2,13 @@
 
 格式參考 [Keep a Changelog](https://keepachangelog.com/zh-TW/1.1.0/),版本號依 [語意化版本](https://semver.org/lang/zh-TW/)。
 
+## [0.1.7]
+
+### 變更
+- 沒有使用者看得到的功能變更;這一版把版本號帶到公開 repo 的第一個正式版。
+- `Cargo.toml` 標明 MIT 授權,與 `LICENSE` 一致。
+- 簽章與發布流程的維護者說明不再放在公開 repo。
+
 ## [0.1.6]
 
 ### 變更

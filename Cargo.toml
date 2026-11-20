@@ -4,6 +4,7 @@ version = "0.1.6"
 edition = "2021"
 description = "Asset library for Windows with a video clip, subtitle and highlight workflow"
 publish = false
+license = "MIT"
 
 [dependencies]
 eframe = "0.29"

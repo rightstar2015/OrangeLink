@@ -7,6 +7,6 @@
 # signs only if the primary is lost (SECURITY.md, "發版金鑰外洩與輪替").
 #
 # primary
-0c7e67d92e0c5b8515f373829ac9ee2e522faab1ff810ca0bce1bda036660bb1
+9d730a520eb72cc1a7cb3243f2a159ec989c8507dfaa057b9fb5bf9c3a260dc4
 # backup (kept offline)
-44d87c886cb64aedbbd3cd06cd8669609cdbf6f1999a9c4b2403cda3aa7b58c2
+79328a4e987eb7002d0518f813a71bb73fd1cd304b0b83f1a6fec87d2cc8187c

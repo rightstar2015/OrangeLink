@@ -352,9 +352,17 @@ mod tests {
         assert!(distinct.len() >= 2, "at least two different keys: a primary and a backup");
         assert_eq!(release_keys(), keys);
         assert!(!RELEASE_KEYS_TXT.contains('<'), "a placeholder is left in release_keys.txt");
-        // The key from before 0.1.6, which no released copy ever trusted, is not listed.
-        let old = "d6c7eb3e47c0e311cd7750e72ac31e0b50fe93c05d919e3331f4f19cb0ecbdf3";
-        assert!(keys.iter().all(|k| crate::release_keys::hex(k) != old));
+        // Keys that must never be listed: the one from before 0.1.6, which no released
+        // copy ever trusted, and the primary and backup it was replaced with before
+        // 0.1.6 shipped.
+        let retired = [
+            "d6c7eb3e47c0e311cd7750e72ac31e0b50fe93c05d919e3331f4f19cb0ecbdf3",
+            "0c7e67d92e0c5b8515f373829ac9ee2e522faab1ff810ca0bce1bda036660bb1",
+            "44d87c886cb64aedbbd3cd06cd8669609cdbf6f1999a9c4b2403cda3aa7b58c2",
+        ];
+        for old in retired {
+            assert!(keys.iter().all(|k| crate::release_keys::hex(k) != old), "a retired key is listed: {old}");
+        }
     }
 
     #[test]

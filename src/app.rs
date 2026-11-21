@@ -3867,6 +3867,12 @@ mod tests {
         app.visible = ["a", "b", "c", "d", "e", "f"].into_iter().map(String::from).collect();
         app.grid_cols = 2;
         let shift = egui::Modifiers { shift: true, ..Default::default() };
+        // The key handler queues a click; the frame applies it before the next key.
+        let step = |app: &mut App, delta: i64, mods: egui::Modifiers| {
+            app.arrow_step(delta, mods);
+            let ctx = app.egui_ctx.clone();
+            app.process_actions(&ctx);
+        };
         let selected = |app: &App| {
             let mut sel: Vec<String> = app.selected.iter().cloned().collect();
             sel.sort();
@@ -3874,29 +3880,29 @@ mod tests {
         };
 
         // The first arrow with nothing selected picks the first item.
-        app.arrow_step(1, egui::Modifiers::NONE);
+        step(&mut app, 1, egui::Modifiers::NONE);
         assert_eq!((app.anchor.as_deref(), app.caret.as_deref()), (Some("a"), Some("a")));
 
         // Shift+→ twice: the anchor stays, the caret moves, the range grows.
-        app.arrow_step(1, shift);
-        app.arrow_step(1, shift);
+        step(&mut app, 1, shift);
+        step(&mut app, 1, shift);
         assert_eq!((app.anchor.as_deref(), app.caret.as_deref()), (Some("a"), Some("c")));
         assert_eq!(selected(&app), "abc");
 
         // Shift+← shrinks it instead of getting stuck at the anchor's end.
-        app.arrow_step(-1, shift);
+        step(&mut app, -1, shift);
         assert_eq!(app.caret.as_deref(), Some("b"));
         assert_eq!(selected(&app), "ab");
 
         // Shift+↓ moves a whole row; past the end it stops at the last item.
-        app.arrow_step(2, shift);
+        step(&mut app, 2, shift);
         assert_eq!(selected(&app), "abcd");
-        app.arrow_step(10, shift);
+        step(&mut app, 10, shift);
         assert_eq!(app.caret.as_deref(), Some("f"));
         assert_eq!(selected(&app), "abcdef");
 
         // A plain arrow drops the range and starts again from where the caret is.
-        app.arrow_step(-1, egui::Modifiers::NONE);
+        step(&mut app, -1, egui::Modifiers::NONE);
         assert_eq!((app.anchor.as_deref(), app.caret.as_deref()), (Some("e"), Some("e")));
         assert_eq!(selected(&app), "e");
         assert_eq!(app.scroll_to.as_deref(), Some("e"));

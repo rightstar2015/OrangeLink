@@ -120,6 +120,8 @@ impl App {
             Action::UndoAi { first, last } => self.undo_ai(first, last, false),
             Action::GrantMcp { files } => self.grant_mcp(files),
             Action::UndoStep(seq) => {
+                // A structural edit this frame is a later change than `seq`.
+                self.track_structure();
                 if self.edits.undo.last().is_some_and(|s| s.seq == seq) {
                     self.restore_items(false);
                 } else {

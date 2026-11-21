@@ -745,6 +745,8 @@ impl App {
                         lib.set_watch_rule(&path, folder, t);
                     }
                     if let Some(p) = remove {
+                        // Added back later, the folder starts from its own (empty) tags.
+                        tags.remove(&p);
                         lib.remove_watch_folder(&p);
                     }
                     if let Some(p) = add {

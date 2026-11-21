@@ -2541,7 +2541,9 @@ impl App {
         self.show_in_grid(&id);
         self.selected.clear();
         self.selected.insert(id.clone());
+        // Both: arrow keys after the preview go on from the item paged to.
         self.anchor = Some(id.clone());
+        self.caret = Some(id.clone());
         self.preview = None;
         self.player = None;
         self.subs = None;
@@ -3758,6 +3760,15 @@ mod tests {
         });
         drop(app);
         assert!(ended.load(Ordering::Relaxed), "closed with FFmpeg still running");
+    }
+
+    #[test]
+    fn arrow_keys_go_on_from_the_item_the_preview_paged_to() {
+        let mut app = App::with_config(&egui::Context::default(), Config::default());
+        app.caret = Some("a".into());
+        app.open_viewer_at("c".into());
+        assert_eq!(app.caret.as_deref(), Some("c"));
+        assert_eq!(app.anchor.as_deref(), Some("c"));
     }
 
     #[test]

@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.2.1]
+
 ### 新增
 - 擴充套件：加入自己電腦上的擴充資料夾並信任後，可以讓它替影片找精華候選，結果在剪輯工作台照常審核。格式見 [docs/EXTENSIONS.md](docs/EXTENSIONS.md)。
 

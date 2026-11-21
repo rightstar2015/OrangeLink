@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "OrangeLink",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "在網頁上按右鍵，把圖片、影片、音訊或檔案加入 OrangeLink 素材庫。",
   "permissions": ["alarms", "contextMenus", "notifications", "storage", "scripting", "declarativeNetRequestWithHostAccess"],
   "host_permissions": ["<all_urls>"],

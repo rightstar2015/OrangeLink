@@ -162,7 +162,7 @@ impl App {
 
         let status = if missing {
             Some(("⚠", ERROR_ON_DARK))
-        } else if it.source.is_some() {
+        } else if it.source.is_some() && self.with_sidebar_stats(|s| s.link_badge_tells()) {
             Some(("🔗", Color32::WHITE))
         } else {
             None

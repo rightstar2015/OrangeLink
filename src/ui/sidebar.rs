@@ -18,6 +18,8 @@ pub struct SidebarStats {
     pub folder_flat: Vec<(String, String, usize)>,
     /// Items that name a folder that no longer exists.
     pub missing_folder_refs: usize,
+    /// Items kept where they were (🔗) rather than copied in.
+    pub linked: usize,
 }
 
 impl SidebarStats {
@@ -37,11 +39,18 @@ impl SidebarStats {
                 s.total_size += it.size;
                 s.uncategorized += usize::from(it.folders.is_empty());
                 s.untagged += usize::from(it.tags.is_empty());
+                s.linked += usize::from(it.source.is_some());
                 let idx = MediaKind::ALL.iter().position(|k| *k == it.kind).unwrap_or(3);
                 s.by_kind[idx] += 1;
             }
         }
         s
+    }
+
+    /// Whether 🔗 on a thumbnail says anything: not when most of the library
+    /// is linked, where it sat on nearly every cell.
+    pub fn link_badge_tells(&self) -> bool {
+        self.linked > 0 && self.linked * 2 < self.total
     }
 }
 

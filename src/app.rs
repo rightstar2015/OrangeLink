@@ -4682,6 +4682,9 @@ mod tests {
         lib.insert_item(mk("v1", "video", 250, false, &[], &[]));
         lib.insert_item(mk("a1", "audio", 50, false, &[], &["t1"]));
         lib.insert_item(mk("d1", "other", 999, true, &[], &[]));
+        if let Some(it) = lib.items.get_mut("a1") {
+            it.source = Some(root.join("elsewhere.bin"));
+        }
 
         let stats = crate::ui::SidebarStats::compute(&lib);
         assert_eq!(stats.total, 3);
@@ -4690,6 +4693,13 @@ mod tests {
         assert_eq!(stats.uncategorized, 2);
         assert_eq!(stats.untagged, 1);
         assert_eq!(stats.by_kind, [1, 1, 1, 0]);
+        assert_eq!(stats.linked, 1);
+        assert!(stats.link_badge_tells(), "1 of 3 linked: 🔗 tells them apart");
+        if let Some(it) = lib.items.get_mut("v1") {
+            it.source = Some(root.join("elsewhere2.bin"));
+        }
+        let stats = crate::ui::SidebarStats::compute(&lib);
+        assert!(!stats.link_badge_tells(), "2 of 3 linked: 🔗 would be on most cells");
 
         let _ = std::fs::remove_dir_all(&root);
     }

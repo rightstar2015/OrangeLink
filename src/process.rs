@@ -41,19 +41,34 @@ pub fn visible(program: impl AsRef<OsStr>) -> Command {
 /// `cancel` is set: on Windows a program left running keeps its files open.
 /// None when cancelled.
 pub fn output_or_cancel(cmd: &mut Command, cancel: &AtomicBool) -> std::io::Result<Option<Output>> {
+    output_or_cancel_lines(cmd, cancel, |_| {})
+}
+
+/// `output_or_cancel`, also handing each line the program writes to stdout to
+/// `on_line` as it comes (FFmpeg's `-progress pipe:1`).
+pub fn output_or_cancel_lines(cmd: &mut Command, cancel: &AtomicBool, mut on_line: impl FnMut(&str) + Send + 'static) -> std::io::Result<Option<Output>> {
     let mut child = cmd.stdout(Stdio::piped()).stderr(Stdio::piped()).spawn()?;
     // Read both pipes on the side so a chatty program can't fill one and stall.
-    let read = |pipe: Option<Box<dyn std::io::Read + Send>>| {
+    let stdout = child.stdout.take().map(|p| {
         std::thread::spawn(move || {
+            use std::io::BufRead;
             let mut buf = Vec::new();
-            if let Some(mut p) = pipe {
-                let _ = p.read_to_end(&mut buf);
+            let mut reader = std::io::BufReader::new(p);
+            let mut line = Vec::new();
+            while reader.read_until(b'\n', &mut line).is_ok_and(|n| n > 0) {
+                on_line(String::from_utf8_lossy(&line).trim_end());
+                buf.append(&mut line);
             }
             buf
         })
-    };
-    let stdout = read(child.stdout.take().map(|p| Box::new(p) as _));
-    let stderr = read(child.stderr.take().map(|p| Box::new(p) as _));
+    });
+    let stderr = child.stderr.take().map(|mut p| {
+        std::thread::spawn(move || {
+            let mut buf = Vec::new();
+            let _ = std::io::Read::read_to_end(&mut p, &mut buf);
+            buf
+        })
+    });
     let status = loop {
         if let Some(status) = child.try_wait()? {
             break Some(status);
@@ -65,7 +80,8 @@ pub fn output_or_cancel(cmd: &mut Command, cancel: &AtomicBool) -> std::io::Resu
         }
         std::thread::sleep(Duration::from_millis(50));
     };
-    let (stdout, stderr) = (stdout.join().unwrap_or_default(), stderr.join().unwrap_or_default());
+    let joined = |t: Option<std::thread::JoinHandle<Vec<u8>>>| t.and_then(|t| t.join().ok()).unwrap_or_default();
+    let (stdout, stderr) = (joined(stdout), joined(stderr));
     Ok(status.map(|status| Output { status, stdout, stderr }))
 }
 

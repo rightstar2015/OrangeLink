@@ -494,6 +494,8 @@ struct ClipExports {
     rx: Option<Receiver<ClipExported>>,
     /// Stops the clip being written (FFmpeg is ended, the partial file removed).
     cancel: Arc<AtomicBool>,
+    /// How far the clip being written is, 0..=1 as `f32` bits.
+    progress: Arc<std::sync::atomic::AtomicU32>,
     queue: std::collections::VecDeque<(String, String, crate::config::ExportPreset)>,
 }
 
@@ -2331,8 +2333,10 @@ impl App {
         let ctx = self.egui_ctx.clone();
         let cancel = Arc::new(AtomicBool::new(false));
         self.clips.cancel = cancel.clone();
+        let progress = Arc::new(std::sync::atomic::AtomicU32::new(0));
+        self.clips.progress = progress.clone();
         std::thread::spawn(move || {
-            let result = crate::export::run(&ff, encoder, &job, &out, &cancel).map(|enc| (out, job.preset.import, enc));
+            let result = crate::export::run(&ff, encoder, &job, &out, &cancel, &progress).map(|enc| (out, job.preset.import, enc));
             if let Some(sub) = &job.subtitles {
                 let _ = std::fs::remove_file(sub);
             }
@@ -2382,7 +2386,8 @@ impl App {
         self.clips.rx.as_ref()?;
         let left = self.clips.queue.len();
         let detail = if left > 0 { t!("還有 {left} 個等待中", left) } else { t!("FFmpeg 處理中").to_string() };
-        Some(jobs::BgJob::new(jobs::JobKind::ClipExport, t!("輸出片段"), detail, None))
+        let done = f32::from_bits(self.clips.progress.load(Ordering::Relaxed));
+        Some(jobs::BgJob::new(jobs::JobKind::ClipExport, t!("輸出片段"), detail, Some(done)))
     }
 
     /// Stops the clip being written and drops the ones waiting.

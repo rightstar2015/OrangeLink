@@ -6,8 +6,8 @@ use std::{
     path::{Path, PathBuf},
     process::{Command, Stdio},
     sync::{
-        atomic::{AtomicBool, Ordering},
-        OnceLock,
+        atomic::{AtomicBool, AtomicU32, Ordering},
+        Arc, OnceLock,
     },
 };
 
@@ -102,7 +102,8 @@ impl Export {
     /// encoder name; unused for audio and copies).
     pub fn args(&self, encoder: &str, out: &Path) -> Vec<String> {
         let s = |v: &str| v.to_string();
-        let mut a = vec![s("-v"), s("error"), s("-y"), s("-ss"), format!("{:.3}", self.start), s("-i")];
+        // `-progress pipe:1` writes `out_time_us=…` to stdout for the jobs list.
+        let mut a = vec![s("-v"), s("error"), s("-y"), s("-progress"), s("pipe:1"), s("-nostats"), s("-ss"), format!("{:.3}", self.start), s("-i")];
         a.push(self.input.to_string_lossy().into_owned());
         a.extend([s("-t"), format!("{:.3}", self.end - self.start)]);
         let loud = self.preset.loudnorm;
@@ -218,7 +219,8 @@ fn command(ffmpeg_dir: &Path) -> Command {
 /// Returns the encoder used (or "copy"/"aac"/"audio" without video), or
 /// FFmpeg's last error line.
 /// Encodes the clip; stops FFmpeg and removes the partial file when `cancel` is set.
-pub fn run(ffmpeg_dir: &Path, choice: VideoEncoder, job: &Export, out: &Path, cancel: &AtomicBool) -> Result<&'static str, String> {
+/// `progress` gets how far the clip is, 0..=1 as `f32` bits, while it is written.
+pub fn run(ffmpeg_dir: &Path, choice: VideoEncoder, job: &Export, out: &Path, cancel: &AtomicBool, progress: &Arc<AtomicU32>) -> Result<&'static str, String> {
     let order = if job.encodes_video() { encoder_order(choice, ffmpeg_encoders(ffmpeg_dir), NVENC_FAILED.load(Ordering::Relaxed)) } else { vec![job.other_codec()] };
     let mut last = String::from(t!("ffmpeg 失敗"));
     for (n, encoder) in order.iter().enumerate() {
@@ -227,7 +229,14 @@ pub fn run(ffmpeg_dir: &Path, choice: VideoEncoder, job: &Export, out: &Path, ca
         if let Some(dir) = job.subtitles.as_ref().and_then(|p| p.parent()) {
             cmd.current_dir(dir);
         }
-        match crate::process::output_or_cancel(&mut cmd, cancel) {
+        let (len, shared) = (job.end - job.start, progress.clone());
+        shared.store(0f32.to_bits(), Ordering::Relaxed);
+        let on_line = move |line: &str| {
+            if let Some(p) = progress_fraction(line, len) {
+                shared.store(p.to_bits(), Ordering::Relaxed);
+            }
+        };
+        match crate::process::output_or_cancel_lines(&mut cmd, cancel, on_line) {
             Ok(None) => {
                 let _ = std::fs::remove_file(out);
                 return Err(CANCELLED.to_string());
@@ -254,9 +263,27 @@ pub fn run(ffmpeg_dir: &Path, choice: VideoEncoder, job: &Export, out: &Path, ca
     Err(last)
 }
 
+/// How far FFmpeg is, from a `-progress` line (`out_time_us=12500000`) and
+/// the clip's length in seconds. Other lines, `N/A` and a zero length give None.
+pub fn progress_fraction(line: &str, len: f64) -> Option<f32> {
+    let us: f64 = line.strip_prefix("out_time_us=")?.trim().parse().ok()?;
+    (len > 0.0 && us.is_finite()).then(|| (us / 1e6 / len).clamp(0.0, 1.0) as f32)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn clip_export_progress_comes_from_ffmpegs_out_time() {
+        assert!(joined(&job(ExportShape::Original, true), "libx264").contains("-progress pipe:1 -nostats"));
+        assert_eq!(progress_fraction("out_time_us=7750000", 15.5), Some(0.5));
+        assert_eq!(progress_fraction("out_time_us=99000000", 15.5), Some(1.0), "past the end is done, not more");
+        assert_eq!(progress_fraction("out_time_us=-30000", 15.5), Some(0.0));
+        assert_eq!(progress_fraction("out_time_us=N/A", 15.5), None);
+        assert_eq!(progress_fraction("frame=12", 15.5), None);
+        assert_eq!(progress_fraction("out_time_us=1000000", 0.0), None);
+    }
 
     fn job(shape: ExportShape, video: bool) -> Export {
         Export {
@@ -341,8 +368,10 @@ mod tests {
             subtitles: None,
         };
         let out = dir.join("v.mp4");
-        let enc = run(&ff, VideoEncoder::Auto, &job, &out, &AtomicBool::new(false)).unwrap();
+        let progress = Arc::new(AtomicU32::new(0));
+        let enc = run(&ff, VideoEncoder::Auto, &job, &out, &AtomicBool::new(false), &progress).unwrap();
         println!("encoder: {enc}");
+        assert!(f32::from_bits(progress.load(Ordering::Relaxed)) > 0.9, "FFmpeg's progress was read");
         let p = crate::media::probe(&ff, &out).unwrap();
         assert_eq!((p.width, p.height), SHORTS);
         assert!((p.duration.unwrap() - 2.0).abs() < 0.2, "{:?}", p.duration);
@@ -355,7 +384,7 @@ mod tests {
         job.subtitles = Some(sub);
         job.preset.loudnorm = false;
         let subbed = dir.join("s.mp4");
-        run(&ff, VideoEncoder::Auto, &job, &subbed, &AtomicBool::new(false)).unwrap();
+        run(&ff, VideoEncoder::Auto, &job, &subbed, &AtomicBool::new(false), &Default::default()).unwrap();
         let frame = |f: &Path| {
             let o = command(&ff).args(["-v", "error", "-ss", "1", "-i"]).arg(f).args(["-frames:v", "1", "-vf", "crop=1080:400:0:1300,scale=54:20", "-f", "rawvideo", "-pix_fmt", "gray", "-"]).stdout(Stdio::piped()).output().unwrap();
             o.stdout
@@ -377,19 +406,19 @@ mod tests {
             assert!(made.success());
             let portrait = Export { input: src, crop: None, end: 1.5, start: 0.0, ..job.clone() };
             let out = dir.join(name);
-            run(&ff, VideoEncoder::Auto, &portrait, &out, &AtomicBool::new(false)).unwrap();
+            run(&ff, VideoEncoder::Auto, &portrait, &out, &AtomicBool::new(false), &Default::default()).unwrap();
             let p = crate::media::probe(&ff, &out).unwrap();
             assert_eq!((p.width, p.height), SHORTS, "{size}");
         }
 
         job.preset = ExportPreset { shape: ExportShape::AudioOnly, ..Default::default() };
         let out = dir.join("a.m4a");
-        assert_eq!(run(&ff, VideoEncoder::Auto, &job, &out, &AtomicBool::new(false)).unwrap(), "aac", "logged as what it is");
+        assert_eq!(run(&ff, VideoEncoder::Auto, &job, &out, &AtomicBool::new(false), &Default::default()).unwrap(), "aac", "logged as what it is");
         assert!(crate::media::probe(&ff, &out).unwrap().duration.is_some());
 
         // Cancelled: FFmpeg is ended and nothing half-written is left.
         let out = dir.join("cancelled.m4a");
-        assert_eq!(run(&ff, VideoEncoder::Auto, &job, &out, &AtomicBool::new(true)), Err(CANCELLED.to_string()));
+        assert_eq!(run(&ff, VideoEncoder::Auto, &job, &out, &AtomicBool::new(true), &Default::default()), Err(CANCELLED.to_string()));
         assert!(!out.exists());
         let _ = std::fs::remove_dir_all(&dir);
     }

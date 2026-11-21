@@ -1085,7 +1085,12 @@ impl App {
                                 self.clip_ui.renaming = None;
                             }
                         } else {
-                            let text = if candidate { RichText::new(&c.name).italics().weak() } else { RichText::new(&c.name).strong() };
+                            // A candidate an extension named shows the name it gets once kept.
+                            let shown = match (&c.title, candidate) {
+                                (Some(title), true) => format!("{} · {title}", c.name),
+                                _ => c.name.clone(),
+                            };
+                            let text = if candidate { RichText::new(shown).italics().weak() } else { RichText::new(shown).strong() };
                             let r = ui.allocate_ui_with_layout(vec2(w, 18.0), Layout::left_to_right(Align::Center), |ui| ui.add(egui::Label::new(text).truncate().sense(Sense::click()))).inner;
                             if r.on_hover_text(t!("點一下重新命名；Ctrl／Shift＋點一下多選")).clicked() {
                                 click = Some((n, true));

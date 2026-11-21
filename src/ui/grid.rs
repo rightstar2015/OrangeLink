@@ -1026,6 +1026,7 @@ impl App {
             }
         });
         let is_media = item.is_some_and(|it| matches!(it.kind, MediaKind::Video | MediaKind::Audio));
+        let ext_actions = item.filter(|_| is_media && !trash).map(|it| self.extension_actions(it.kind, it.duration)).unwrap_or_default();
         if is_media && !trash {
             ui.menu_button(t!("影音"), |ui| {
                 if ui.button(t!("產生字幕（語音轉文字）…")).clicked() {
@@ -1048,6 +1049,15 @@ impl App {
                 if ui.button(t!("自動找精華候選")).on_hover_text(hint).clicked() {
                     self.act(Action::Media(id.to_string(), MediaTask::Candidates));
                     ui.close_menu();
+                }
+                if !ext_actions.is_empty() {
+                    ui.separator();
+                }
+                for (dir, action, label) in ext_actions {
+                    if ui.button(format!("🧩 {label}")).on_hover_text(t!("用擴充套件在背景找精華候選；可多選，進度在狀態列的背景工作")).clicked() {
+                        self.act(Action::RunExtension { dir, action, ids: targets.clone() });
+                        ui.close_menu();
+                    }
                 }
             });
         }

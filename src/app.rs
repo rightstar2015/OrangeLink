@@ -1,4 +1,5 @@
 mod actions;
+mod extensions;
 mod ai_log;
 mod file_jobs;
 mod filter;
@@ -391,6 +392,15 @@ pub enum Action {
     NavForward,
     /// 整場處理: loudness, candidates and subtitles for each, in the background.
     ProcessStreams(Vec<String>),
+    /// Run this action of the extension in this folder on these items.
+    RunExtension { dir: PathBuf, action: String, ids: Vec<String> },
+    /// Settings → 擴充套件.
+    AddExtension(PathBuf),
+    TrustExtensionAsk(PathBuf),
+    RemoveExtension(PathBuf),
+    CheckExtension(PathBuf),
+    OpenExtensionUi(PathBuf),
+    ReloadExtensions,
     /// Clips around the item's chat and loudness peaks.
     FindCandidates(String),
     /// Clips of an item, with a 復原 toast.
@@ -564,6 +574,8 @@ pub enum Confirmed {
     UndoAi { first: u64, last: u64 },
     /// Create a library where the command line named one, then import the rest.
     CreateLibrary(PathBuf, Vec<PathBuf>),
+    /// Trust the extension in this folder with the manifest of this hash.
+    TrustExtension(PathBuf, String),
 }
 
 /// What the command line (`orangelink [library] [files or folders...]`) asks for.
@@ -963,6 +975,8 @@ pub struct App {
     pub signals: Option<highlights::Signals>,
     /// 整場處理.
     stream: highlights::StreamJobs,
+    /// Extensions added in the settings, and their runs.
+    pub ext: extensions::Extensions,
     /// A 影音 task from the item menu, run once the preview has loaded the item.
     pending_media: Option<(String, MediaTask)>,
     /// An item's name being edited in place: F2 on the grid, or a click on the
@@ -1030,6 +1044,7 @@ impl App {
             app.toast_error(p.to_string());
         }
         app.sync_mcp();
+        app.load_extensions();
         app.sync_webclip();
         app.sync_hotkey();
         let (tx, rx) = std::sync::mpsc::channel();
@@ -1175,6 +1190,7 @@ impl App {
             subs: None,
             signals: None,
             stream: highlights::StreamJobs::default(),
+            ext: Default::default(),
             pending_media: None,
             renaming: RefCell::new(None),
             scrub: Default::default(),
@@ -1378,6 +1394,9 @@ impl App {
             let left = self.stream.queue.len();
             jobs.push(if left > 0 { t!("{job}（還有 {left} 個）", job = job.name, left) } else { job.name });
         }
+        if let Some(job) = self.extension_job() {
+            jobs.push(job.name);
+        }
         if self.clips.rx.is_some() {
             let left = self.clips.queue.len();
             jobs.push(if left > 0 { t!("輸出片段（還有 {left} 個等待中）", left) } else { t!("輸出片段").to_string() });
@@ -1409,6 +1428,7 @@ impl App {
         self.drop_whisper();
         self.cancel_loudness();
         self.cancel_stream();
+        self.cancel_extensions();
         self.signals = None;
         self.pending_media = None;
         self.cancel_clip_queue();
@@ -3383,6 +3403,7 @@ impl App {
                 return;
             }
             Confirmed::UndoAi { first, last } => return self.undo_ai(first, last, true),
+            Confirmed::TrustExtension(dir, hash) => return self.trust_extension(dir, hash),
             Confirmed::CloseUnsaved => {
                 crate::log::error("save", "使用者選擇不儲存，直接關閉");
                 self.force_close = true;
@@ -3427,7 +3448,7 @@ impl App {
                 lib.delete_tag(&tag);
                 self.tag_filter.retain(|t| *t != tag);
             }
-            Confirmed::SwitchLibrary(_) | Confirmed::CloseUnsaved | Confirmed::AiImport { .. } | Confirmed::UndoAi { .. } | Confirmed::CreateLibrary(..) => {}
+            Confirmed::SwitchLibrary(_) | Confirmed::CloseUnsaved | Confirmed::AiImport { .. } | Confirmed::UndoAi { .. } | Confirmed::CreateLibrary(..) | Confirmed::TrustExtension(..) => {}
             Confirmed::DeleteField(name) => {
                 lib.delete_field(&name);
                 self.toast(t!("已刪除欄位「{name}」", name));
@@ -3605,6 +3626,8 @@ impl eframe::App for App {
         self.poll_pdf(ctx);
         self.poll_signals();
         self.poll_stream();
+        self.poll_extension();
+        self.poll_extension_check();
         self.run_pending_media();
         self.poll_scrub();
         self.poll_update_check();

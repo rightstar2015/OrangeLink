@@ -36,18 +36,20 @@ pub enum SettingsPage {
     Preview,
     Highlights,
     ExternalApps,
+    Extensions,
     Integration,
     Tools,
     Advanced,
 }
 
 impl SettingsPage {
-    pub const ALL: [SettingsPage; 8] = [
+    pub const ALL: [SettingsPage; 9] = [
         SettingsPage::General,
         SettingsPage::ImportDelete,
         SettingsPage::Preview,
         SettingsPage::Highlights,
         SettingsPage::ExternalApps,
+        SettingsPage::Extensions,
         SettingsPage::Integration,
         SettingsPage::Tools,
         SettingsPage::Advanced,
@@ -60,6 +62,7 @@ impl SettingsPage {
             SettingsPage::Preview => t!("預覽與播放"),
             SettingsPage::Highlights => t!("直播精華"),
             SettingsPage::ExternalApps => t!("外部程式"),
+            SettingsPage::Extensions => t!("擴充套件"),
             SettingsPage::Integration => t!("整合"),
             SettingsPage::Tools => t!("工具"),
             SettingsPage::Advanced => t!("進階"),
@@ -232,6 +235,8 @@ pub struct Config {
 
     /// Programs offered under "Open with" (e.g. Premiere, Photoshop).
     pub external_apps: Vec<ExternalApp>,
+    /// Extensions added from folders on this computer (see `crate::extension`).
+    pub extensions: Vec<ExtensionEntry>,
     pub slideshow_secs: f32,
     /// Minutes between watch-folder scans.
     pub watch_interval_min: f32,
@@ -404,6 +409,8 @@ impl Config {
                 self.burn_outline = d.burn_outline;
             }
             SettingsPage::ExternalApps => self.external_apps = d.external_apps,
+            // The extensions the user added and trusted are not settings with a default.
+            SettingsPage::Extensions => {}
             SettingsPage::Integration => {
                 self.mcp_enabled = d.mcp_enabled;
                 self.mcp_port = d.mcp_port;
@@ -454,6 +461,20 @@ impl WindowGeom {
     }
 }
 
+/// An extension the user added: its folder, the manifest they trusted, its options.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ExtensionEntry {
+    pub dir: PathBuf,
+    /// SHA-256 of the manifest the user trusted; None until they do. A manifest
+    /// that differs from it does not run.
+    pub trusted: Option<String>,
+    /// Off: kept, but not offered in the menus.
+    pub enabled: bool,
+    /// Option values the user picked, by `action.option`.
+    pub options: std::collections::BTreeMap<String, bool>,
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 pub struct ExternalApp {
     pub name: String,
@@ -482,6 +503,7 @@ impl Default for Config {
             viewer_upscale: false,
             drag_out: true,
             external_apps: Vec::new(),
+            extensions: Vec::new(),
             slideshow_secs: 3.0,
             watch_interval_min: 1.0,
             volume: 0.8,

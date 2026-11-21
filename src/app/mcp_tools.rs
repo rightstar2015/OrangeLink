@@ -1108,7 +1108,7 @@ mod tests {
     #[test]
     fn every_job_kind_has_its_own_key_for_get_status() {
         use super::super::jobs::JobKind as K;
-        let kinds = [K::Import, K::Ytdlp, K::Whisper, K::SubtitleIndex, K::Loudness, K::Thumbnails, K::ClipExport, K::Stream, K::FileCopy, K::Capture, K::Integrity];
+        let kinds = [K::Import, K::Ytdlp, K::Whisper, K::SubtitleIndex, K::Loudness, K::Thumbnails, K::ClipExport, K::Stream, K::Extension, K::FileCopy, K::Capture, K::Integrity];
         let keys: std::collections::HashSet<&str> = kinds.iter().map(|k| k.key()).collect();
         assert_eq!(keys.len(), kinds.len());
     }

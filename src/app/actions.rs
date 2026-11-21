@@ -480,6 +480,16 @@ impl App {
             }
             Action::FindCandidates(id) => self.find_candidates(&id),
             Action::ProcessStreams(ids) => self.process_streams(ids),
+            Action::RunExtension { dir, action, ids } => self.run_extension(dir, action, ids),
+            Action::AddExtension(dir) => self.add_extension(dir),
+            Action::TrustExtensionAsk(dir) => self.ask_trust_extension(&dir),
+            Action::RemoveExtension(dir) => self.remove_extension(&dir),
+            Action::CheckExtension(dir) => self.check_extension(dir),
+            Action::OpenExtensionUi(dir) => self.open_extension_ui(dir),
+            Action::ReloadExtensions => {
+                self.load_extensions();
+                self.toast(t!("已重新讀取擴充"));
+            }
             Action::NavBack => self.go_back(),
             Action::NavForward => self.go_forward(),
             Action::AddClip(id, a, b, name) => {
@@ -555,7 +565,7 @@ impl App {
             }
             Action::KeepClip(id, cid) => self.edit_items(&[id], |it| {
                 if let Some(c) = it.clips.iter_mut().find(|c| c.id == cid) {
-                    c.name = super::highlights::kept_name(&c.name);
+                    super::highlights::keep(c);
                 }
             }),
             Action::SetClipRange(id, cid, start, end) => {

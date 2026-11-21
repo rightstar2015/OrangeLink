@@ -443,7 +443,10 @@ impl Engine {
                 // time; but mid-seek it may still hold the frame from before.
                 if has_video {
                     if let Ok(t) = e.OnVideoStreamTick() {
-                        if t != last_frame && !e.IsSeeking().as_bool() {
+                        // A seek that lands on the frame already shown brings no new
+                        // tick; send that frame again so the UI stops waiting for one.
+                        let landed_on_same = t == last_frame && shown < sought && sought_at.elapsed() > Duration::from_millis(120);
+                        if (t != last_frame || landed_on_same) && !e.IsSeeking().as_bool() {
                             if let Some(frame) = self.grab(max_width, sought) {
                                 match frames.try_send(frame) {
                                     // A full queue: the UI is behind; try again next tick.

@@ -13,6 +13,20 @@ const AUDIO_EXTS: &[&str] = &["mp3", "wav", "flac", "aac", "m4a", "ogg", "opus",
 /// Image formats the `image` crate can't decode; ffmpeg may still make a thumbnail.
 const EXTRA_IMAGE_EXTS: &[&str] = &["avif", "heic", "heif", "psd", "svg", "tga", "dds", "exr", "hdr", "jxl"];
 
+/// The file types the 匯入檔案 dialog offers, the first one shown first.
+/// Any file can be imported, so it starts with all of them; images alone
+/// once hid every video and audio file.
+pub fn import_dialog_filters() -> Vec<(&'static str, Vec<&'static str>)> {
+    let images = crate::imaging::SUPPORTED_EXTS.iter().chain(EXTRA_IMAGE_EXTS).copied().collect();
+    vec![
+        (tk!("所有檔案"), vec!["*"]),
+        (tk!("圖片"), images),
+        (tk!("影片"), VIDEO_EXTS.to_vec()),
+        (tk!("音訊"), AUDIO_EXTS.to_vec()),
+        (tk!("字幕與文字"), vec!["srt", "vtt", "ass", "txt"]),
+    ]
+}
+
 /// Files that are never worth importing.
 pub fn is_junk(path: &Path) -> bool {
     let Some(name) = path.file_name().and_then(|n| n.to_str()) else { return true };
@@ -321,6 +335,16 @@ pub fn fmt_precise(secs: f64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn import_dialog_offers_videos_audio_and_subtitles_not_only_images() {
+        let filters = import_dialog_filters();
+        assert_eq!(filters[0].1, vec!["*"], "the first, shown filter lets any file through");
+        let offered = |ext: &str| filters.iter().any(|(_, exts)| exts.contains(&ext));
+        for ext in ["png", "mp4", "mkv", "mp3", "m4a", "srt", "vtt"] {
+            assert!(offered(ext), "{ext} has a filter");
+        }
+    }
 
     #[test]
     fn cover_art_in_an_audio_file_is_not_taken_for_its_video() {

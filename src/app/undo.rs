@@ -116,6 +116,9 @@ impl App {
 
     /// Swaps the stored item states with the current ones (undo or redo).
     pub(super) fn restore_items(&mut self, redo: bool) {
+        // A structural edit made earlier this frame becomes its own step first,
+        // so undo neither swallows it nor has it clear the redo just made.
+        self.track_structure();
         let step = if redo { self.edits.redo.pop() } else { self.edits.undo.pop() };
         let Some(step) = step else {
             self.toast(if redo { "沒有可以重做的操作" } else { "沒有可以復原的操作" });
@@ -147,6 +150,10 @@ impl App {
         if !still_exists {
             self.view = View::All;
         }
+        // An item that went back to the trash (or out of it) is no longer in
+        // view; leaving it selected would let the next batch edit change it.
+        let in_trash = matches!(self.view, View::Trash);
+        self.selected.retain(|id| lib.items.get(id).is_some_and(|it| it.deleted == in_trash));
         self.edits.seq += 1;
         let back = UndoStep { seq: self.edits.seq, time: f64::NEG_INFINITY, items: current, meta };
         if redo {

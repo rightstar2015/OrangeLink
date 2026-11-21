@@ -558,11 +558,13 @@ impl App {
             }
             Action::ExportClip(id, cid, preset) => {
                 if let Some(preset) = self.export_preset(preset) {
+                    self.remember_export_preset(&preset.name);
                     self.export_clip(&id, &cid, preset);
                 }
             }
             Action::ExportClips(id, cids, preset) => {
                 let Some(preset) = self.export_preset(preset) else { return };
+                self.remember_export_preset(&preset.name);
                 let n = cids.len();
                 let mut cids = cids.into_iter();
                 // In list order: the first starts now unless an export is running.

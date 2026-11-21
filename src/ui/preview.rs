@@ -864,6 +864,7 @@ impl App {
         });
         ui.add_space(2.0);
 
+        let quick = crate::config::last_preset_index(&presets, self.config.last_export_preset.as_deref(), video);
         let mut click: Option<(usize, bool)> = None;
         ScrollArea::vertical().id_salt("clips").auto_shrink([false, false]).show(ui, |ui| {
             ui.spacing_mut().item_spacing.y = 5.0;
@@ -942,6 +943,12 @@ impl App {
                                     ui.close_menu();
                                 }
                             });
+                            if let Some(p) = quick {
+                                let tip = t!("用「{name}」輸出（上次用的預設組；其他預設組在「…」→「輸出」）", name = presets[p].name);
+                                if ui.small_button("⇩").on_hover_text(tip).clicked() {
+                                    pending.push(Action::ExportClip(id.to_string(), c.id.clone(), p));
+                                }
+                            }
                             ui.label(len).on_hover_text(t!("片段長度"));
                         });
                     });

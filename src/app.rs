@@ -354,6 +354,8 @@ pub enum Action {
     Redo,
     /// Save the frame at `pos` seconds of a video as a new image item.
     CaptureFrame(String, f64),
+    /// Show 2 to 4 pictures side by side.
+    Compare(Vec<String>),
     /// Make the frame at `pos` seconds the video's thumbnail.
     FrameAsThumbnail(String, f64),
     BackupsDialog,
@@ -885,6 +887,8 @@ pub struct App {
     pub crop_frame: Option<f32>,
     /// The part of the timeline shown, and the item it belongs to.
     pub timeline: Option<(String, crate::ui::TimeView)>,
+    /// Pictures shown side by side, over the library.
+    pub compare: Option<crate::ui::Compare>,
     /// "+5s" and the like, shown briefly over the video after a key jump.
     pub seek_flash: Option<(String, f64)>,
     /// Clips played from the list start over at their out point.
@@ -1125,6 +1129,7 @@ impl App {
             viewer_tags_open: false,
             signal_plot_cache: crate::ui::SignalPlotCache::default(),
             timeline: None,
+            compare: None,
             text_cues_cache: None,
             crop_drag_before: None,
             chat_keywords_draft: None,
@@ -1343,6 +1348,7 @@ impl App {
         // A frame for this library must not be imported into the next one.
         self.cancel_file_jobs(jobs::JobKind::Capture);
         self.files.captures.clear();
+        self.compare = None;
         self.cancel_integrity();
         if let Some(job) = self.subtitle_index.take() {
             job.cancel.store(true, Ordering::Relaxed);
@@ -1664,6 +1670,12 @@ impl App {
                         None => {
                             self.thumbs.failed.insert(loaded.id);
                         }
+                    }
+                }
+                Kind::Compare => {
+                    if let (Some(cmp), Some(img)) = (self.compare.as_mut().filter(|c| c.ids.contains(&loaded.id)), loaded.image) {
+                        let tex = ctx.load_texture(format!("compare-{}", loaded.id), img, egui::TextureOptions::LINEAR);
+                        cmp.tex.insert(loaded.id, tex);
                     }
                 }
                 Kind::Full => {
@@ -3530,7 +3542,11 @@ impl eframe::App for App {
                 self.top_bar(ctx);
             }
             self.status_bar(ctx);
-            if self.viewer.is_some() {
+            if self.compare.is_some() {
+                egui::CentralPanel::default()
+                    .frame(egui::Frame::none().fill(crate::ui::tokens().bg_viewer))
+                    .show(ctx, |ui| crate::ui::in_dark_viewer(ui, |ui| self.compare_ui(ui)));
+            } else if self.viewer.is_some() {
                 egui::CentralPanel::default()
                     .frame(egui::Frame::none().fill(crate::ui::tokens().bg_viewer))
                     .show(ctx, |ui| crate::ui::in_dark_viewer(ui, |ui| self.viewer_ui(ui)));

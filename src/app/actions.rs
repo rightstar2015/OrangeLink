@@ -451,6 +451,18 @@ impl App {
                 let _ = self.capture_frame(&id, pos);
             }
             Action::FrameAsThumbnail(id, pos) => self.frame_as_thumbnail(&id, pos),
+            Action::Compare(ids) => {
+                let Some(lib) = &self.lib else { return };
+                if !crate::ui::comparable(lib, &ids) {
+                    return self.toast(t!("並排比較需要選 2～4 張圖片"));
+                }
+                for id in &ids {
+                    if let Some(it) = lib.items.get(id) {
+                        self.loader.request_compare(id.clone(), lib.file_path(it));
+                    }
+                }
+                self.compare = Some(crate::ui::Compare::new(ids));
+            }
             Action::FindCandidates(id) => self.find_candidates(&id),
             Action::ProcessStreams(ids) => self.process_streams(ids),
             Action::NavBack => self.go_back(),

@@ -1378,5 +1378,11 @@
  "無法設定縮圖：{e}": "Couldn't set the thumbnail: {e}",
  "已把 {pos} 的畫面設為縮圖": "The frame at {pos} is now the thumbnail",
  "把目前畫面設為這部影片的縮圖": "Use the current frame as this video's thumbnail",
- "顯示或隱藏資訊面板": "Show or hide the info panel"
+ "顯示或隱藏資訊面板": "Show or hide the info panel",
+ "並排比較（{n} 張）": "Side by side ({n})",
+ "滾輪縮放、拖曳移動，所有圖片一起動；點兩下回到符合大小": "Wheel to zoom, drag to move; all pictures move together. Double-click to fit.",
+ "關閉 (Esc)": "Close (Esc)",
+ "並排比較需要選 2～4 張圖片": "Side by side needs 2–4 pictures selected",
+ "並排比較": "Compare side by side",
+ "2～4 張圖片並排，一起縮放與移動": "2–4 pictures side by side, zoomed and moved together"
 }

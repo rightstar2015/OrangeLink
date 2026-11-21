@@ -1051,7 +1051,7 @@ impl App {
                 ui.label(RichText::new("點一句跳到該時間；右鍵可從這句建立片段").small().weak());
                 let row_h = 26.0;
                 let mut scroll = ScrollArea::vertical().id_salt("cues").auto_shrink([false, false]);
-                let scroll_target = subs.focus.or(if follow { current } else { None });
+                let scroll_target = subs.scroll_target(if follow { current } else { None });
                 if let Some(target_idx) = scroll_target {
                     if let Some(row_pos) = filtered.iter().position(|&idx| idx == target_idx) {
                         let view_h = ui.available_height().max(row_h);

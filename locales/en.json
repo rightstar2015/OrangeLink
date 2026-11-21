@@ -1421,5 +1421,11 @@
  "已複製 YouTube 章節": "YouTube chapters copied",
  "已複製，但 YouTube 需要至少 3 個章節、每段至少 10 秒才會顯示": "Copied, but YouTube shows chapters only with at least 3, each 10 s or longer",
  "（這個片段之前已經用這個預設組輸出過，會另存一份）": "(This clip was exported with this preset before; another copy is written)",
- "已輸出 {n} 次，最近一次：{preset}\n\n{list}": "Exported {n} times, last with {preset}\n\n{list}"
+ "已輸出 {n} 次，最近一次：{preset}\n\n{list}": "Exported {n} times, last with {preset}\n\n{list}",
+ "已複製 {tags} 個標籤、{folders} 個資料夾、{fields} 個欄位": "Copied {tags} tags, {folders} folders, {fields} fields",
+ "已套用到 {n} 個項目": "Applied to {n} items",
+ "複製標籤、資料夾與欄位": "Copy tags, folders and fields",
+ "之後在其他素材上按「套用」，一次加上同樣的分類": "Then use Apply on other items to give them the same organising",
+ "加上：{what}（原有的保留，可復原）": "Adds: {what} (what they have stays; can be undone)",
+ "套用複製的標籤、資料夾與欄位": "Apply copied tags, folders and fields"
 }

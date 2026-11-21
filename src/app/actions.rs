@@ -454,6 +454,18 @@ impl App {
                 let _ = self.capture_frame(&id, pos);
             }
             Action::FrameAsThumbnail(id, pos) => self.frame_as_thumbnail(&id, pos),
+            Action::CopyMeta(id) => {
+                let Some(it) = self.lib.as_ref().and_then(|l| l.items.get(&id)) else { return };
+                let copy = MetaCopy::of(it);
+                let msg = t!("已複製 {tags} 個標籤、{folders} 個資料夾、{fields} 個欄位", tags = copy.tags.len(), folders = copy.folders.len(), fields = copy.fields.len());
+                self.meta_clipboard = Some(copy);
+                self.toast(msg);
+            }
+            Action::PasteMeta(ids) => {
+                let Some(copy) = self.meta_clipboard.clone() else { return };
+                let n = self.paste_meta(&ids, &copy);
+                self.toast(t!("已套用到 {n} 個項目", n));
+            }
             Action::Compare(ids) => {
                 let Some(lib) = &self.lib else { return };
                 if !crate::ui::comparable(lib, &ids) {

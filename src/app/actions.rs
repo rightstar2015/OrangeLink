@@ -373,14 +373,7 @@ impl App {
                     self.open_viewer_at(id);
                     return;
                 }
-                if !self.visible.contains(&id) {
-                    self.view = View::All;
-                    self.search.clear();
-                    self.tag_filter.clear();
-                    self.ext_filter.clear();
-                    self.min_rating = 0;
-                    self.color_filter = None;
-                }
+                self.show_in_grid(&id);
                 self.selected = [id.clone()].into_iter().collect();
                 self.anchor = Some(id.clone());
                 self.scroll_to = Some(id);

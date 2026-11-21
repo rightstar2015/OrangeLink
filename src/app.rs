@@ -2761,6 +2761,13 @@ impl App {
     /// so it is.
     pub(super) fn show_in_grid(&mut self, id: &str) {
         if !self.visible.iter().any(|v| v == id) {
+            // What was shown is a step back at once (not after the usual
+            // pause for typing), and the way back is said.
+            self.history_step_now();
+            let filtered = !matches!(self.view, View::All) || !self.search.trim().is_empty() || !self.tag_filter.is_empty() || !self.ext_filter.is_empty() || self.min_rating > 0 || self.color_filter.is_some();
+            if filtered && self.lib.is_some() {
+                self.toast(t!("已清除篩選以顯示這個項目；Alt+← 回到原本的畫面"));
+            }
             self.view = View::All;
             self.search.clear();
             self.tag_filter.clear();

@@ -206,13 +206,16 @@ impl App {
                 }
             }
             Action::ImportPaths(paths) => {
-                if self.import_running() {
+                // While an import runs, more files wait their turn (see
+                // `start_import`); only a window already open can't ask now.
+                let running = self.import_running();
+                if running && self.dialog.is_some() {
                     self.toast(if self.import_is_watch_scan() { t!("正在掃描監看資料夾，請稍候再試") } else { t!("匯入進行中，請稍候") });
                     return;
                 }
                 // A large drop (or a folder, until counted) gets the preview first.
                 let min = self.config.import_preview_min;
-                if min > 0 && (paths.len() > min || paths.iter().any(|p| p.is_dir())) {
+                if !running && min > 0 && (paths.len() > min || paths.iter().any(|p| p.is_dir())) {
                     self.preview_import(paths);
                 } else {
                     self.apply(ctx, Action::ImportByMode(paths));

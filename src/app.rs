@@ -2127,8 +2127,9 @@ impl App {
             self.toast("需要 FFmpeg 才能輸出片段");
             return;
         };
-        let Some(it) = lib.items.get(id) else { return };
-        let Some(c) = it.clips.iter().find(|c| c.id == cid) else { return };
+        let Some((it, c)) = lib.items.get(id).and_then(|it| Some((it, it.clips.iter().find(|c| c.id == cid)?))) else {
+            return self.toast("要輸出的片段已經被刪除");
+        };
         let dir = preset.folder.clone().unwrap_or_else(|| lib.root.join("captures"));
         if let Err(e) = std::fs::create_dir_all(&dir) {
             return self.toast(format!("無法建立輸出資料夾 {}：{e}", dir.display()));
@@ -2212,7 +2213,10 @@ impl App {
             }
             Err(e) => self.toast_error(format!("輸出片段失敗：{e}")),
         }
-        if let Some((id, cid, preset)) = self.clips.queue.pop_front() {
+        // A clip that can't start (deleted, its folder can't be made) says so and
+        // the next one goes; nothing else would start the rest of the queue.
+        while self.clips.rx.is_none() {
+            let Some((id, cid, preset)) = self.clips.queue.pop_front() else { break };
             self.export_clip(&id, &cid, preset);
         }
     }
@@ -3640,6 +3644,24 @@ mod tests {
         groups.sort();
         assert_eq!(groups, vec![vec!["a".to_string(), "c".to_string()], vec!["b".to_string(), "d".to_string()]]);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_clip_that_cannot_start_does_not_hold_up_the_export_queue() {
+        let ctx = egui::Context::default();
+        let mut app = App::with_config(&ctx, Config::default());
+        let root = std::env::temp_dir().join(format!("orangelink-clipq-{}", crate::model::new_id()));
+        app.lib = Some(Library::create(&root).unwrap());
+        app.ffmpeg_dir = Some(root.clone());
+        let preset = crate::config::default_export_presets().remove(0);
+        app.clips.queue = [("deleted", "c1"), ("deleted too", "c2")].map(|(i, c)| (i.to_string(), c.to_string(), preset.clone())).into();
+        let (tx, rx) = std::sync::mpsc::channel();
+        tx.send(Err("FFmpeg 失敗".to_string())).unwrap();
+        app.clips.rx = Some(rx);
+        app.poll_clip_export(&ctx);
+        assert!(app.clips.queue.is_empty() && app.clips.rx.is_none(), "the rest of the queue was left waiting");
+        drop(app);
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

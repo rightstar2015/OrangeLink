@@ -611,7 +611,8 @@ impl Library {
     }
 
     /// Brings back unreadable items from the newest backup that has each of them. The
-    /// damaged file is kept as `metadata.json.broken`. Returns (restored, not in any backup).
+    /// damaged file is kept as `metadata.json.broken` (numbered when an earlier one is
+    /// there). Returns (restored, not in any backup).
     pub fn restore_unreadable(&mut self) -> Result<(usize, usize)> {
         let mut wanted: HashSet<String> = self.unreadable.iter().map(|u| u.id.clone()).collect();
         let mut found: Vec<Item> = Vec::new();
@@ -636,7 +637,7 @@ impl Library {
         let restored = found.len();
         for item in found {
             let meta = item_dir(&self.root, &item.id).join(META_FILE);
-            fs::rename(&meta, meta.with_extension("json.broken")).context("無法保留損壞的檔案")?;
+            keep_aside(&meta).context("無法保留損壞的檔案")?;
             let id = item.id.clone();
             self.insert_item(item);
             self.dirty.insert(id.clone());
@@ -1752,6 +1753,28 @@ mod tests {
         assert_eq!(lib.unreadable.len(), 1);
         assert_eq!(lib.restore_unreadable().unwrap(), (1, 0));
         assert!(lib.items["a"].folders.is_empty(), "points at a folder that no longer exists");
+        drop(lib);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_second_damaged_copy_of_an_item_does_not_replace_the_first() {
+        let root = std::env::temp_dir().join(format!("orangelink-restore-{}", new_id()));
+        let mut lib = Library::create(&root).unwrap();
+        fs::create_dir_all(item_dir(&root, "a")).unwrap();
+        lib.insert_item(item("a"));
+        lib.touch("a");
+        lib.flush().unwrap();
+        lib.write_backup("backup-20000101-000000.json").unwrap();
+        let meta = item_dir(&root, "a").join(META_FILE);
+        for damage in ["first damage", "second damage"] {
+            fs::write(&meta, damage).unwrap();
+            let mut lib = Library::open(&root).unwrap();
+            assert_eq!(lib.restore_unreadable().unwrap(), (1, 0));
+        }
+        let dir = item_dir(&root, "a");
+        assert_eq!(fs::read_to_string(dir.join("metadata.json.broken")).unwrap(), "first damage");
+        assert_eq!(fs::read_to_string(dir.join("metadata.json.broken-1")).unwrap(), "second damage");
         drop(lib);
         let _ = fs::remove_dir_all(&root);
     }

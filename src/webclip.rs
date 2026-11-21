@@ -77,15 +77,7 @@ pub struct WebServer {
 impl WebServer {
     pub fn start(port: u16, token: String, ctx: egui::Context) -> Result<Self, String> {
         // A server restarted with a new pairing code frees its port just after being dropped.
-        let mut bound = tiny_http::Server::http(("127.0.0.1", port));
-        for _ in 0..10 {
-            if bound.is_ok() {
-                break;
-            }
-            thread::sleep(std::time::Duration::from_millis(50));
-            bound = tiny_http::Server::http(("127.0.0.1", port));
-        }
-        let server = Arc::new(bound.map_err(|e| e.to_string())?);
+        let server = Arc::new(crate::mcp::bind_local(port)?);
         // Port 0 lets the system pick one (the tests); report the one we got.
         let port = server.server_addr().to_ip().map_or(port, |a| a.port());
         // Clean leftovers from a previous process once at first bind (not on

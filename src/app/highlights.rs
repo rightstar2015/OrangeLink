@@ -94,7 +94,7 @@ impl App {
         let Some(it) = lib.items.get(id).filter(|i| matches!(i.kind, MediaKind::Video | MediaKind::Audio)) else { return };
         let mut s = Signals { id: id.to_string(), ..Default::default() };
         s.loud = std::fs::read(loudness_cache(&lib.root, id)).ok().and_then(|b| serde_json::from_slice(&b).ok());
-        s.chat_file = it.imported_from().and_then(|p| signals::chat_file_for(p));
+        s.chat_file = it.chat_file();
         if let Some(file) = s.chat_file.clone() {
             let (tx, rx) = channel();
             let (keywords, duration, ctx) = (self.config.chat_keywords.clone(), it.duration.unwrap_or(0.0), self.egui_ctx.clone());
@@ -262,7 +262,7 @@ impl App {
         let Some(id) = self.stream.queue.pop_front() else { return };
         let Some(it) = lib.items.get(&id) else { return self.start_next_stream() };
         let input = lib.file_path(it);
-        let chat_file = it.imported_from().and_then(|p| signals::chat_file_for(p));
+        let chat_file = it.chat_file();
         let cached: Option<Vec<f32>> = std::fs::read(loudness_cache(&lib.root, &id)).ok().and_then(|b| serde_json::from_slice(&b).ok());
         let (keywords, duration) = (self.config.chat_keywords.clone(), it.duration);
         let (ff, model, ctx) = (self.ffmpeg_dir.clone(), self.config.whisper_model.clone(), self.egui_ctx.clone());
@@ -386,6 +386,7 @@ pub fn candidates_ui(app: &mut App, ui: &mut egui::Ui, id: &str) {
     };
     let mut analyze = false;
     let mut cancel = false;
+    let mut pick_chat = false;
     let mut open_settings = false;
     let t = crate::ui::tokens();
     egui::Frame::none()
@@ -403,7 +404,13 @@ pub fn candidates_ui(app: &mut App, ui: &mut egui::Ui, id: &str) {
                 (Some(_), Some(c), _) => (t!("✔ 聊天室已載入（約 {n} 分鐘）", n = c.len() / 60), true),
                 (Some(_), None, None) => (t!("聊天室紀錄沒有可用的時間資訊").to_string(), false),
             };
-            ui.label(RichText::new(chat_text).small().color(if chat_ok { crate::ui::good() } else { t.text_muted }));
+            ui.horizontal_wrapped(|ui| {
+                ui.label(RichText::new(chat_text).small().color(if chat_ok { crate::ui::good() } else { t.text_muted }));
+                // A record fetched later or renamed is never found by its name.
+                if ui.small_button(t!("選擇聊天室檔…")).on_hover_text(t!("指定這支影片的 .live_chat.json（例如之後才下載、或改過檔名）")).clicked() {
+                    pick_chat = true;
+                }
+            });
             ui.add_space(4.0);
             ui.horizontal(|ui| match (&s.loud, &s.loud_job) {
                 (_, Some(job)) => {
@@ -452,6 +459,9 @@ pub fn candidates_ui(app: &mut App, ui: &mut egui::Ui, id: &str) {
         if let Some(s) = &mut app.signals {
             s.loud_job = None;
         }
+    }
+    if pick_chat {
+        app.act(Action::PickChat(id.to_string()));
     }
     if open_settings {
         app.act(Action::OpenSettingsAt(crate::config::SettingsPage::Highlights));

@@ -1346,5 +1346,8 @@
  "入點 {at}": "In {at}",
  "出點 {at}": "Out {at}",
  "已加入片段": "Clip added",
- "用「{name}」輸出（上次用的預設組；其他預設組在「…」→「輸出」）": "Export with \"{name}\" (the preset used last; other presets are under \"…\" → \"Export\")"
+ "用「{name}」輸出（上次用的預設組；其他預設組在「…」→「輸出」）": "Export with \"{name}\" (the preset used last; other presets are under \"…\" → \"Export\")",
+ "選擇聊天室檔…": "Choose chat file…",
+ "指定這支影片的 .live_chat.json（例如之後才下載、或改過檔名）": "Choose this video's .live_chat.json (for example one downloaded later or renamed)",
+ "聊天室紀錄": "Chat records"
 }

@@ -430,6 +430,7 @@ fn import_one(
             clips: Vec::new(),
             fields: Default::default(),
             subtitle: None,
+            chat: None,
             links: Vec::new(),
         };
         write_json(&dir.join(META_FILE), &item)?;

@@ -577,6 +577,11 @@ impl App {
                 }
                 self.toast(t!("{n} 個片段排入輸出，進度在狀態列的背景工作裡", n));
             }
+            Action::PickChat(id) => {
+                let Some(path) = rfd::FileDialog::new().set_title(t!("選擇聊天室檔…")).add_filter(t!("聊天室紀錄"), &["json"]).pick_file() else { return };
+                self.edit_items(std::slice::from_ref(&id), |it| it.chat = Some(path.clone()));
+                self.load_signals(&id);
+            }
             Action::PickSubtitle(id) => {
                 let Some(path) = rfd::FileDialog::new().add_filter(t!("字幕"), &["srt", "vtt"]).pick_file() else { return };
                 self.edit_items(std::slice::from_ref(&id), |it| it.subtitle = Some(path.clone()));

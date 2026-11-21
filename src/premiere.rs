@@ -331,6 +331,7 @@ mod tests {
             clips: Vec::new(),
             fields: Default::default(),
             subtitle: None,
+            chat: None,
             links: Vec::new(),
         };
         let mut video = mk("clip", "mp4", MediaKind::Video, vec![folder]);

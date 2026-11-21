@@ -2239,6 +2239,28 @@ impl App {
     }
 
     /// Stops the clip being written and drops the ones waiting.
+    /// On closing: cancels the jobs that run other programs (FFmpeg, curl,
+    /// yt-dlp) and waits up to `within` for their threads to end them. A program
+    /// left running would keep its files open after OrangeLink is gone.
+    fn stop_programs(&mut self, within: std::time::Duration) {
+        self.cancel_imports();
+        self.cancel_ytdlp();
+        self.cancel_whisper();
+        self.cancel_model_download();
+        self.cancel_clip_queue();
+        self.cancel_dup_search();
+        self.cancel_file_jobs(jobs::JobKind::Capture);
+        self.cancel_file_jobs(jobs::JobKind::FileCopy);
+        let end = std::time::Instant::now() + within;
+        while !(self.clips.rx.as_ref().is_none_or(state::ended) && self.whisper_programs_ended()) {
+            if std::time::Instant::now() >= end {
+                crate::log::error("exit", "背景工作沒有在時限內結束");
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+    }
+
     pub(super) fn cancel_clip_queue(&mut self) {
         self.clips.queue.clear();
         self.clips.cancel.store(true, Ordering::Relaxed);
@@ -3491,6 +3513,7 @@ struct WebSource {
 
 impl Drop for App {
     fn drop(&mut self) {
+        self.stop_programs(std::time::Duration::from_secs(3));
         if let Some(lib) = &mut self.lib {
             if let Err(e) = lib.flush() {
                 crate::log::error("save", format!("關閉時儲存失敗：{e:#}"));
@@ -3713,6 +3736,28 @@ mod tests {
         app.poll_exact_duplicates();
         assert!(!matches!(app.view, View::Ids { .. }), "a cancelled search shows no results");
         assert!(app.background_jobs().iter().all(|j| j.kind != jobs::JobKind::Duplicates));
+    }
+
+    #[test]
+    fn closing_stops_a_clip_export_and_waits_for_it() {
+        let mut app = App::with_config(&egui::Context::default(), Config::default());
+        let (tx, rx) = std::sync::mpsc::channel::<ClipExported>();
+        let cancel = Arc::new(AtomicBool::new(false));
+        app.clips.cancel = cancel.clone();
+        app.clips.rx = Some(rx);
+        let ended = Arc::new(AtomicBool::new(false));
+        let ended2 = ended.clone();
+        // Stands in for the export thread: it ends FFmpeg once told to, which takes a moment.
+        std::thread::spawn(move || {
+            while !cancel.load(Ordering::Relaxed) {
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            ended2.store(true, Ordering::Relaxed);
+            drop(tx);
+        });
+        drop(app);
+        assert!(ended.load(Ordering::Relaxed), "closed with FFmpeg still running");
     }
 
     #[test]

@@ -216,6 +216,13 @@ impl App {
     }
 
     /// Stops everything for good: the result of the running job is dropped.
+    /// Whether the transcription and the model download (if any) have ended,
+    /// for closing: their FFmpeg and curl must not outlive OrangeLink.
+    pub(super) fn whisper_programs_ended(&self) -> bool {
+        self.whisper.running.as_ref().is_none_or(|r| super::state::ended(&r.job.rx))
+            && self.whisper.download.as_ref().is_none_or(|d| super::state::ended(&d.rx))
+    }
+
     pub(super) fn drop_whisper(&mut self) {
         self.cancel_whisper();
         self.whisper.running = None;

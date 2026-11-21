@@ -1048,23 +1048,12 @@ impl Library {
         }
     }
 
-    /// Creates the built-in smart-folder tree (by type, rating, date, size, status).
+    /// Creates the built-in smart-folder tree (by rating, date, size, status,
+    /// clips). Not by type: the sidebar's 類型 section already lists that.
     pub fn seed_default_smart_folders(&mut self) {
         use crate::model::{MediaKind, Orientation};
         let f = SavedFilter::default;
         let tree: Vec<(&str, Vec<(&str, SavedFilter)>)> = vec![
-            (
-                t!("依類型"),
-                vec![
-                    (t!("圖片"), SavedFilter { kind: Some(MediaKind::Image), ..f() }),
-                    (t!("影片"), SavedFilter { kind: Some(MediaKind::Video), ..f() }),
-                    (t!("音訊"), SavedFilter { kind: Some(MediaKind::Audio), ..f() }),
-                    (
-                        t!("字幕與文字"),
-                        SavedFilter { exts: ["srt", "vtt", "ass", "ssa", "lrc", "txt"].map(String::from).to_vec(), ..f() },
-                    ),
-                ],
-            ),
             (
                 t!("依評分"),
                 vec![

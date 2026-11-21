@@ -4386,6 +4386,8 @@ mod tests {
         // Seeding again adds only the groups not there.
         lib.seed_default_smart_folders();
         let n = lib.meta.smart_folders.len();
+        // 依類型 repeated the sidebar's 類型 section, one for one.
+        assert!(lib.meta.smart_folders.iter().all(|s| s.name != "依類型" && s.name != "圖片"));
         lib.seed_default_smart_folders();
         assert_eq!(lib.meta.smart_folders.len(), n);
         let _ = std::fs::remove_dir_all(&root);

@@ -92,7 +92,7 @@ impl App {
             return;
         };
         let idx = self.visible.iter().position(|x| *x == id).unwrap_or(0);
-        let engine_name = self.player.as_ref().filter(|p| p.id == id).map(|p| p.engine_name().to_string());
+        let engine_name = self.player.as_ref().filter(|p| p.id == id).map(|p| (p.engine_short_name(), p.engine_name().to_string()));
         let has_frames = self.player.as_ref().filter(|p| p.id == id).is_some_and(|p| p.has_frames());
 
         // An animated GIF gives the frame for the current time and when the next is due.
@@ -133,8 +133,12 @@ impl App {
                     if ui.button(t!("← 返回")).on_hover_text(t!("回到素材庫（Esc）")).clicked() {
                         self.act(Action::CloseViewer);
                     }
-                    // Reserve right-side room so long filenames truncate cleanly instead of overlapping buttons.
-                    let right_reserve = if has_player { 430.0 } else { 370.0 };
+                    // The buttons on the right (and a PDF's page controls) are as
+                    // wide as they were last frame: the name and the info line
+                    // get what is left, so neither runs into them.
+                    let trail_id = ui.id().with("viewer-header-trail");
+                    let trail: [f32; 2] = ui.data(|d| d.get_temp(trail_id)).unwrap_or([if has_player { 430.0 } else { 370.0 }, 0.0]);
+                    let right_reserve = trail[0] + trail[1] + ui.spacing().item_spacing.x * 2.0;
                     let name_max = (ui.available_width() - right_reserve).clamp(110.0, 360.0);
                     ui.allocate_ui_with_layout(vec2(name_max, 20.0), Layout::left_to_right(Align::Center), |ui| {
                         ui.add(egui::Label::new(RichText::new(&name).strong().color(tokens().text)).truncate())
@@ -147,13 +151,23 @@ impl App {
                     if let Some(d) = duration {
                         info += &format!("  ·  {}", fmt_duration(d));
                     }
-                    if let Some(eng) = &engine_name {
-                        info += &format!("  ·  {eng}");
+                    if let Some((short, _)) = &engine_name {
+                        info += &format!("  ·  {short}");
                     }
-                    if ui.available_width() > right_reserve + 80.0 {
-                        ui.add(egui::Label::new(RichText::new(info).small().weak()).truncate());
+                    let info_w = header_info_width(ui.available_width(), right_reserve);
+                    if info_w > 0.0 {
+                        let r = ui
+                            .allocate_ui_with_layout(vec2(info_w, 20.0), Layout::left_to_right(Align::Center), |ui| {
+                                ui.add(egui::Label::new(RichText::new(&info).small().weak()).truncate())
+                            })
+                            .inner;
+                        if let Some((_, full)) = &engine_name {
+                            r.on_hover_text(format!("{info}\n{full}"));
+                        }
                     }
+                    let mut pdf_w = 0.0;
                     if let Some((page, total, error, _)) = &pdf {
+                        let pdf_start = ui.cursor().left();
                         ui.separator();
                         if ui.add_enabled(*page > 0, egui::Button::new("▲")).on_hover_text(t!("上一頁 (← / PageUp)")).clicked() {
                             self.act(Action::PdfPage(page - 1));
@@ -168,8 +182,10 @@ impl App {
                         if let Some(e) = error {
                             ui.label(RichText::new(t!("無法讀取 PDF：{e}", e)).color(danger()));
                         }
+                        pdf_w = ui.cursor().left() - pdf_start;
                     }
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        let right_start = ui.cursor().right();
                         let (next_tip, prev_tip) = if has_player {
                             (t!("下一個 (Ctrl+→ / PageDown)"), t!("上一個 (Ctrl+← / PageUp)"))
                         } else {
@@ -249,6 +265,8 @@ impl App {
                                 }
                             }
                         }
+                        let right_w = right_start - ui.cursor().right();
+                        ui.ctx().data_mut(|d| d.insert_temp(trail_id, [right_w, pdf_w]));
                     });
                 });
             });
@@ -1112,6 +1130,18 @@ impl App {
 
 /// Chat activity (bars) and loudness (line) along the video, lined up with the progress
 /// bar below, with I/O range highlight. Returns the time clicked.
+/// How wide the info line beside the name may be: what is left once the
+/// buttons after it have their room, or nothing when too little is left to
+/// read. It never reaches into the buttons.
+fn header_info_width(available: f32, reserve: f32) -> f32 {
+    let left = available - reserve;
+    if left < 80.0 {
+        0.0
+    } else {
+        left
+    }
+}
+
 fn activity_strip(ui: &mut Ui, cache: &SignalPlotCache, dur: f64, pos: f64, mark: (Option<f64>, Option<f64>)) -> Option<f64> {
     let width = ui.available_width().max(1.0);
     let (rect, resp) = ui.allocate_exact_size(vec2(width, 40.0), Sense::click());
@@ -1212,6 +1242,17 @@ fn clip_block(ui: &Ui, block: Rect, grips: [(bool, Rect); 2], id: egui::Id) -> (
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The info line (`1 / 2028 · 1920 × 1080 · 9:49:32 · …`) once ran into
+    /// the ↩ button: it took all the width the name left.
+    #[test]
+    fn the_viewer_info_line_stops_before_the_buttons() {
+        for (available, reserve) in [(900.0, 520.0), (600.0, 520.0), (1400.0, 300.0)] {
+            let w = header_info_width(available, reserve);
+            assert!(w + reserve <= available, "{available} {reserve} → {w}");
+        }
+        assert_eq!(header_info_width(560.0, 520.0), 0.0, "too narrow to read: left out");
+    }
 
     /// A 30-second highlight on a 2-hour stream is a few pixels wide, all of it
     /// under the grips.

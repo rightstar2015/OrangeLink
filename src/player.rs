@@ -467,6 +467,17 @@ impl Player {
         }
     }
 
+    /// The engine in a few letters, for the viewer's crowded top bar.
+    pub fn engine_short_name(&self) -> &'static str {
+        match self.backend {
+            Backend::Ffmpeg(_) => "FFmpeg",
+            #[cfg(windows)]
+            Backend::Mf(_) if self.frame_size.is_some() => "MF GPU",
+            #[cfg(windows)]
+            Backend::Mf(_) => "MF",
+        }
+    }
+
     /// One frame's length, for stepping frame by frame.
     pub fn frame_secs(&self) -> f64 {
         1.0 / self.fps

@@ -319,6 +319,12 @@ pub struct Config {
     /// Speech to subtitles: model name and language code.
     pub whisper_model: String,
     pub whisper_language: String,
+
+    /// config.json was there but couldn't be read (locked by antivirus, a sync
+    /// tool, a permission problem). Its contents are unknown, so it is never
+    /// replaced before a copy of it has been kept; see `save_to`.
+    #[serde(skip)]
+    pub unread_file: bool,
 }
 
 /// Main window placement in logical points; `x`/`y` is the outer (frame) corner,
@@ -506,6 +512,7 @@ impl Default for Config {
             export_presets: default_export_presets(),
             whisper_model: "small".into(),
             whisper_language: "auto".into(),
+            unread_file: false,
         }
     }
 }
@@ -563,7 +570,10 @@ impl Config {
         let bytes = match std::fs::read(path) {
             Ok(b) => b,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return (Self::loaded(Self::default()), None),
-            Err(e) => return (Self::loaded(Self::default()), Some(format!("無法讀取設定檔 {}：{e}，這次使用預設值", path.display()))),
+            Err(e) => {
+                let config = Self { unread_file: true, ..Self::loaded(Self::default()) };
+                return (config, Some(format!("無法讀取設定檔 {}：{e}，這次使用預設值；原檔在能讀取並另存一份之前不會被覆蓋", path.display())));
+            }
         };
         match serde_json::from_slice::<Self>(bytes.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(&bytes)) {
             Ok(c) => (Self::loaded(c), None),
@@ -592,7 +602,7 @@ impl Config {
         self.config_version = CONFIG_VERSION;
     }
 
-    pub fn save(&self) {
+    pub fn save(&mut self) {
         if let Some(path) = config_path() {
             let _ = self.save_to(&path);
         }
@@ -601,7 +611,23 @@ impl Config {
     /// Through a temp file, so a crash or power cut never leaves a half-written
     /// config; and not at all when nothing changed (every start saves). Returns
     /// whether it wrote.
-    fn save_to(&self, path: &Path) -> anyhow::Result<bool> {
+    ///
+    /// A file that couldn't be read at start holds settings this run never saw:
+    /// it is copied aside first, and while it still can't be read it isn't
+    /// replaced at all.
+    fn save_to(&mut self, path: &Path) -> anyhow::Result<bool> {
+        if self.unread_file {
+            match std::fs::read(path) {
+                Ok(bytes) => {
+                    if keep_broken(path, &bytes).is_none() {
+                        return Ok(false);
+                    }
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(_) => return Ok(false),
+            }
+            self.unread_file = false;
+        }
         if let Some(dir) = path.parent() {
             std::fs::create_dir_all(dir)?;
         }
@@ -654,6 +680,31 @@ mod tests {
         std::fs::write(&path, b"not json").unwrap();
         Config::load_from(&path);
         assert_eq!(std::fs::read(dir.join("config.broken-1.json")).unwrap(), b"not json", "another broken file doesn't replace the first");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_config_that_could_not_be_read_is_not_replaced_by_the_defaults() {
+        let dir = std::env::temp_dir().join(format!("orangelink-config-{}", crate::model::new_id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        // A directory where the file should be: reading fails with something
+        // other than NotFound, like a file locked by antivirus.
+        let path = dir.join("config.json");
+        std::fs::create_dir_all(&path).unwrap();
+        let (mut c, problem) = Config::load_from(&path);
+        assert!(problem.is_some());
+        c.webclip_port = 50003;
+        assert!(!c.save_to(&path).unwrap(), "a file that can't be read isn't replaced");
+        assert!(path.is_dir());
+
+        // Readable again later: the original is kept aside before the first save.
+        std::fs::remove_dir(&path).unwrap();
+        std::fs::write(&path, b"{\"mcp_token\": \"keep me\"}").unwrap();
+        assert!(c.save_to(&path).unwrap());
+        assert_eq!(std::fs::read(dir.join("config.broken.json")).unwrap(), b"{\"mcp_token\": \"keep me\"}");
+        c.webclip_port = 50004;
+        assert!(c.save_to(&path).unwrap());
+        assert!(!dir.join("config.broken-1.json").exists(), "only the unread original is kept, once");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

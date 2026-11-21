@@ -410,6 +410,8 @@ struct DupSearch {
     similar_rx: Option<Receiver<SimilarFound>>,
     /// Confirming large files by their contents.
     exact_rx: Option<Receiver<Vec<Vec<String>>>>,
+    /// Stops the search under way.
+    cancel: Arc<AtomicBool>,
 }
 
 /// Marked clips being encoded: the one in FFmpeg, and the ones waiting
@@ -582,9 +584,12 @@ type LibOpened = anyhow::Result<(Library, Option<LibraryLock>)>;
 
 /// Splits files that share a partial hash into groups with exactly the same
 /// bytes (two or more each). A file that can't be read matches nothing.
-fn split_by_contents(files: Vec<(String, PathBuf)>) -> Vec<Vec<String>> {
+fn split_by_contents(files: Vec<(String, PathBuf)>, cancel: &AtomicBool) -> Vec<Vec<String>> {
     let mut classes: Vec<(PathBuf, Vec<String>)> = Vec::new();
     for (id, path) in files {
+        if cancel.load(Ordering::Relaxed) {
+            return Vec::new();
+        }
         match classes.iter_mut().find(|(p, _)| crate::imaging::same_contents(p, &path).unwrap_or(false)) {
             Some((_, ids)) => ids.push(id),
             None if path.is_file() => classes.push((path, vec![id])),
@@ -1182,8 +1187,7 @@ impl App {
         self.pending_media = None;
         self.cancel_clip_queue();
         self.clips.rx = None;
-        self.dupes.similar_rx = None;
-        self.dupes.exact_rx = None;
+        self.cancel_dup_search();
         // A frame for this library must not be imported into the next one.
         self.cancel_file_jobs(jobs::JobKind::Capture);
         self.files.captures.clear();
@@ -2278,9 +2282,10 @@ impl App {
         let limit = if target.is_some() { self.similar_near } else { self.similar_dupes };
         let ctx = self.egui_ctx.clone();
         let (tx, rx) = std::sync::mpsc::channel();
+        let cancel = self.new_dup_search();
         std::thread::spawn(move || {
             // Only thumbnails new or rebuilt (and videos changed) since the last search are read.
-            let hashes = crate::similarity::hashes(&root, &items, ff.as_deref());
+            let hashes = crate::similarity::hashes(&root, &items, ff.as_deref(), &cancel);
             let groups = match &target {
                 Some(t) => crate::similarity::near(&hashes, t, limit, 300).into_iter().collect(),
                 None => crate::similarity::groups(&hashes, limit),
@@ -2337,16 +2342,43 @@ impl App {
         }
         let ctx = self.egui_ctx.clone();
         let (tx, rx) = std::sync::mpsc::channel();
+        let cancel = self.new_dup_search();
         std::thread::spawn(move || {
             let mut groups = sure;
             for g in check {
-                groups.extend(split_by_contents(g));
+                groups.extend(split_by_contents(g, &cancel));
             }
             let _ = tx.send(groups);
             ctx.request_repaint();
         });
         self.dupes.exact_rx = Some(rx);
         self.toast("正在比對大檔案的內容…");
+    }
+
+    /// A fresh cancel flag for a duplicate search; the one before it is stopped.
+    fn new_dup_search(&mut self) -> Arc<AtomicBool> {
+        self.cancel_dup_search();
+        self.dupes.cancel = Arc::default();
+        self.dupes.cancel.clone()
+    }
+
+    /// The duplicate or similarity search under way, for the status bar's jobs list.
+    pub(super) fn dup_search_job(&self) -> Option<jobs::BgJob> {
+        let name = if self.dupes.similar_rx.is_some() {
+            "比對相似的素材"
+        } else if self.dupes.exact_rx.is_some() {
+            "比對大檔案的內容"
+        } else {
+            return None;
+        };
+        Some(jobs::BgJob::new(jobs::JobKind::Duplicates, name, "", None))
+    }
+
+    /// Stops the search; its result is never shown.
+    pub(super) fn cancel_dup_search(&mut self) {
+        self.dupes.cancel.store(true, Ordering::Relaxed);
+        self.dupes.similar_rx = None;
+        self.dupes.exact_rx = None;
     }
 
     fn poll_exact_duplicates(&mut self) {
@@ -3644,7 +3676,7 @@ mod tests {
             std::fs::write(dir.join(name), body).unwrap();
         }
         let files = ["a", "b", "c", "d", "e", "gone"].iter().map(|n| (n.to_string(), dir.join(n))).collect();
-        let mut groups = split_by_contents(files);
+        let mut groups = split_by_contents(files, &AtomicBool::new(false));
         groups.sort();
         assert_eq!(groups, vec![vec!["a".to_string(), "c".to_string()], vec!["b".to_string(), "d".to_string()]]);
         let _ = std::fs::remove_dir_all(&dir);
@@ -3666,6 +3698,21 @@ mod tests {
         assert!(app.clips.queue.is_empty() && app.clips.rx.is_none(), "the rest of the queue was left waiting");
         drop(app);
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_duplicate_search_is_a_job_that_can_be_cancelled() {
+        let mut app = App::with_config(&egui::Context::default(), Config::default());
+        let (tx, rx) = std::sync::mpsc::channel();
+        let cancel = app.new_dup_search();
+        app.dupes.exact_rx = Some(rx);
+        assert!(app.background_jobs().iter().any(|j| j.kind == jobs::JobKind::Duplicates && j.can_cancel));
+        app.cancel_job(jobs::JobKind::Duplicates);
+        assert!(cancel.load(Ordering::Relaxed), "the thread is told to stop");
+        let _ = tx.send(vec![vec!["a".into(), "b".into()]]);
+        app.poll_exact_duplicates();
+        assert!(!matches!(app.view, View::Ids { .. }), "a cancelled search shows no results");
+        assert!(app.background_jobs().iter().all(|j| j.kind != jobs::JobKind::Duplicates));
     }
 
     #[test]

@@ -19,6 +19,7 @@ pub enum JobKind {
     FileCopy,
     Capture,
     Integrity,
+    Duplicates,
 }
 
 impl JobKind {
@@ -37,6 +38,7 @@ impl JobKind {
             JobKind::FileCopy => "file_export",
             JobKind::Capture => "frame_capture",
             JobKind::Integrity => "library_check",
+            JobKind::Duplicates => "duplicate_search",
         }
     }
 }
@@ -100,6 +102,7 @@ impl App {
         jobs.extend(self.file_copy_job());
         jobs.extend(self.capture_job());
         jobs.extend(self.integrity_job());
+        jobs.extend(self.dup_search_job());
         let now = self.now;
         if self.thumbs.pending.is_empty() {
             self.thumbs.busy_since = None;
@@ -139,6 +142,7 @@ impl App {
             JobKind::Stream => self.cancel_stream(),
             JobKind::FileCopy | JobKind::Capture => self.cancel_file_jobs(kind),
             JobKind::Integrity => self.cancel_integrity(),
+            JobKind::Duplicates => self.cancel_dup_search(),
             JobKind::Thumbnails => {}
         }
     }

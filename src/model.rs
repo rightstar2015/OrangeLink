@@ -336,7 +336,7 @@ pub fn merge_into(keep: &mut Item, other: &Item) {
             keep.links.push(l.clone());
         }
     }
-    keep.use_count += other.use_count;
+    keep.use_count = keep.use_count.saturating_add(other.use_count);
     keep.last_used = keep.last_used.max(other.last_used);
 }
 
@@ -350,6 +350,16 @@ mod tests {
             "added_at": 0, "modified_at": 0
         }))
         .unwrap()
+    }
+
+    #[test]
+    fn merging_two_heavily_used_items_does_not_overflow_the_use_count() {
+        let mut a = item("a");
+        a.use_count = u32::MAX;
+        let mut b = item("b");
+        b.use_count = 5;
+        merge_into(&mut a, &b);
+        assert_eq!(a.use_count, u32::MAX);
     }
 
     #[test]

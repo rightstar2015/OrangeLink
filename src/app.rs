@@ -494,11 +494,28 @@ pub struct Subtitles {
     pub search: String,
     /// Cue shown last frame, to scroll the list along with playback.
     pub last_cue: Option<usize>,
-    /// Cue to scroll to once, e.g. the line a search found.
+    /// Cue to mark until playback reaches it, e.g. the line a search found.
     pub focus: Option<usize>,
+    /// The list still has to scroll to `focus`; it does so once, then scrolls freely.
+    pub scroll_to_focus: bool,
 }
 
 impl Subtitles {
+    /// Marks `i` and scrolls the list to it once.
+    pub fn focus_on(&mut self, i: Option<usize>) {
+        self.focus = i;
+        self.scroll_to_focus = i.is_some();
+    }
+
+    /// Where the list scrolls this frame: the focused line once, otherwise the
+    /// playing line when following playback.
+    pub fn scroll_target(&mut self, follow: Option<usize>) -> Option<usize> {
+        if std::mem::take(&mut self.scroll_to_focus) {
+            return self.focus.or(follow);
+        }
+        follow
+    }
+
     /// The first cue with the most words of `search` in it (`欄位:值` words are skipped).
     pub fn find(&self, search: &str) -> Option<usize> {
         let words = filter::search_words(search);
@@ -2124,7 +2141,7 @@ impl App {
         if let Some(p) = &path {
             self.index_subtitles(id, p);
         }
-        self.subs = is_media.then(|| Subtitles { id: id.to_string(), path, cues, search: String::new(), last_cue: None, focus: None });
+        self.subs = is_media.then(|| Subtitles { id: id.to_string(), path, cues, search: String::new(), last_cue: None, focus: None, scroll_to_focus: false });
     }
 
     /// Encodes a marked clip to `captures/` on a background thread; it is imported when done.
@@ -2591,7 +2608,7 @@ impl App {
                 p.seek(t);
             }
             if let Some(subs) = self.subs.as_mut().filter(|s| s.id == id) {
-                subs.focus = subs.at(t + 0.001);
+                subs.focus_on(subs.at(t + 0.001));
                 self.viewer_tab = ViewerTab::Subtitles;
             }
             return;
@@ -2599,7 +2616,7 @@ impl App {
         // Opened from a search that matched the dialogue: start at that line.
         if let Some(subs) = self.subs.as_mut().filter(|s| s.id == id) {
             if let Some(i) = subs.find(&self.search) {
-                subs.focus = Some(i);
+                subs.focus_on(Some(i));
                 self.viewer_tab = ViewerTab::Subtitles;
                 if let Some(p) = &mut self.player {
                     p.seek(subs.cues[i].start);
@@ -3945,6 +3962,7 @@ mod tests {
             search: String::new(),
             last_cue: None,
             focus: None,
+            scroll_to_focus: false,
         };
         assert_eq!(subs.find("拉我"), Some(1), "the first of equally good lines");
         assert_eq!(subs.find("拉我 center"), Some(2), "more words matched wins");
@@ -4309,6 +4327,26 @@ mod tests {
         assert!(!app.viewer_tags_open);
         assert!(app.clip_ui.sel.is_empty());
         assert!(app.text_cues_cache.is_none());
+    }
+
+    #[test]
+    fn the_subtitle_list_scrolls_to_a_found_line_once_and_then_scrolls_freely() {
+        let cue = |t: f64| crate::media::Cue { start: t, end: t + 1.0, text: "x".into() };
+        let mut subs = Subtitles {
+            id: "a".into(),
+            path: None,
+            cues: vec![cue(0.0), cue(5.0), cue(9.0)],
+            search: String::new(),
+            last_cue: None,
+            focus: None,
+            scroll_to_focus: false,
+        };
+        subs.focus_on(Some(2));
+        assert_eq!(subs.scroll_target(None), Some(2));
+        // The playhead is not on the line yet: the line stays marked, the list is free.
+        assert_eq!(subs.scroll_target(None), None, "the list was held on the found line");
+        assert_eq!(subs.focus, Some(2));
+        assert_eq!(subs.scroll_target(Some(1)), Some(1), "following playback still scrolls");
     }
 
     #[test]

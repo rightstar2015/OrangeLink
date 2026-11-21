@@ -24,6 +24,7 @@ cargo test --locked -- library:: importer:: config:: app::integrity:: app::tests
 | # | 保證 | 測試 |
 | --- | --- | --- |
 | R1 | 讀不懂的 config.json 會先保留成 `config.broken.json`,才改用預設值;不會被靜默蓋掉 | `config::tests::unreadable_config_is_kept_aside` |
+| R1b | 讀不到的 config.json(被防毒軟體鎖住、權限不足)在能讀取並另存成 `config.broken.json` 之前不會被覆蓋 | `config::tests::a_config_that_could_not_be_read_is_not_replaced_by_the_defaults` |
 | R2 | library.json 壞掉時,資料夾、智慧資料夾、標籤群組、欄位從最新的備份取回,壞檔保留成 `library.json.broken` | `importer::tests::damaged_library_json_comes_back_from_a_backup` |
 | R3 | 壞掉的 metadata.json 會被回報,可以從備份還原 | `importer::tests::damaged_metadata_is_reported_and_restored_from_backup` |
 | R4 | 資料夾樹有環或父資料夾不見時,仍然打得開,每個資料夾都看得到 | `library::tests::folder_loops_and_lost_parents_are_repaired` |

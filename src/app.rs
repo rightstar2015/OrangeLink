@@ -358,6 +358,10 @@ pub enum Action {
     CaptureFrame(String, f64),
     /// Show 2 to 4 pictures side by side.
     Compare(Vec<String>),
+    /// Remember this item's tags, folders and field values…
+    CopyMeta(String),
+    /// …and add them to these items.
+    PasteMeta(Vec<String>),
     /// Make the frame at `pos` seconds the video's thumbnail.
     FrameAsThumbnail(String, f64),
     BackupsDialog,
@@ -497,6 +501,40 @@ struct DupSearch {
 }
 
 /// Marked clips being encoded: the one in FFmpeg, and the ones waiting
+/// An item's organising, copied to give to others.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct MetaCopy {
+    pub tags: Vec<String>,
+    pub folders: Vec<String>,
+    pub fields: std::collections::BTreeMap<String, String>,
+}
+
+impl MetaCopy {
+    pub fn of(it: &Item) -> Self {
+        Self { tags: it.tags.clone(), folders: it.folders.clone(), fields: it.fields.clone() }
+    }
+
+    fn adds_to(&self, it: &Item, folders: &[String]) -> bool {
+        self.tags.iter().any(|t| !it.tags.contains(t)) || folders.iter().any(|f| !it.folders.contains(f)) || self.fields.iter().any(|(k, v)| it.fields.get(k) != Some(v))
+    }
+
+    fn apply(&self, it: &mut Item, folders: &[String]) {
+        for t in &self.tags {
+            if !it.tags.contains(t) {
+                it.tags.push(t.clone());
+            }
+        }
+        for f in folders {
+            if !it.folders.contains(f) {
+                it.folders.push(f.clone());
+            }
+        }
+        for (k, v) in &self.fields {
+            it.fields.insert(k.clone(), v.clone());
+        }
+    }
+}
+
 /// (item, clip, preset).
 #[derive(Default)]
 struct ClipExports {
@@ -814,6 +852,8 @@ pub struct App {
     pub folder_search: String,
     /// Ctrl+K's box, while open.
     pub palette: Option<palette::Palette>,
+    /// Tags, folders and field values copied from an item, to add to others.
+    pub meta_clipboard: Option<MetaCopy>,
     /// 設定 →「工具」's check of FFmpeg, Whisper, yt-dlp and deno.
     pub tools_check: tools_check::ToolsCheck,
     /// Custom field values typed in the multi-selection panel, by field name.
@@ -1075,6 +1115,7 @@ impl App {
             tag_search: String::new(),
             folder_search: String::new(),
             palette: None,
+            meta_clipboard: None,
             tools_check: Default::default(),
             field_drafts: HashMap::new(),
             last_flush: 0.0,
@@ -2340,6 +2381,17 @@ impl App {
     }
 
     /// Applies `f` to items, recording the previous state for undo.
+    /// Adds `copy`'s tags, folders and field values to these items (one undo
+    /// step); what they already have stays. Returns how many changed.
+    pub(super) fn paste_meta(&mut self, ids: &[String], copy: &MetaCopy) -> usize {
+        let Some(lib) = &self.lib else { return 0 };
+        // A folder deleted since the copy is left out.
+        let folders: Vec<String> = copy.folders.iter().filter(|f| lib.folder_name(f).is_some()).cloned().collect();
+        let changing: Vec<String> = ids.iter().filter(|id| lib.items.get(*id).is_some_and(|it| copy.adds_to(it, &folders))).cloned().collect();
+        self.edit_items(&changing, |it| copy.apply(it, &folders));
+        changing.len()
+    }
+
     fn edit_items(&mut self, ids: &[String], mut f: impl FnMut(&mut Item)) {
         let Some(lib) = &self.lib else { return };
         let before: Vec<Item> = ids.iter().filter_map(|id| lib.items.get(id).cloned()).collect();
@@ -4994,6 +5046,39 @@ mod tests {
         if let Some(run) = app.import.take() {
             run.cancel.store(true, Ordering::Relaxed);
         }
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn copied_tags_folders_and_fields_are_added_to_other_items() {
+        let root = std::env::temp_dir().join(format!("orangelink-metacopy-{}", crate::model::new_id()));
+        let mut app = App::with_config(&egui::Context::default(), Config::default());
+        let mut lib = Library::create(&root).unwrap();
+        let folder = lib.add_folder("表情包", None);
+        let mk = |id: &str, tags: &[&str]| -> Item {
+            serde_json::from_value(serde_json::json!({
+                "id": id, "name": id, "file_name": format!("{id}.png"), "ext": "png", "kind": "image", "size": 1,
+                "width": 1, "height": 1, "added_at": 0, "modified_at": 0, "tags": tags
+            }))
+            .unwrap()
+        };
+        let mut src = mk("src", &["boss", "笑"]);
+        src.folders.push(folder.clone());
+        src.folders.push("deleted-folder".into());
+        src.fields.insert("遊戲".into(), "艾爾登法環".into());
+        lib.insert_item(src);
+        lib.insert_item(mk("a", &["笑", "舊"]));
+        lib.insert_item(mk("b", &[]));
+        app.lib = Some(lib);
+        let copy = MetaCopy::of(&app.lib.as_ref().unwrap().items["src"]);
+        assert_eq!(app.paste_meta(&["a".into(), "b".into(), "src".into()], &copy), 2, "the source already has it all");
+        let a = &app.lib.as_ref().unwrap().items["a"];
+        assert_eq!(a.tags, ["笑", "舊", "boss"], "added, nothing taken away");
+        assert_eq!(a.folders, vec![folder], "a deleted folder isn't given");
+        assert_eq!(a.fields.get("遊戲").map(String::as_str), Some("艾爾登法環"));
+        app.restore_items(false);
+        assert!(app.lib.as_ref().unwrap().items["b"].tags.is_empty(), "one undo step");
+        assert_eq!(app.lib.as_ref().unwrap().items["a"].tags, ["笑", "舊"]);
         let _ = std::fs::remove_dir_all(&root);
     }
 

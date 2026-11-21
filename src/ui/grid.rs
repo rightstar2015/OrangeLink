@@ -903,6 +903,17 @@ impl App {
             self.act(Action::CopyFiles);
             ui.close_menu();
         }
+        if n == 1 && ui.button(t!("複製標籤、資料夾與欄位")).on_hover_text(t!("之後在其他素材上按「套用」，一次加上同樣的分類")).clicked() {
+            self.act(Action::CopyMeta(id.to_string()));
+            ui.close_menu();
+        }
+        if let Some(copy) = &self.meta_clipboard {
+            let tip = t!("加上：{what}（原有的保留，可復原）", what = copy.tags.iter().map(|t| format!("#{t}")).chain(copy.fields.iter().map(|(k, v)| format!("{k}={v}"))).collect::<Vec<_>>().join(" "));
+            if ui.button(t!("套用複製的標籤、資料夾與欄位")).on_hover_text(tip).clicked() {
+                self.act(Action::PasteMeta(targets.clone()));
+                ui.close_menu();
+            }
+        }
         let label = if n > 1 { t!("複製 {n} 個檔案路徑", n) } else { t!("複製檔案路徑").to_string() };
         let r = ui.button(label);
         if (if n > 1 { r.on_hover_text(t!("一行一個")) } else { r }).clicked() {

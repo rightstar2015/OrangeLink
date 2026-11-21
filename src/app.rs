@@ -4052,6 +4052,72 @@ mod tests {
         assert_eq!(quiet.update.new_version(), Some("v9.9.9"));
         assert!(quiet.dialog.is_none());
     }
+
+    /// An import under way, fed by the test instead of an importer thread.
+    fn fake_import(app: &mut App) -> std::sync::mpsc::Sender<ImportEvent> {
+        let (tx, rx) = std::sync::mpsc::channel();
+        app.import = Some(ImportRun {
+            rx,
+            cancel: Arc::new(AtomicBool::new(false)),
+            silent: false,
+            progress: Some((1, 4)),
+            imported: 0,
+            duplicates: 0,
+            failed: 0,
+            errors: Vec::new(),
+            new: Vec::new(),
+        });
+        tx
+    }
+
+    fn queue_import(app: &mut App, root: &std::path::Path) {
+        let ctx = app.egui_ctx.clone();
+        app.start_import(&ctx, vec![root.join("missing.png")], false, None, Vec::new(), false);
+    }
+
+    #[test]
+    fn queued_imports_show_in_the_jobs_list_and_are_cancelled_with_the_running_one() {
+        let root = std::env::temp_dir().join(format!("orangelink-importq-{}", crate::model::new_id()));
+        let mut app = App::with_config(&egui::Context::default(), Config::default());
+        app.lib = Some(Library::create(&root).unwrap());
+        let tx = fake_import(&mut app);
+        queue_import(&mut app, &root);
+        queue_import(&mut app, &root);
+        assert_eq!(app.import_queue.len(), 2, "a second import waits for the first");
+
+        let list = app.background_jobs();
+        let job = list.iter().find(|j| j.kind == jobs::JobKind::Import).expect("the import is listed");
+        assert!(job.can_cancel);
+        assert!(job.detail.contains("另有 2 批排隊"), "{}", job.detail);
+
+        app.cancel_job(jobs::JobKind::Import);
+        assert!(app.import.as_ref().unwrap().cancel.load(Ordering::Relaxed));
+        assert!(app.import_queue.is_empty());
+        // The cancelled importer still sends Finished; nothing queued starts after it.
+        tx.send(ImportEvent::Finished).unwrap();
+        app.poll_import();
+        assert!(app.import.is_none(), "no queued import started after the cancel");
+        assert!(app.background_jobs().iter().all(|j| j.kind != jobs::JobKind::Import));
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_finished_import_starts_the_next_queued_one() {
+        let root = std::env::temp_dir().join(format!("orangelink-importnext-{}", crate::model::new_id()));
+        let mut app = App::with_config(&egui::Context::default(), Config::default());
+        app.lib = Some(Library::create(&root).unwrap());
+        let tx = fake_import(&mut app);
+        queue_import(&mut app, &root);
+        tx.send(ImportEvent::Finished).unwrap();
+        app.poll_import();
+        assert!(app.import.is_some(), "the queued import started");
+        assert!(app.import_queue.is_empty());
+        if let Some(run) = app.import.take() {
+            run.cancel.store(true, Ordering::Relaxed);
+        }
+        let _ = std::fs::remove_dir_all(&root);
+    }
 }
 
 #[cfg(test)]

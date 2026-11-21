@@ -73,9 +73,20 @@ impl App {
     /// The jobs running now, in the order the popover lists them.
     pub fn background_jobs(&mut self) -> Vec<BgJob> {
         let mut jobs = Vec::new();
-        if let Some((done, total)) = self.import.as_ref().and_then(|r| r.progress) {
-            let (detail, progress) = if total == 0 { ("掃描檔案中…".to_string(), None) } else { (format!("{done}/{total}"), Some(done as f32 / total as f32)) };
-            jobs.push(BgJob::new(JobKind::Import, "匯入", detail, progress));
+        if let Some(run) = &self.import {
+            // Imports asked for while this one runs wait in the queue: they show
+            // here, so the one cancel button is seen to cover them too.
+            let queued = self.import_queue.len();
+            if run.progress.is_some() || queued > 0 {
+                let (mut detail, progress) = match run.progress {
+                    Some((done, total)) if total > 0 => (format!("{done}/{total}"), Some(done as f32 / total as f32)),
+                    _ => ("掃描檔案中…".to_string(), None),
+                };
+                if queued > 0 {
+                    detail += &format!("（另有 {queued} 批排隊）");
+                }
+                jobs.push(BgJob::new(JobKind::Import, "匯入", detail, progress));
+            }
         }
         jobs.extend(self.ytdlp_job());
         jobs.extend(self.whisper_job());
@@ -115,11 +126,7 @@ impl App {
 
     pub fn cancel_job(&mut self, kind: JobKind) {
         match kind {
-            JobKind::Import => {
-                if let Some(run) = &self.import {
-                    run.cancel.store(true, Ordering::Relaxed);
-                }
-            }
+            JobKind::Import => self.cancel_imports(),
             JobKind::Ytdlp => self.cancel_ytdlp(),
             JobKind::Whisper => self.cancel_whisper(),
             JobKind::SubtitleIndex => self.subtitle_index = None,
@@ -129,6 +136,18 @@ impl App {
             JobKind::FileCopy | JobKind::Capture => self.cancel_file_jobs(kind),
             JobKind::Integrity => self.cancel_integrity(),
             JobKind::Thumbnails => {}
+        }
+    }
+
+    /// Cancels the import under way and drops the ones queued behind it, so
+    /// none of them starts when the cancelled one finishes.
+    pub(super) fn cancel_imports(&mut self) {
+        if let Some(run) = &self.import {
+            run.cancel.store(true, Ordering::Relaxed);
+        }
+        let dropped = std::mem::take(&mut self.import_queue).len();
+        if dropped > 0 {
+            self.toast(format!("已取消 {dropped} 批排隊中的匯入"));
         }
     }
 

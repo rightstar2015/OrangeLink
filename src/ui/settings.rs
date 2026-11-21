@@ -644,7 +644,7 @@ impl App {
                 if f.show(ui, "自動更新 新版 檢查 GitHub 下載") {
                     ui.checkbox(&mut c.auto_update, "啟動時檢查 GitHub 新版本並跳出更新詢問");
                     ui.label(
-                        RichText::new("偵測到已通過簽章驗證的新版本時，會詢問是否前往 GitHub Releases 手動下載；取消勾選則僅在左下角狀態列顯示提示。")
+                        RichText::new("偵測到新版本時，會詢問是否前往 GitHub Releases 手動下載；取消勾選則僅在左下角狀態列顯示提示。")
                             .small()
                             .weak(),
                     );

@@ -75,7 +75,7 @@ OrangeLink 是 Windows 上的素材管理與影片剪輯工作流工具。你可
 | [FFmpeg](https://ffmpeg.org/) | 影片縮圖、播放備援、片段輸出、語音轉字幕（語音轉字幕需要內建 whisper 的 FFmpeg 8 以上） |
 | [yt-dlp](https://github.com/yt-dlp/yt-dlp) | 從網址下載影片、音訊與直播聊天室 |
 
-沒有安裝它們也能使用其他功能。新版本發布後，OrangeLink 會在狀態列提示，並可以在你關閉程式時自動安裝（只接受簽章驗證通過的版本，細節見 [docs/FEATURES.md](docs/FEATURES.md#更新與回報問題)）。
+沒有安裝它們也能使用其他功能。新版本發布後，OrangeLink 會提示有新版，請到 GitHub Releases 手動下載更新（細節見 [docs/FEATURES.md](docs/FEATURES.md#更新與回報問題)）。0.1.6 到 0.1.9 版不會提示之後的新版，請手動下載一次。
 
 ## 快速上手
 

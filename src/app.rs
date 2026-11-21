@@ -424,7 +424,7 @@ pub enum Dialog {
     FieldName { rename: Option<String>, name: String },
     /// What 「檢查資源庫」 found; fixes take their part out.
     Integrity(crate::library::Integrity),
-    /// A newer signed release was found on GitHub; asks whether to open the download page.
+    /// A newer release was found on GitHub; asks whether to open the download page.
     UpdatePrompt { tag: String },
 }
 
@@ -900,7 +900,7 @@ pub struct App {
     pub clip_ui: ClipUi,
     pub yt: ytdlp_ui::YtState,
     whisper: whisper_ui::WhisperState,
-    /// Checking for a newer signed release on GitHub (see `UpdateState`).
+    /// Checking for a newer release on GitHub (see `UpdateState`).
     pub update: UpdateState,
     /// The user chose to close despite a failed save: let the close through.
     force_close: bool,
@@ -3563,17 +3563,17 @@ impl App {
     }
 }
 
-/// Checking for a newer signed version on GitHub Releases.
+/// Checking for a newer version on GitHub Releases.
 ///
 /// ```text
 ///   Checking ──nothing newer, or no answer──▶ Latest
-///      └──newer signed release──▶ Available (asks user to open GitHub Releases)
+///      └──newer release───────▶ Available (asks user to open GitHub Releases)
 /// ```
 pub enum UpdateState {
     Checking(Receiver<Option<crate::update::Release>>),
     /// This is the newest version (or the check could not tell).
     Latest,
-    /// A newer signed release is published on GitHub Releases for manual download.
+    /// A newer release is published on GitHub Releases for manual download.
     Available { release: crate::update::Release },
 }
 
@@ -4583,12 +4583,7 @@ mod tests {
 
     #[test]
     fn update_check_prompts_instead_of_auto_downloading() {
-        let release = || crate::update::Release {
-            tag: "v9.9.9".into(),
-            asset: Some("OrangeLink-v9.9.9-windows-x64.zip".into()),
-            sha256: Some("a".repeat(64)),
-            sig: Some("sig".into()),
-        };
+        let release = || crate::update::Release { tag: "v9.9.9".into() };
 
         // With auto_update enabled, detecting a newer release opens Dialog::UpdatePrompt.
         let mut app = App::with_config(&egui::Context::default(), Config { auto_update: true, ..Config::default() });

@@ -61,12 +61,6 @@ jobs:
       - name: Test
         run: cargo test --locked
 
-      # The release signing tool is a crate of its own (not in the app's tree).
-      - name: Signing tool
-        run: |
-          cargo clippy --locked --all-targets --manifest-path tools/sign_release/Cargo.toml -- -D warnings
-          cargo test --locked --manifest-path tools/sign_release/Cargo.toml
-
   # Known vulnerabilities in the dependencies (RustSec advisory database).
   audit:
     runs-on: ubuntu-latest

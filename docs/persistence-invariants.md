@@ -18,6 +18,7 @@ cargo test --locked -- library:: importer:: config:: app::integrity:: app::tests
 | W2 | 設定檔整個取代,不會留下暫存檔;內容沒變就不寫檔(修改時間也不變) | `config::tests::save_replaces_the_file_whole` |
 | W3 | 關閉、重新開啟資源庫之後,變更和垃圾桶狀態都還在 | `importer::tests::changes_survive_reopening_and_trash_round_trips`、`import_dedupes_and_survives_reopen` |
 | W4 | 測試不會讀寫使用者真實的 config 和 log(`config_path`、`log::dir` 在測試中指向別處) | `app::mcp_tools::fuzz_tests::every_tool_survives_bad_arguments` 會 drop 一個 `App`,drop 時會存 config |
+| W5 | 校對字幕時寫回字幕檔:先寫暫存檔、`sync_all`、再 rename;第一次修改前原檔保留成 `<名稱>.orig.<副檔名>`(位元組完全相同,包括 GBK／Big5);內容沒變就不寫 | `media::tests::edited_subtitles_are_saved_as_utf8_and_the_gbk_original_is_kept` |
 
 ## 損壞與復原
 

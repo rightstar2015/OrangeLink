@@ -137,10 +137,18 @@ struct Clause {
     any: Vec<(bool, Atom)>,
 }
 
-/// Splits a search into words, keeping "quoted phrases" whole (quotes dropped)
-/// and a `-` right before a quote with its phrase. Each word says whether it
-/// was quoted.
-fn tokens(search: &str) -> Vec<(String, bool)> {
+/// A search word: the text, whether it was "quoted", and whether a `-` outside
+/// any quotes excludes it.
+struct Token {
+    word: String,
+    quoted: bool,
+    neg: bool,
+}
+
+/// Splits a search into words, keeping "quoted phrases" whole (quotes dropped).
+/// A `-` right before a word or a quote excludes it; one inside the quotes is
+/// part of the phrase (`"-14 dB"`).
+fn tokens(search: &str) -> Vec<Token> {
     let mut out = Vec::new();
     let mut chars = search.chars().peekable();
     while let Some(&c) = chars.peek() {
@@ -149,9 +157,9 @@ fn tokens(search: &str) -> Vec<(String, bool)> {
             continue;
         }
         let mut word = String::new();
-        if c == '-' {
+        let neg = c == '-';
+        if neg {
             chars.next();
-            word.push('-');
         }
         if matches!(chars.peek(), Some('"' | '“' | '「')) {
             let close = match chars.next() {
@@ -165,7 +173,7 @@ fn tokens(search: &str) -> Vec<(String, bool)> {
                 }
                 word.push(c);
             }
-            out.push((word, true));
+            out.push(Token { word, quoted: true, neg });
         } else {
             while let Some(&c) = chars.peek() {
                 if c.is_whitespace() {
@@ -174,7 +182,12 @@ fn tokens(search: &str) -> Vec<(String, bool)> {
                 word.push(c);
                 chars.next();
             }
-            out.push((word, false));
+            // A lone `-` is a word, not an exclusion of nothing.
+            if neg && word.is_empty() {
+                out.push(Token { word: "-".into(), quoted: false, neg: false });
+            } else {
+                out.push(Token { word, quoted: false, neg });
+            }
         }
     }
     out
@@ -245,7 +258,8 @@ fn special(word: &str) -> Special {
         let found = [(">=", Cmp::Ge), ("<=", Cmp::Le), (">", Cmp::Gt), ("<", Cmp::Lt), ("=", Cmp::Eq), (":", Cmp::Eq), ("：", Cmp::Eq)]
             .iter()
             .find_map(|(op, c)| rest.strip_prefix(op).map(|v| (*c, v)))
-            .or_else(|| (key == "★" && !rest.is_empty()).then_some((Cmp::Ge, rest)));
+            // `★3` is `★>=3`; `★精選` is just a word.
+            .or_else(|| (key == "★" && rest.starts_with(|c: char| c.is_ascii_digit())).then_some((Cmp::Ge, rest)));
         // `wedding`, `height`: a word that only starts like a key.
         let Some((cmp, value)) = found else { return Special::Plain };
         let v = if nk == NumKey::Duration { parse_duration(value) } else { value.parse::<f64>().ok() };
@@ -276,15 +290,12 @@ fn is_plain_word(word: &str) -> bool {
 fn parse(search: &str) -> Vec<Clause> {
     let mut clauses: Vec<Clause> = Vec::new();
     let mut join = false;
-    for (word, quoted) in tokens(search) {
-        if word == "OR" && !quoted {
+    for Token { word, quoted, neg } in tokens(search) {
+        if word == "OR" && !quoted && !neg {
             join = !clauses.is_empty();
             continue;
         }
-        let (neg, body) = match word.strip_prefix('-') {
-            Some(b) if !b.is_empty() => (true, b),
-            _ => (false, word.as_str()),
-        };
+        let body = word.as_str();
         if body.is_empty() {
             continue;
         }
@@ -308,9 +319,9 @@ fn parse(search: &str) -> Vec<Clause> {
 pub fn search_words(search: &str) -> Vec<String> {
     tokens(search)
         .into_iter()
-        .filter(|(w, q)| *q || (w != "OR" && !w.starts_with('-') && !w.contains([':', '：']) && is_plain_word(&w.to_lowercase())))
-        .filter(|(w, _)| !w.starts_with('-') && !w.is_empty())
-        .map(|(w, _)| w.to_lowercase())
+        .filter(|t| !t.neg && !t.word.is_empty() && t.word != "-")
+        .filter(|t| t.quoted || (t.word != "OR" && !t.word.contains([':', '：']) && is_plain_word(&t.word.to_lowercase())))
+        .map(|t| t.word.to_lowercase())
         .collect()
 }
 
@@ -363,7 +374,9 @@ pub fn fuzzy_score(word: &str, text: &str) -> Option<i32> {
 /// A search with no special forms (`-`, quotes, OR, `#`, `欄位:值`, `★>=3`…),
 /// which the shortcut search may match loosely.
 pub fn is_plain_search(search: &str) -> bool {
-    tokens(search).iter().all(|(w, quoted)| !quoted && w != "OR" && !w.starts_with(['-', '#']) && !w.contains([':', '：']) && is_plain_word(&w.to_lowercase()))
+    tokens(search)
+        .iter()
+        .all(|t| !t.quoted && !t.neg && t.word != "OR" && !t.word.starts_with('#') && !t.word.contains([':', '：']) && is_plain_word(&t.word.to_lowercase()))
 }
 
 /// The fuzzy score of an item for every word of `search`: each word scored on
@@ -517,6 +530,22 @@ mod tests {
         assert!(fuzzy_item_score("遊戲", &it).is_some(), "tags too");
         assert!(fuzzy_item_score("精華 zzz", &it).is_none(), "every word");
         assert!(is_plain_search("demo 精華") && !is_plain_search("demo -草稿") && !is_plain_search("ext:mp4") && !is_plain_search("#遊戲"));
+    }
+
+    #[test]
+    fn a_dash_inside_quotes_and_a_star_before_a_word_are_searched_for() {
+        let named = |name: &str| -> Item {
+            serde_json::from_value(serde_json::json!({
+                "id": name, "name": name, "file_name": "a.png", "ext": "png", "size": 1, "width": 1, "height": 1, "added_at": 0, "modified_at": 0, "rating": 4
+            }))
+            .unwrap()
+        };
+        let items = vec![named("音量 -14 dB 版本"), named("★精選 合輯"), named("一般")];
+        assert_eq!(hits(&items, r#""-14 dB""#), ["音量 -14 dB 版本"], "the phrase, not everything but it");
+        assert_eq!(hits(&items, r#"-"-14 dB""#), ["★精選 合輯", "一般"], "a dash before the quotes still excludes");
+        assert_eq!(hits(&items, "★精選"), ["★精選 合輯"]);
+        assert_eq!(hits(&items, "★4").len(), 3, "★ and a number is still a rating");
+        assert_eq!(search_words(r#""-14 dB" -草稿"#), ["-14 db"]);
     }
 
     #[test]

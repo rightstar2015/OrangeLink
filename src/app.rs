@@ -2569,15 +2569,15 @@ impl App {
         }
         if let Some(p) = &mut self.preview {
             if p.id == id {
-                if let Some(rx) = &p.gif_rx {
-                    if let Ok(frames) = rx.try_recv() {
+                if p.gif_rx.is_some() {
+                    // A decoder that died leaves the still thumbnail, not a wait forever.
+                    if let Some(Ok(frames)) = state::take(&mut p.gif_rx).finished() {
                         p.frames = frames
                             .into_iter()
                             .enumerate()
                             .map(|(i, (img, d))| (ctx.load_texture(format!("hover-{i}"), img, egui::TextureOptions::LINEAR), d))
                             .collect();
                         p.start = self.now;
-                        p.gif_rx = None;
                     }
                     ctx.request_repaint_after(std::time::Duration::from_millis(50));
                 }

@@ -33,6 +33,29 @@ pub fn poll<T>(rx: &Receiver<T>) -> Reply<T> {
     }
 }
 
+impl<T> Reply<T> {
+    /// None while still working; otherwise the answer, or `LOST` when the
+    /// thread ended without one.
+    pub fn finished(self) -> Option<Result<T, &'static str>> {
+        match self {
+            Reply::Pending => None,
+            Reply::Done(v) => Some(Ok(v)),
+            Reply::Lost => Some(Err(LOST)),
+        }
+    }
+}
+
+/// Polls a one-answer job's channel and empties `slot` once the job is over,
+/// whether it answered or died. Pending when there is no job.
+pub fn take<T>(slot: &mut Option<Receiver<T>>) -> Reply<T> {
+    let Some(rx) = slot else { return Reply::Pending };
+    let reply = poll(rx);
+    if !matches!(reply, Reply::Pending) {
+        *slot = None;
+    }
+    reply
+}
+
 /// Said when a worker thread ended without answering. The panic itself is in the log.
 pub const LOST: &str = "背景工作意外結束（詳見記錄）";
 
@@ -233,6 +256,24 @@ mod tests {
 
     fn start_ok(port: u16) -> Result<u16, String> {
         Ok(port)
+    }
+
+    #[test]
+    fn a_job_whose_thread_died_is_over_and_failed() {
+        let (tx, rx) = std::sync::mpsc::channel::<u32>();
+        let mut slot = Some(rx);
+        assert!(take(&mut slot).finished().is_none(), "still working");
+        assert!(slot.is_some());
+        drop(tx); // the thread panicked before answering
+        assert_eq!(take(&mut slot).finished(), Some(Err(LOST)));
+        assert!(slot.is_none(), "no longer shown as running");
+
+        let (tx, rx) = std::sync::mpsc::channel::<u32>();
+        let mut slot = Some(rx);
+        tx.send(7).unwrap();
+        assert_eq!(take(&mut slot).finished(), Some(Ok(7)));
+        assert!(slot.is_none());
+        assert!(take(&mut slot).finished().is_none(), "no job");
     }
 
     #[test]

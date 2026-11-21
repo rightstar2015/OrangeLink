@@ -109,9 +109,8 @@ impl App {
 
     pub(super) fn poll_signals(&mut self) {
         let Some(s) = &mut self.signals else { return };
-        if let Some(chat) = s.chat_rx.as_ref().and_then(|rx| rx.try_recv().ok()) {
-            s.chat_rx = None;
-            (s.chat, s.chat_hits) = chat.map_or((None, None), |(c, h)| (Some(c), Some(h)));
+        if let Some(chat) = super::state::take(&mut s.chat_rx).finished() {
+            (s.chat, s.chat_hits) = chat.ok().flatten().map_or((None, None), |(c, h)| (Some(c), Some(h)));
         }
         let Some(job) = &s.loud_job else { return };
         let result = match super::state::poll(&job.rx) {

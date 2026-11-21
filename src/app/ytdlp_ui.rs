@@ -182,38 +182,43 @@ impl App {
         c.save();
     }
 
-    pub(super) fn poll_ytdlp(&mut self, ctx: &egui::Context) {
-        if let Some(check) = self.yt.check_rx.as_ref().and_then(|rx| rx.try_recv().ok()) {
-            self.yt.check_rx = None;
-            let yt = &mut self.yt;
-            match &check.ytdlp {
-                Some(p) => yt.log(format!("yt-dlp：{}（{}）", p.display(), check.version.as_deref().unwrap_or("無法執行"))),
-                None => yt.log("找不到 yt-dlp"),
-            }
-            yt.log(format!("最新版本：{}", check.latest.as_deref().unwrap_or("無法檢查（網路？）")));
-            match &self.ffmpeg_dir {
-                Some(d) if check.ffmpeg_ok => yt.log(format!("FFmpeg / FFprobe：{}", d.display())),
-                _ => yt.log("找不到可用的 FFmpeg / FFprobe（mp4 合併與 mp3 轉檔需要）"),
-            }
-            match &check.deno {
-                Some(d) => yt.log(format!("JavaScript 執行環境（deno）：{}", d.display())),
-                None => yt.log("找不到 deno：YouTube 需要它才能取得完整格式，建議按「安裝 deno」"),
-            }
-            let msg = if check.ytdlp.is_none() {
-                ("尚未安裝 yt-dlp，請按「安裝 yt-dlp」".to_string(), true)
-            } else if check.update_available() {
-                (format!("yt-dlp 有新版本 {}，建議先更新", check.latest.as_deref().unwrap_or_default()), true)
-            } else if check.deno.is_none() {
-                ("工具檢查完成；未安裝 deno，YouTube 可能缺少部分格式".to_string(), true)
-            } else {
-                ("工具檢查完成。".to_string(), false)
-            };
-            yt.set_status(msg.0, msg.1);
-            yt.check = Some(check);
+    /// Logs what the tool check found and says what to do next.
+    fn show_tool_check(&mut self, check: Check) {
+        let yt = &mut self.yt;
+        match &check.ytdlp {
+            Some(p) => yt.log(format!("yt-dlp：{}（{}）", p.display(), check.version.as_deref().unwrap_or("無法執行"))),
+            None => yt.log("找不到 yt-dlp"),
         }
-        if let Some(result) = self.yt.install_rx.as_ref().and_then(|rx| rx.try_recv().ok()) {
-            self.yt.install_rx = None;
-            match result {
+        yt.log(format!("最新版本：{}", check.latest.as_deref().unwrap_or("無法檢查（網路？）")));
+        match &self.ffmpeg_dir {
+            Some(d) if check.ffmpeg_ok => yt.log(format!("FFmpeg / FFprobe：{}", d.display())),
+            _ => yt.log("找不到可用的 FFmpeg / FFprobe（mp4 合併與 mp3 轉檔需要）"),
+        }
+        match &check.deno {
+            Some(d) => yt.log(format!("JavaScript 執行環境（deno）：{}", d.display())),
+            None => yt.log("找不到 deno：YouTube 需要它才能取得完整格式，建議按「安裝 deno」"),
+        }
+        let msg = if check.ytdlp.is_none() {
+            ("尚未安裝 yt-dlp，請按「安裝 yt-dlp」".to_string(), true)
+        } else if check.update_available() {
+            (format!("yt-dlp 有新版本 {}，建議先更新", check.latest.as_deref().unwrap_or_default()), true)
+        } else if check.deno.is_none() {
+            ("工具檢查完成；未安裝 deno，YouTube 可能缺少部分格式".to_string(), true)
+        } else {
+            ("工具檢查完成。".to_string(), false)
+        };
+        yt.set_status(msg.0, msg.1);
+        yt.check = Some(check);
+    }
+
+    pub(super) fn poll_ytdlp(&mut self, ctx: &egui::Context) {
+        match super::state::take(&mut self.yt.check_rx).finished() {
+            Some(Ok(check)) => self.show_tool_check(check),
+            Some(Err(lost)) => self.yt.set_status(format!("工具檢查失敗：{lost}"), true),
+            None => {}
+        }
+        if let Some(result) = super::state::take(&mut self.yt.install_rx).finished() {
+            match result.map_err(str::to_string).and_then(|r| r) {
                 Ok(path) => {
                     self.yt.set_status(format!("yt-dlp 已更新：{}", path.display()), false);
                     self.start_tool_check();
@@ -221,10 +226,9 @@ impl App {
                 Err(e) => self.yt.set_status(format!("更新 yt-dlp 失敗：{e}"), true),
             }
         }
-        if let Some(result) = self.yt.probe_rx.as_ref().and_then(|rx| rx.try_recv().ok()) {
-            self.yt.probe_rx = None;
+        if let Some(result) = super::state::take(&mut self.yt.probe_rx).finished() {
             let yt = &mut self.yt;
-            match result {
+            match result.map_err(str::to_string).and_then(|r| r) {
                 Ok(info) => {
                     let mut msg = format!("已取得：{}", info.title);
                     if let Some(d) = info.duration {
@@ -244,7 +248,6 @@ impl App {
                 Err(e) => yt.set_status(format!("取得影片資訊失敗：{e}"), true),
             }
         }
-
         let mut finished = None;
         if let Some(run) = &mut self.yt.running {
             let mut lines = Vec::new();

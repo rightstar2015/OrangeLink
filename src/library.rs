@@ -462,8 +462,11 @@ impl Library {
         self.revision += 1;
     }
 
-    /// Points a missing/linked item at a new file location.
+    /// Points a missing/linked item at a new file location, spelled as an import
+    /// would (no `..`, 8.3 names or `\\?\`), so duplicate checks and watch
+    /// folders recognise the file.
     pub fn relink(&mut self, id: &str, path: PathBuf) {
+        let path = crate::importer::dunce_abs(&path).unwrap_or(path);
         if let Some(item) = self.items.get_mut(id) {
             item.source = Some(path);
             self.missing.remove(id);
@@ -1730,6 +1733,20 @@ mod tests {
         assert!(lib.meta.folders.iter().all(|f| f.id != new));
         assert_eq!(lib.items["b"].folders, std::slice::from_ref(&old), "the folder made after the backup is gone");
         assert_eq!(lib.items["a"].folders, [old]);
+        drop(lib);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_relinked_file_is_spelled_as_an_import_would() {
+        let root = std::env::temp_dir().join(format!("orangelink-relink-{}", new_id()));
+        let mut lib = Library::create(&root.join("lib")).unwrap();
+        fs::create_dir_all(root.join("moved").join("sub")).unwrap();
+        fs::write(root.join("moved").join("f.png"), "x").unwrap();
+        lib.insert_item(item("a"));
+        lib.relink("a", root.join("moved").join("sub").join("..").join("f.png"));
+        let want = crate::importer::dunce_abs(&root.join("moved").join("f.png")).unwrap();
+        assert_eq!(lib.items["a"].source.as_deref(), Some(want.as_path()));
         drop(lib);
         let _ = fs::remove_dir_all(&root);
     }

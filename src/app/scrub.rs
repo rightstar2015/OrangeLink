@@ -108,7 +108,8 @@ impl App {
         } else {
             self.scrub.failed.insert(step);
         }
-        let duration = self.player.as_ref().map_or(0.0, |p| p.duration);
+        // Without a player the length is unknown; the next hover asks again.
+        let Some(duration) = self.player.as_ref().map(|p| p.duration) else { return };
         self.start_scrub_grab(duration);
     }
 }

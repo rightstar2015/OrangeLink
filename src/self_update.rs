@@ -1,11 +1,13 @@
-//! Installing a new version without an installer. OrangeLink ships as a zip, so:
-//! check the release key's signature on the version and SHA-256 in `latest.json`,
-//! download the zip it names into `%LOCALAPPDATA%\OrangeLink\update`, check it
-//! against that SHA-256, unpack it, and when OrangeLink closes start
-//! the new exe with `--apply-update`: it waits for the old one to exit, renames it
-//! to `.old`, copies itself into its place and, when asked, starts it again.
+//! Release signatures, Windows' curl, and the install step of the old
+//! self-update.
 //!
-//! Only for an installed copy: an exe somewhere under a `target` folder is a
+//! Since 0.1.8 OrangeLink only tells the user about a new signed release
+//! (`update.rs`); it no longer downloads or installs one. Copies up to 0.1.7
+//! still do: they download the new zip into `%LOCALAPPDATA%\OrangeLink\update`
+//! and, when they close, start the new exe with `--apply-update <target>`, which
+//! waits for the old one to exit, renames it to `.old`, copies itself into its
+//! place and, when asked, starts it again. That step (`apply`) stays so those
+//! copies can update to this version; an exe under a `target` folder is a
 //! development build and is never replaced.
 //!
 //! The flow follows Prime Files (`crates/nohrs-pages/src/updater.rs`), MIT License,
@@ -14,11 +16,6 @@
 use std::{
     path::{Path, PathBuf},
     time::{Duration, Instant},
-};
-#[cfg(test)]
-use std::{
-    process::Stdio,
-    sync::atomic::{AtomicBool, Ordering},
 };
 
 /// This build's version, kept in the exe where `tools/sign_release` finds it:
@@ -55,81 +52,6 @@ pub fn clean_up() {
     if let Some(root) = staging_root().filter(|r| !exe.starts_with(r)) {
         let _ = std::fs::remove_dir_all(root);
     }
-}
-
-/// Shown when a release's signature does not check. Whoever made `latest.json`
-/// fail may also have replaced the zip on the download page, so this never
-/// suggests installing by hand.
-#[cfg(test)]
-const SIGNATURE_FAILED: &str = "新版的簽章驗證失敗，請勿安裝，並請回報（「說明」→「回報問題」）";
-
-/// Shown when `latest.json` names something that is not a zip asset.
-#[cfg(test)]
-const BAD_RELEASE_INFO: &str = "新版的更新資訊不正確（檔名不合法），請勿安裝，並請回報（「說明」→「回報問題」）";
-
-/// Downloads, checks and unpacks `tag`'s zip (release asset `asset` on this
-/// repository's GitHub Releases, SHA-256 `sha256`, release signature `sig`).
-/// Kept under `#[cfg(test)]` to verify signature and zip integrity guarantees
-/// while the app directs users to download new releases manually from GitHub.
-#[cfg(test)]
-pub fn download(tag: &str, asset: &str, sha256: &str, sig: &str, cancel: &AtomicBool) -> Result<PathBuf, String> {
-    if !crate::update::is_asset_name(asset) {
-        return Err(BAD_RELEASE_INFO.into());
-    }
-    // Whoever can change latest.json can change its hash too; only the release key
-    // can sign one.
-    if !signature_ok(&release_keys(), tag, sha256, sig) {
-        return Err(SIGNATURE_FAILED.into());
-    }
-    let root = staging_root().ok_or("找不到 LOCALAPPDATA")?;
-    let dir = root.join(tag);
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).map_err(|e| format!("無法建立暫存資料夾：{e}"))?;
-    let zip = dir.join("OrangeLink.zip");
-    let url = crate::update::asset_url(tag, asset);
-    let mut cmd = curl(ZIP_MAX)?;
-    cmd.args(["-L", "--fail", "-sS", "--max-time", "900", "-o"]).arg(&zip).arg(&url).stdout(Stdio::null()).stderr(Stdio::null());
-    let mut child = cmd.spawn().map_err(|e| format!("無法執行 curl：{e}"))?;
-    // curl has exited on every way out of here, so the folder can be deleted.
-    let finished = wait_or_cancel(&mut child, cancel);
-    match finished {
-        Ok(status) if status.success() => {}
-        Ok(status) => {
-            let _ = std::fs::remove_dir_all(&dir);
-            return Err(format!("下載更新失敗（curl 結束代碼 {:?}）", status.code()));
-        }
-        Err(e) => {
-            let _ = std::fs::remove_dir_all(&dir);
-            return Err(e);
-        }
-    }
-    // A proxy or captive portal may answer with a web page instead of the file.
-    let mut magic = [0u8; 2];
-    let is_zip = std::fs::File::open(&zip).and_then(|mut f| std::io::Read::read_exact(&mut f, &mut magic)).is_ok() && &magic == b"PK";
-    if !is_zip {
-        let _ = std::fs::remove_dir_all(&dir);
-        return Err("下載到的不是 zip（網路可能被攔截，或需要先登入網路）".into());
-    }
-    let got = sha256_file(&zip).map_err(|e| format!("讀不到下載的檔案：{e}"))?;
-    if !got.eq_ignore_ascii_case(sha256.trim()) {
-        let _ = std::fs::remove_dir_all(&dir);
-        return Err(format!("更新檔的 SHA-256 不符，已丟棄（應為 {}…，實際 {}…）", &sha256.trim()[..sha256.trim().len().min(12)], &got[..12]));
-    }
-    // Windows 10 and later ship bsdtar, which unpacks zips.
-    let out = dir.join("unpacked");
-    std::fs::create_dir_all(&out).map_err(|e| e.to_string())?;
-    let mut tar = crate::process::hidden(system_tool("tar")?);
-    tar.arg("-xf").arg(&zip).arg("-C").arg(&out).stdout(Stdio::null()).stderr(Stdio::null());
-    let ok = tar.status().is_ok_and(|s| s.success());
-    if !ok {
-        return Err("無法解壓縮更新檔".into());
-    }
-    walkdir::WalkDir::new(&out)
-        .into_iter()
-        .filter_map(Result::ok)
-        .map(|e| e.into_path())
-        .find(|p| p.file_name().is_some_and(|n| n.eq_ignore_ascii_case("OrangeLink.exe")))
-        .ok_or_else(|| "更新檔裡沒有 OrangeLink.exe".to_string())
 }
 
 /// `--apply-update <target> [--relaunch]`, run by the new exe from the staging
@@ -187,29 +109,6 @@ fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
-/// Waits for `child`, polling `cancel`. On cancel, or when the wait itself
-/// fails, the child is killed and waited for: a process that is still exiting
-/// keeps its files open, and Windows then refuses to delete them.
-#[cfg(test)]
-fn wait_or_cancel(child: &mut std::process::Child, cancel: &AtomicBool) -> Result<std::process::ExitStatus, String> {
-    loop {
-        if cancel.load(Ordering::Relaxed) {
-            let _ = child.kill();
-            let _ = child.wait();
-            return Err("已取消下載更新".into());
-        }
-        match child.try_wait() {
-            Ok(Some(status)) => return Ok(status),
-            Ok(None) => std::thread::sleep(Duration::from_millis(200)),
-            Err(e) => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err(format!("下載更新失敗：{e}"));
-            }
-        }
-    }
-}
-
 /// The copy of `curl` or `tar` that ships with Windows (System32). There is no
 /// fallback to the bare name: Windows looks for that next to OrangeLink's exe
 /// and on PATH first, so any `curl.exe` placed there would run.
@@ -226,10 +125,6 @@ fn system_tool_in(system_root: Option<&std::ffi::OsStr>, name: &str) -> Result<P
 
 /// curl arguments that keep a download, and every redirect, on HTTPS.
 pub const HTTPS_ONLY: [&str; 4] = ["--proto", "=https", "--proto-redir", "=https"];
-
-/// Largest update zip that is downloaded (a release is about 15 MB).
-#[cfg(test)]
-const ZIP_MAX: u64 = 200 * 1024 * 1024;
 
 /// Windows' curl, ready for a download of at most `max_bytes`: `-q` (which only
 /// works as the first argument) so no `_curlrc` in the user's folders can add
@@ -318,20 +213,6 @@ mod tests {
         assert!(!signature_ok(&[key], "v0.2.0", &sha, ""), "no signature");
     }
 
-    /// SECURITY.md quotes what the user sees when an update is refused.
-    #[test]
-    fn security_md_quotes_the_update_refusals_as_shown() {
-        let doc = include_str!("../SECURITY.md");
-        let signature = "新版的簽章驗證失敗，請勿安裝，並請回報";
-        assert!(SIGNATURE_FAILED.starts_with(signature));
-        assert!(doc.contains(&format!("「{signature}」")), "the bad-signature message");
-        // A zip that does not match its hash is thrown away, not "do not install".
-        let hash = "更新檔的 SHA-256 不符，已丟棄";
-        assert!(include_str!("self_update.rs").contains(&format!("\"{hash}（")), "the message download() shows");
-        assert!(doc.contains(&format!("「{hash}」")), "the hash-mismatch message");
-        assert!(!doc.contains("簽章或雜湊不對就不安裝,並提示"), "the old sentence gave one message for both");
-    }
-
     #[test]
     fn the_shipped_key_list_is_valid() {
         let keys = crate::release_keys::parse(RELEASE_KEYS_TXT).expect("release_keys.txt");
@@ -366,36 +247,6 @@ mod tests {
         assert!(!signature_ok(&both, "v0.3.0", &sha, &sign(&stranger)), "a key not in the list");
         assert!(!signature_ok(&[*new.pk], "v0.3.0", &sha, &sign(&old)), "a key dropped from the list");
         assert!(!signature_ok(&[], "v0.3.0", &sha, &sign(&old)), "no keys, no update");
-    }
-
-    #[test]
-    fn a_release_without_a_good_signature_or_name_is_not_downloaded() {
-        let cancel = AtomicBool::new(false);
-        let sha = "ab".repeat(32);
-        // Both refusals come before anything is created or fetched.
-        let err = download("v99.0.0", "OrangeLink.zip", &sha, "c2ln", &cancel).unwrap_err();
-        assert!(err.contains("簽章"), "{err}");
-        let kp = ed25519_compact::KeyPair::from_seed(ed25519_compact::Seed::new([7; 32]));
-        use base64::Engine;
-        let other = base64::engine::general_purpose::STANDARD.encode(kp.sk.sign(signed_message("99.0.0", &sha), None).as_ref());
-        assert!(download("v99.0.0", "OrangeLink.zip", &sha, &other, &cancel).unwrap_err().contains("簽章"), "signed with another key");
-        for bad in ["../OrangeLink.zip", "https://example.com/x.zip", "OrangeLink.exe"] {
-            assert!(download("v99.0.0", bad, &sha, "c2ln", &cancel).unwrap_err().contains("檔名"), "{bad}");
-        }
-    }
-
-    #[test]
-    fn the_signature_failure_message_does_not_suggest_a_manual_install() {
-        let cancel = AtomicBool::new(false);
-        let sha = "ab".repeat(32);
-        let bad_sig = download("v99.0.0", "OrangeLink.zip", &sha, "c2ln", &cancel).unwrap_err();
-        let bad_name = download("v99.0.0", "../x.zip", &sha, "c2ln", &cancel).unwrap_err();
-        for err in [bad_sig, bad_name] {
-            assert!(err.contains("請勿安裝") && err.contains("回報"), "{err}");
-            for hint in ["手動", "下載頁", "下載頁面"] {
-                assert!(!err.contains(hint), "{err} points to a manual install");
-            }
-        }
     }
 
     #[test]
@@ -434,27 +285,12 @@ mod tests {
 
     #[test]
     fn downloads_are_limited_in_size_and_redirects() {
-        let args: Vec<String> = curl(ZIP_MAX).unwrap().get_args().map(|a| a.to_string_lossy().into_owned()).collect();
+        let args: Vec<String> = curl(200 * 1024 * 1024).unwrap().get_args().map(|a| a.to_string_lossy().into_owned()).collect();
         let after = |flag: &str| args.iter().position(|a| a == flag).map(|i| args[i + 1].as_str());
         assert_eq!(after("--max-filesize"), Some("209715200"));
         assert_eq!(after("--max-redirs"), Some("5"));
         assert_eq!(after("--proto"), Some("=https"));
         assert_eq!(after("--proto-redir"), Some("=https"));
-    }
-
-    #[test]
-    fn cancel_waits_for_curl_to_exit() {
-        let dir = std::env::temp_dir().join(format!("orangelink-cancel-{}", crate::model::new_id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        // A child that holds a file open the way curl holds the zip it writes.
-        let out = dir.join("held.txt");
-        let file = std::fs::File::create(&out).unwrap();
-        let mut child = crate::process::hidden("ping").args(["-n", "30", "127.0.0.1"]).stdout(file).spawn().unwrap();
-        let cancel = AtomicBool::new(true);
-        assert!(wait_or_cancel(&mut child, &cancel).unwrap_err().contains("取消"));
-        // Gone, not merely told to go: the file it held can be deleted at once.
-        assert!(child.try_wait().unwrap().is_some());
-        std::fs::remove_dir_all(&dir).expect("the cancelled child still holds its file");
     }
 
     #[test]

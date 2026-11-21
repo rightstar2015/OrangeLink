@@ -56,38 +56,47 @@ pub fn has_filter(ffmpeg_dir: &Path) -> bool {
 
 pub fn download_model(name: &str) -> Result<(), String> {
     let dir = models_dir().ok_or("找不到 APPDATA 資料夾")?;
-    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let file = model_file(name);
-    let part = dir.join(format!("{file}.part"));
     let url = format!("https://huggingface.co/ggerganov/whisper.cpp/resolve/main/{file}");
     // The largest model is about 3 GB.
     let curl = || crate::self_update::curl(8 * 1024 * 1024 * 1024);
-    let out = curl()?
-        .args(["-L", "--fail", "-sS", "--max-time", "3600", "-o"])
-        .arg(&part)
-        .arg(url)
-        .output()
-        .map_err(|e| format!("無法執行 curl：{e}"))?;
-    if !out.status.success() {
+    let listing = || curl().ok()?.args(["-L", "--fail", "-sS", "--max-time", "30", MODELS_API]).output().ok().filter(|o| o.status.success()).map(|o| o.stdout);
+    let fetch = |part: &Path| {
+        let out = curl()?
+            .args(["-L", "--fail", "-sS", "--max-time", "3600", "-o"])
+            .arg(part)
+            .arg(&url)
+            .output()
+            .map_err(|e| format!("無法執行 curl：{e}"))?;
+        if out.status.success() {
+            Ok(())
+        } else {
+            Err(String::from_utf8_lossy(&out.stderr).trim().to_string())
+        }
+    };
+    download_verified(&dir, &file, listing, fetch)
+}
+
+/// Downloads `file` into `dir` with `fetch` and keeps it only when it matches the
+/// SHA-256 Hugging Face lists for it (its LFS id; `listing` reads the list). The
+/// hash is read first: when it can't be had, nothing is downloaded (a model is up
+/// to 3 GB), and a cut-off or damaged download is caught here, not when the
+/// transcription fails.
+fn download_verified(dir: &Path, file: &str, listing: impl FnOnce() -> Option<Vec<u8>>, fetch: impl FnOnce(&Path) -> Result<(), String>) -> Result<(), String> {
+    let Some(want) = listing().and_then(|l| lfs_hash(&l, file)) else {
+        crate::log::error("whisper", format!("讀不到 {file} 公布的 SHA-256，沒有下載"));
+        return Err(format!("無法取得 Hugging Face 公布的 {file} SHA-256，沒有下載，請稍後重試"));
+    };
+    std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    let part = dir.join(format!("{file}.part"));
+    if let Err(e) = fetch(&part) {
         let _ = std::fs::remove_file(&part);
-        return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
+        return Err(e);
     }
-    // Hugging Face lists each model's SHA-256 (its LFS id): a cut-off or damaged
-    // download is caught here, not when the transcription fails.
-    let listing = curl()?.args(["-L", "--fail", "-sS", "--max-time", "30", MODELS_API]).output().ok().filter(|o| o.status.success());
-    match listing.and_then(|o| lfs_hash(&o.stdout, &file)) {
-        Some(want) => {
-            let got = crate::self_update::sha256_file(&part).map_err(|e| e.to_string())?;
-            if !got.eq_ignore_ascii_case(&want) {
-                let _ = std::fs::remove_file(&part);
-                return Err(format!("下載的 {file} 和 Hugging Face 公布的 SHA-256 不符，已刪除，請重試"));
-            }
-        }
-        None => {
-            let _ = std::fs::remove_file(&part);
-            crate::log::error("whisper", format!("讀不到 {file} 公布的 SHA-256，已拒絕使用未驗證的檔案"));
-            return Err(format!("無法取得 Hugging Face 公布的 {file} SHA-256，基於安全已刪除暫存檔，請稍後重試"));
-        }
+    let got = crate::self_update::sha256_file(&part).map_err(|e| e.to_string())?;
+    if !got.eq_ignore_ascii_case(&want) {
+        let _ = std::fs::remove_file(&part);
+        return Err(format!("下載的 {file} 和 Hugging Face 公布的 SHA-256 不符，已刪除，請重試"));
     }
     std::fs::rename(&part, dir.join(file)).map_err(|e| e.to_string())
 }
@@ -257,6 +266,39 @@ fn to_srt(cues: &[Cue]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_model_is_not_downloaded_when_its_published_hash_cannot_be_read() {
+        let dir = std::env::temp_dir().join(format!("orangelink-whisper-dl-{}", crate::model::new_id()));
+        let file = "ggml-small.bin";
+        let data = b"model bytes".to_vec();
+        let sha = crate::self_update::sha256_hex(&data);
+        let listing = |oid: &str| format!(r#"[{{"path": "{file}", "lfs": {{"oid": "{oid}"}}}}]"#).into_bytes();
+        let fetched = std::cell::Cell::new(0);
+        let fetch = |part: &Path| {
+            fetched.set(fetched.get() + 1);
+            std::fs::write(part, &data).map_err(|e| e.to_string())
+        };
+
+        // No listing, or no hash for this file in it: the model is never fetched.
+        for answer in [None, Some(b"[]".to_vec()), Some(b"<html>".to_vec())] {
+            let err = download_verified(&dir, file, || answer, fetch).unwrap_err();
+            assert!(err.contains("SHA-256") && err.contains("沒有下載"), "{err}");
+        }
+        assert_eq!(fetched.get(), 0, "fetched before the hash was known");
+        assert!(!dir.join(file).exists() && !dir.join(format!("{file}.part")).exists());
+
+        // A download that doesn't match is thrown away.
+        let err = download_verified(&dir, file, || Some(listing(&"0".repeat(64))), fetch).unwrap_err();
+        assert!(err.contains("不符"), "{err}");
+        assert!(!dir.join(file).exists() && !dir.join(format!("{file}.part")).exists());
+
+        // One that matches is kept.
+        download_verified(&dir, file, || Some(listing(&sha.to_uppercase())), fetch).unwrap();
+        assert_eq!(std::fs::read(dir.join(file)).unwrap(), data);
+        assert_eq!(fetched.get(), 2);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn reads_model_hashes_from_the_listing() {

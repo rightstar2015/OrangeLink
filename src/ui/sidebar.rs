@@ -154,7 +154,6 @@ impl App {
                 let tags = &stats.tag_counts;
                 // Edited through a local so the closure below only needs `&self`.
                 let mut tag_search = std::mem::take(&mut self.tag_search);
-                let mut open_ai_log = false;
 
                 egui::TopBottomPanel::bottom("sidebar-help").show_inside(ui, |ui| {
                     ui.horizontal(|ui| {
@@ -185,23 +184,6 @@ impl App {
                             }
                             ui.separator();
                             ui.label(RichText::new(format!("OrangeLink {}", env!("CARGO_PKG_VERSION"))).small().weak());
-                        });
-                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            if self.mcp.is_running() {
-                                if ui
-                                    .add(egui::Button::new(RichText::new("● MCP").small().color(good())).frame(false))
-                                    .on_hover_text(t!("本機 MCP 伺服器執行中；按一下查看 AI 操作紀錄"))
-                                    .clicked()
-                                {
-                                    open_ai_log = true;
-                                }
-                            } else if ui
-                                .add(egui::Button::new(RichText::new("○ MCP").small().weak()).frame(false))
-                                .on_hover_text(t!("AI 助理整合（MCP）尚未啟用；按一下開啟整合設定"))
-                                .clicked()
-                            {
-                                self.act(Action::OpenSettingsAt(crate::config::SettingsPage::Integration));
-                            }
                         });
                     });
                 });
@@ -329,9 +311,6 @@ impl App {
                     }
                 });
                 self.tag_search = tag_search;
-                if open_ai_log {
-                    self.show_ai_log = true;
-                }
             });
     }
 

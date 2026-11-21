@@ -139,7 +139,9 @@ impl Loader {
                 }
                 let is_gif = media::ext_of(&req.source) == "gif";
                 let frames = if is_gif { load_gif_frames(&req.source, None) } else { Vec::new() };
-                let image = if frames.is_empty() {
+                let image = if crate::font_sample::is_font(&req.source) {
+                    std::fs::read(&req.source).ok().and_then(|b| crate::font_sample::specimen(&b, 1400)).map(|img| to_color_image(&image::DynamicImage::ImageRgba8(img)))
+                } else if frames.is_empty() {
                     decode_file(&req.source).ok().map(|img| to_color_image(&fit_for_view(img)))
                 } else {
                     None
@@ -201,6 +203,14 @@ fn load_thumb(req: &Request) -> Option<ColorImage> {
     }
     if !req.source.is_file() {
         return None;
+    }
+    // A font shows its own sample text, Chinese where it has it.
+    if crate::font_sample::is_font(&req.source) {
+        if let Some(img) = std::fs::read(&req.source).ok().and_then(|b| crate::font_sample::thumbnail(&b, THUMB_SIDE)) {
+            let img = image::DynamicImage::ImageRgba8(img);
+            let _ = save_thumbnail(&img, &req.thumb);
+            return Some(to_color_image(&make_thumbnail(&img)));
+        }
     }
     // Never read a whole video into memory here; only ffmpeg can make these.
     if let (Some(ff), false) = (&req.ffmpeg_dir, req.media == MediaKind::Other) {

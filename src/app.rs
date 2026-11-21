@@ -1698,7 +1698,7 @@ impl App {
         }
         let Some(lib) = &self.lib else { return };
         let Some(it) = lib.items.get(id) else { return };
-        if !imaging::SUPPORTED_EXTS.contains(&it.ext.as_str()) {
+        if !imaging::SUPPORTED_EXTS.contains(&it.ext.as_str()) && !crate::font_sample::FONT_EXTS.contains(&it.ext.as_str()) {
             // Not decodable here; the viewer shows the thumbnail or an icon.
             // The previous item's textures are not needed any more.
             self.full.close();

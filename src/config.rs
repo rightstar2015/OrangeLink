@@ -250,6 +250,9 @@ pub struct Config {
     pub ffmpeg_hint_dismissed: bool,
     /// Download a new version by itself and install it when OrangeLink closes.
     pub auto_update: bool,
+    /// A release the 發現新版本 window was told to skip: it shows only as the
+    /// status bar's badge, until a newer one comes out.
+    pub skipped_update: Option<String>,
     /// How long a wheel notch glides in the grid, 0..=100; 0 scrolls in steps.
     pub scroll_smoothness: u32,
 
@@ -408,6 +411,7 @@ impl Config {
             }
             SettingsPage::Advanced => {
                 self.auto_update = d.auto_update;
+                self.skipped_update = d.skipped_update;
                 self.collapsed_sections = d.collapsed_sections;
                 self.clip_sort = d.clip_sort;
             }
@@ -479,6 +483,7 @@ impl Default for Config {
             settings_page: SettingsPage::General,
             ffmpeg_hint_dismissed: false,
             auto_update: true,
+            skipped_update: None,
             mcp_enabled: false,
             mcp_port: 47821,
             mcp_token: String::new(),

@@ -1013,6 +1013,7 @@ impl App {
             Dialog::UpdatePrompt { tag } => {
                 let url = crate::update::release_tag_url(tag);
                 let mut copied = false;
+                let mut skip = false;
                 window(t!("發現新版本")).show(ctx, |ui| {
                     ui.set_max_width(440.0);
                     ui.label(RichText::new(t!("偵測到 GitHub 上有新版本 {tag}", tag)).strong());
@@ -1041,10 +1042,16 @@ impl App {
                             .fill(tokens().selection_bg);
                         commit |= ui.add(go).clicked();
                         close |= ui.button(t!("否，稍後再說")).clicked();
+                        skip = ui.button(t!("略過這個版本")).on_hover_text(t!("不再為這個版本跳出視窗，狀態列仍會顯示；有更新的版本時再提示")).clicked();
                     });
                 });
                 if copied {
                     self.toast(t!("已複製 GitHub 下載連結"));
+                }
+                if skip {
+                    self.config.skipped_update = Some(tag.clone());
+                    self.config.save();
+                    close = true;
                 }
             }
         }

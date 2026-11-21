@@ -1336,5 +1336,7 @@
  "這些素材的 metadata.json 損壞或無法讀取，所以沒有顯示在資源庫中，原始檔案沒有被刪除。在處理之前，每日自動備份會暫停，避免舊備份被輪替掉。": "The metadata.json for these assets is corrupted or unreadable, so they are not shown in the library. The original files have not been deleted. Until this is resolved, the daily automatic backup is paused so older backups are not rotated out.",
  "安裝：在瀏覽器開啟 brave://extensions（Chrome 為 chrome://extensions），打開「開發人員模式」，按「載入未封裝項目」並選擇上面的資料夾，再點工具列的 OrangeLink 圖示貼上配對碼。": "To install: open brave://extensions in your browser (chrome://extensions for Chrome), turn on \"Developer mode\", click \"Load unpacked\" and select the folder above, then click the OrangeLink icon on the toolbar and paste the pairing code.",
  "所有檔案": "All files",
- "匯入檔案": "Import files"
+ "匯入檔案": "Import files",
+ "略過這個版本": "Skip this version",
+ "不再為這個版本跳出視窗，狀態列仍會顯示；有更新的版本時再提示": "Don't open this window for this version again; the status bar still shows it, and a newer version will prompt again"
 }

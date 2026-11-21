@@ -22,16 +22,7 @@ impl App {
                     None => self.toast("找不到和這個字幕同名的影片或音訊"),
                 }
             }
-            Action::CloseViewer => {
-                if let Some(v) = self.viewer.take() {
-                    self.scroll_to = Some(v.id);
-                }
-                self.full.close();
-                self.pdf = None;
-                self.slideshow = None;
-                self.player = None;
-                self.subs = None;
-            }
+            Action::CloseViewer => self.close_viewer(true),
             Action::ViewerStep(delta) => {
                 let Some(v) = &self.viewer else { return };
                 let n = self.visible.len() as i64;
@@ -48,6 +39,7 @@ impl App {
             Action::ClearSelection => {
                 self.selected.clear();
                 self.anchor = None;
+                self.caret = None;
             }
             Action::TrashSelected => {
                 let ids = self.selected_ids();
@@ -579,7 +571,10 @@ impl App {
                     on_yes: Confirmed::DeleteField(name),
                 });
             }
-            Action::BackupsDialog => self.dialog = Some(Dialog::Backups),
+            Action::BackupsDialog => {
+                let list = self.lib.as_ref().map(|l| l.list_backups()).unwrap_or_default();
+                self.dialog = Some(Dialog::Backups(list));
+            }
             Action::FindSimilar(id) => self.start_similarity(Some(id)),
             Action::FindDuplicates => self.start_similarity(None),
             Action::FindExactDuplicates => self.find_exact_duplicates(),
@@ -652,7 +647,8 @@ impl App {
                 self.view = view;
                 self.selected.clear();
                 self.anchor = None;
-                self.viewer = None;
+                self.caret = None;
+                self.close_viewer(false);
             }
             Action::ToggleTagFilter(tag) => {
                 if let Some(i) = self.tag_filter.iter().position(|t| *t == tag) {

@@ -343,7 +343,7 @@ pub enum Dialog {
     ImportMode { paths: Vec<PathBuf>, link: bool, remember: bool },
     /// A large drop: counts, and where the files go, before importing.
     ImportPreview { paths: Vec<PathBuf>, link: bool, folder: Option<String>, tags: String, scan: Arc<std::sync::Mutex<crate::importer::ImportScan>> },
-    Backups,
+    Backups(Vec<(PathBuf, usize)>),
     Unreadable,
     SmartFolderName { rename: Option<String>, name: String, parent: Option<String>, group: bool },
     TagGroupName { rename: Option<String>, name: String, tag: Option<String> },
@@ -522,8 +522,8 @@ pub enum MediaTask {
 pub enum ViewerTab {
     Clips,
     Subtitles,
-    /// Rating and tags, to sort things out without leaving the preview.
-    Tags,
+    /// Highlight detection (chat activity, loudness analysis, auto-candidates).
+    Highlights,
 }
 
 /// A message in the bottom right corner, maybe with a button.
@@ -791,6 +791,24 @@ pub struct App {
     pub ai_hint: usize,
     /// What the window's title bar was last set to (dark or not).
     title_bar_dark: Option<bool>,
+    /// Cached sidebar & inspector counts, keyed by `lib.revision`.
+    pub sidebar_cache: RefCell<(Option<u64>, crate::ui::SidebarStats)>,
+    /// Search syntax quick-reference popover open.
+    pub syntax_open: bool,
+    /// Studio header 🏷 整理 popover open.
+    pub viewer_tags_open: bool,
+    /// Cached downsampled chat/loudness curves for the timeline activity strip.
+    pub signal_plot_cache: crate::ui::SignalPlotCache,
+    /// Cached parsed cues when previewing a standalone `.srt` / `.vtt` file.
+    pub text_cues_cache: Option<(String, Vec<crate::media::Cue>)>,
+    /// Item snapshot captured when starting a 9:16 crop-box drag (for undo).
+    pub crop_drag_before: Option<Item>,
+    /// Editable draft for `config.chat_keywords` so trailing separators aren't eaten.
+    pub chat_keywords_draft: Option<String>,
+    /// Whether the currently open modal dialog's text input already received initial focus.
+    pub dialog_focused: bool,
+    /// Active keyboard focus item (extends Shift+arrow range from `anchor`).
+    caret: Option<String>,
 }
 
 impl App {
@@ -961,6 +979,15 @@ impl App {
             force_close: false,
             ai_hint: 0,
             title_bar_dark: None,
+            sidebar_cache: RefCell::new((None, crate::ui::SidebarStats::default())),
+            syntax_open: false,
+            viewer_tags_open: false,
+            signal_plot_cache: crate::ui::SignalPlotCache::default(),
+            text_cues_cache: None,
+            crop_drag_before: None,
+            chat_keywords_draft: None,
+            dialog_focused: false,
+            caret: None,
         }
     }
 
@@ -1187,6 +1214,33 @@ impl App {
         self.lib_loading = Some((path, rx));
     }
 
+    /// Tears down the active preview/studio cleanly so Media Foundation / PDF
+    /// background threads exit, textures are released, and no stale audio plays.
+    pub(super) fn close_viewer(&mut self, scroll_back: bool) {
+        if let Some(v) = self.viewer.take() {
+            if scroll_back {
+                self.scroll_to = Some(v.id);
+            }
+        }
+        self.full.close();
+        self.pdf = None;
+        self.slideshow = None;
+        self.player = None;
+        self.subs = None;
+        self.signals = None;
+        self.viewer_loading = None;
+        self.viewer_start = None;
+        self.mark = (None, None);
+        self.crop_frame = None;
+        self.crop_drag_before = None;
+        self.seek_flash = None;
+        self.clip_ui = ClipUi::default();
+        self.viewer_tags_open = false;
+        self.text_cues_cache = None;
+        self.signal_plot_cache.clear();
+        self.scrub.clear();
+    }
+
     fn poll_library_loading(&mut self) {
         let Some((_, rx)) = &self.lib_loading else { return };
         let result = match state::poll(rx) {
@@ -1198,12 +1252,18 @@ impl App {
         let Some((path, _)) = self.lib_loading.take() else { return };
         match result {
             Ok((lib, lock)) => {
+                self.close_viewer(false);
                 self.lib = Some(lib);
                 self.lib_lock = lock;
+                self.edits = undo::Edits::default();
                 self.visible_key = None;
                 self.smart_counts = (u64::MAX, HashMap::new());
+                self.sidebar_cache.borrow_mut().0 = None;
+                self.format_cache.borrow_mut().0 = None;
                 self.clear_history();
                 self.watch.last_scan = f64::NEG_INFINITY;
+                self.watch.scan_queue.clear();
+                self.watch.ready.clear();
                 self.thumbs.tex.clear();
                 self.thumbs.pending.clear();
                 self.thumbs.failed.clear();
@@ -1211,12 +1271,17 @@ impl App {
                 self.view = View::All;
                 self.selected.clear();
                 self.anchor = None;
-                self.viewer = None;
+                self.caret = None;
                 self.search.clear();
                 self.tag_filter.clear();
                 self.ext_filter.clear();
                 self.min_rating = 0;
                 self.color_filter = None;
+                self.filter_open = false;
+                self.syntax_open = false;
+                self.field_drafts.clear();
+                *self.renaming.borrow_mut() = None;
+                self.save_error = None;
                 self.config.remember(&path);
                 self.config.save();
                 let unreadable = self.lib.as_ref().map_or(0, |l| l.unreadable.len());
@@ -1631,6 +1696,48 @@ impl App {
         }
     }
 
+    fn has_floating_window(&self) -> bool {
+        self.show_shortcuts
+            || self.show_settings
+            || self.show_ai_log
+            || self.smart_edit.is_some()
+            || self.premiere_dialog.is_some()
+            || self.yt.open
+            || self.whisper.open
+    }
+
+    fn close_top_floating_window(&mut self) -> bool {
+        if self.smart_edit.take().is_some() {
+            return true;
+        }
+        if self.premiere_dialog.take().is_some() {
+            return true;
+        }
+        if self.whisper.open {
+            self.whisper.open = false;
+            return true;
+        }
+        if self.yt.open {
+            self.yt.open = false;
+            return true;
+        }
+        if self.show_shortcuts {
+            self.show_shortcuts = false;
+            return true;
+        }
+        if self.show_ai_log {
+            self.show_ai_log = false;
+            return true;
+        }
+        if self.show_settings {
+            self.show_settings = false;
+            self.chat_keywords_draft = None;
+            self.config.save();
+            return true;
+        }
+        false
+    }
+
     fn handle_keys(&mut self, ctx: &egui::Context) {
         if self.dialog.is_some() {
             return;
@@ -1643,11 +1750,13 @@ impl App {
         } else {
             ctx.input(|i| (i.modifiers.alt && i.key_pressed(Key::ArrowLeft), i.modifiers.alt && i.key_pressed(Key::ArrowRight)))
         };
-        if side_back || alt_back {
-            return self.act(Action::NavBack);
-        }
-        if side_fwd || alt_fwd {
-            return self.act(Action::NavForward);
+        if !self.has_floating_window() {
+            if side_back || alt_back {
+                return self.act(Action::NavBack);
+            }
+            if side_fwd || alt_fwd {
+                return self.act(Action::NavForward);
+            }
         }
         if ctx.wants_keyboard_input() {
             return;
@@ -1658,14 +1767,28 @@ impl App {
             self.show_shortcuts = !self.show_shortcuts;
             return;
         }
-        if self.show_shortcuts && ctx.input(|i| i.key_pressed(Key::Escape)) {
-            self.show_shortcuts = false;
+        // Floating windows capture keyboard shortcuts; Esc closes the topmost one.
+        if self.has_floating_window() {
+            if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, Key::Escape)) {
+                self.close_top_floating_window();
+            }
             return;
         }
-        let (mods, select_all, delete, open, esc, left, right, up, down) = ctx.input(|i| {
+        // Close open toolbar / studio popovers on Esc before touching selection or viewer.
+        if (self.filter_open || self.syntax_open || self.viewer_tags_open)
+            && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, Key::Escape))
+        {
+            self.filter_open = false;
+            self.syntax_open = false;
+            self.viewer_tags_open = false;
+            return;
+        }
+
+        let (mods, select_all, delete, open, esc, left, right, up, down, undo, redo) = ctx.input(|i| {
+            let cmd = i.modifiers.command;
             (
                 i.modifiers,
-                i.modifiers.command && i.key_pressed(Key::A),
+                cmd && i.key_pressed(Key::A),
                 i.key_pressed(Key::Delete),
                 i.key_pressed(Key::Enter) || i.key_pressed(Key::Space),
                 i.key_pressed(Key::Escape),
@@ -1673,8 +1796,20 @@ impl App {
                 i.key_pressed(Key::ArrowRight),
                 i.key_pressed(Key::ArrowUp),
                 i.key_pressed(Key::ArrowDown),
+                cmd && !i.modifiers.shift && i.key_pressed(Key::Z),
+                cmd && (i.key_pressed(Key::Y) || (i.modifiers.shift && i.key_pressed(Key::Z))),
             )
         });
+
+        // Undo / Redo works everywhere (grid AND preview/clip studio).
+        if undo {
+            self.act(Action::Undo);
+            return;
+        }
+        if redo {
+            self.act(Action::Redo);
+            return;
+        }
 
         // egui turns Ctrl+C/V into Copy/Paste events, and drops Ctrl+V entirely when
         // the clipboard holds files or an image, so also watch the physical V key.
@@ -1734,23 +1869,11 @@ impl App {
         if select_all {
             self.act(Action::SelectAll);
         }
-        let (undo, redo, rating) = ctx.input(|i| {
-            let cmd = i.modifiers.command;
-            let rating = [Key::Num0, Key::Num1, Key::Num2, Key::Num3, Key::Num4, Key::Num5]
+        let rating = ctx.input(|i| {
+            [Key::Num0, Key::Num1, Key::Num2, Key::Num3, Key::Num4, Key::Num5]
                 .iter()
-                .position(|k| !cmd && i.key_pressed(*k));
-            (
-                cmd && !i.modifiers.shift && i.key_pressed(Key::Z),
-                cmd && (i.key_pressed(Key::Y) || (i.modifiers.shift && i.key_pressed(Key::Z))),
-                rating,
-            )
+                .position(|k| !i.modifiers.command && i.key_pressed(*k))
         });
-        if undo {
-            self.act(Action::Undo);
-        }
-        if redo {
-            self.act(Action::Redo);
-        }
         if let (Some(r), false) = (rating, self.selected.is_empty()) {
             self.act(Action::SetRating(self.selected_ids(), r as u8));
         }
@@ -1773,7 +1896,11 @@ impl App {
                 many => self.act(Action::BatchRename(many.to_vec())),
             }
         }
-        let current = self.anchor.as_ref().and_then(|a| self.visible.iter().position(|id| id == a));
+        let current = self
+            .caret
+            .as_ref()
+            .or(self.anchor.as_ref())
+            .and_then(|a| self.visible.iter().position(|id| id == a));
         if open {
             if let Some(i) = current {
                 self.act(Action::OpenViewer(self.visible[i].clone()));
@@ -1787,7 +1914,7 @@ impl App {
                 None => 0,
             };
             let id = self.visible[next].clone();
-            // Shift extends from the existing anchor; keep it in place.
+            // Shift extends from the existing anchor; keep it in place while moving caret.
             if mods.shift {
                 self.act(Action::Click(id.clone(), mods));
             } else {
@@ -1801,6 +1928,7 @@ impl App {
     fn media_keys(&mut self, ctx: &egui::Context, mods: egui::Modifiers, esc: bool) {
         use egui::Key;
         let k = |key: Key| ctx.input(|i| i.key_pressed(key));
+        let plain = !mods.command && !mods.alt;
         let (left, right) = (k(Key::ArrowLeft), k(Key::ArrowRight));
         if esc {
             self.act(Action::CloseViewer);
@@ -1826,7 +1954,7 @@ impl App {
             p.seek_by(d);
             jumped = Some(format!("{}{secs:.0}s", if left { "−" } else { "+" }));
         }
-        let (prev_frame, next_frame) = (k(Key::Comma), k(Key::Period));
+        let (prev_frame, next_frame) = (plain && k(Key::Comma), plain && k(Key::Period));
         if prev_frame || next_frame {
             p.pause();
             let f = p.frame_secs();
@@ -1835,7 +1963,7 @@ impl App {
         }
         // J / K / L as in editing programs: backwards and forwards, faster each press.
         let speed = |r: f64| if r < 0.0 { format!("◀◀ {}×", -r) } else { format!("▶ {r}×") };
-        if k(Key::J) {
+        if plain && k(Key::J) {
             match p.backwards() {
                 Some(r) => jumped = Some(speed(r)),
                 None => {
@@ -1844,10 +1972,10 @@ impl App {
                 }
             }
         }
-        if k(Key::K) {
+        if plain && k(Key::K) {
             p.stop_and_reset();
         }
-        if k(Key::L) {
+        if plain && k(Key::L) {
             let was_playing = p.is_playing() && p.rate() > 0.0;
             let r = p.faster();
             if was_playing && !p.can_change_rate() {
@@ -1856,30 +1984,30 @@ impl App {
                 jumped = Some(speed(r));
             }
         }
-        if k(Key::Space) {
+        if plain && k(Key::Space) {
             p.toggle();
         }
-        if k(Key::Home) {
+        if plain && k(Key::Home) {
             p.seek(0.0);
             jumped = Some("開頭".into());
         }
-        if k(Key::End) {
+        if plain && k(Key::End) {
             p.seek((p.duration - p.frame_secs()).max(0.0));
             jumped = Some("結尾".into());
         }
         let pos = p.position();
         let (id, duration, landscape) = (p.id.clone(), p.duration, p.has_frames() && p.is_landscape());
-        if k(Key::I) {
+        if plain && k(Key::I) {
             self.mark.0 = Some(pos);
         }
-        if k(Key::O) {
+        if plain && k(Key::O) {
             self.mark.1 = Some(pos);
         }
-        if k(Key::Enter) && (self.mark.0.is_some() || self.mark.1.is_some()) {
+        if plain && k(Key::Enter) && (self.mark.0.is_some() || self.mark.1.is_some()) {
             let (start, end) = clip_from_marks(self.mark, pos, duration);
             self.act(Action::AddClip(id, start, end, None));
         }
-        if k(Key::V) && landscape {
+        if plain && k(Key::V) && landscape {
             self.crop_frame = if self.crop_frame.is_some() { None } else { Some(0.5) };
         }
         if let Some(text) = jumped {
@@ -1892,6 +2020,7 @@ impl App {
     pub fn anchor_to_first(&mut self, ids: &HashSet<String>) {
         if let Some(first) = self.visible.iter().find(|id| ids.contains(*id)) {
             self.anchor = Some(first.clone());
+            self.caret = Some(first.clone());
         }
     }
 
@@ -1905,6 +2034,7 @@ impl App {
                 }
                 let (lo, hi) = if a <= b { (a, b) } else { (b, a) };
                 self.selected.extend(self.visible[lo..=hi].iter().cloned());
+                self.caret = Some(id);
                 return;
             }
         }
@@ -1916,7 +2046,8 @@ impl App {
             self.selected.clear();
             self.selected.insert(id.clone());
         }
-        self.anchor = Some(id);
+        self.anchor = Some(id.clone());
+        self.caret = Some(id);
     }
 
     /// Applies `f` to items, recording the previous state for undo.
@@ -2225,7 +2356,9 @@ impl App {
         let lens = if grouped { groups.iter().map(Vec::len).collect() } else { Vec::new() };
         self.view = View::Ids { label, ids: groups.concat(), groups: lens, source };
         self.selected.clear();
-        self.viewer = None;
+        self.anchor = None;
+        self.caret = None;
+        self.close_viewer(false);
     }
 
     /// The groups shown now (after filters), as lists of ids.
@@ -2527,29 +2660,40 @@ impl App {
     }
 
     /// Applies a rename pattern: `{name}` original name, `{n}` running number.
-    pub fn batch_rename_preview(&self, ids: &[String], pattern: &str, start: usize) -> Vec<(String, String)> {
+    /// Returns `(id, old_name, new_name)` for each existing item.
+    pub fn batch_rename_preview(&self, ids: &[String], pattern: &str, start: usize) -> Vec<(String, String, String)> {
         let Some(lib) = &self.lib else { return Vec::new() };
         let width = (start + ids.len()).to_string().len().max(2);
         ids.iter()
+            .filter_map(|id| lib.items.get(id))
             .enumerate()
-            .filter_map(|(i, id)| lib.items.get(id).map(|it| (i, it)))
             .map(|(i, it)| {
                 let n = format!("{:0width$}", start + i);
-                (it.name.clone(), pattern.replace("{name}", &it.name).replace("{n}", &n))
+                (it.id.clone(), it.name.clone(), pattern.replace("{name}", &it.name).replace("{n}", &n))
             })
             .collect()
     }
 
     pub fn apply_batch_rename(&mut self, ids: Vec<String>, pattern: String, start: usize) {
         let names = self.batch_rename_preview(&ids, &pattern, start);
+        if names.is_empty() {
+            return;
+        }
+        let before: Vec<Item> = match &self.lib {
+            Some(lib) => names.iter().filter_map(|(id, _, _)| lib.items.get(id).cloned()).collect(),
+            None => return,
+        };
+        self.record_undo(before, false);
         let Some(lib) = &mut self.lib else { return };
-        for (id, (_, new)) in ids.iter().zip(names) {
-            if let Some(it) = lib.items.get_mut(id) {
+        let mut count = 0;
+        for (id, _, new) in names {
+            if let Some(it) = lib.items.get_mut(&id) {
                 it.name = new;
-                lib.touch(id);
+                lib.touch(&id);
+                count += 1;
             }
         }
-        self.toast_undo(format!("已重新命名 {} 個項目", ids.len()));
+        self.toast_undo(format!("已重新命名 {count} 個項目"));
     }
 
     fn delete_message(&self, ids: &[String]) -> String {
@@ -3036,11 +3180,13 @@ impl eframe::App for App {
             }
             if let Some(v) = &self.viewer {
                 if !self.visible.contains(&v.id) {
-                    self.viewer = None;
+                    self.close_viewer(false);
                 }
             }
             self.handle_keys(ctx);
-            self.top_bar(ctx);
+            if self.viewer.is_none() {
+                self.top_bar(ctx);
+            }
             self.status_bar(ctx);
             if self.viewer.is_some() {
                 egui::CentralPanel::default()
@@ -3818,6 +3964,176 @@ mod tests {
         let n = lib.meta.smart_folders.len();
         lib.seed_default_smart_folders();
         assert_eq!(lib.meta.smart_folders.len(), n);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn shift_click_moves_caret_so_shift_arrows_extend_range() {
+        let mut app = App::with_config(&egui::Context::default(), Config::default());
+        app.visible = ["a", "b", "c", "d"].into_iter().map(String::from).collect();
+        let shift = egui::Modifiers { shift: true, ..Default::default() };
+
+        app.select_click("a".into(), egui::Modifiers::NONE);
+        assert_eq!(app.anchor.as_deref(), Some("a"));
+        assert_eq!(app.caret.as_deref(), Some("a"));
+
+        // Stepping forward twice with Shift keeps anchor at "a" while moving caret past 2 items.
+        let step_shift = |app: &mut App, delta: i64| {
+            let cur = app.caret.as_ref().or(app.anchor.as_ref()).and_then(|x| app.visible.iter().position(|id| id == x)).unwrap();
+            let next = (cur as i64 + delta).clamp(0, app.visible.len() as i64 - 1) as usize;
+            let id = app.visible[next].clone();
+            app.select_click(id, shift);
+        };
+        step_shift(&mut app, 1);
+        assert_eq!(app.caret.as_deref(), Some("b"));
+        step_shift(&mut app, 1);
+        assert_eq!(app.anchor.as_deref(), Some("a"));
+        assert_eq!(app.caret.as_deref(), Some("c"));
+        let mut sel: Vec<_> = app.selected.iter().map(String::as_str).collect();
+        sel.sort();
+        assert_eq!(sel, ["a", "b", "c"]);
+
+        // Stepping back shrinks the range instead of getting stuck.
+        step_shift(&mut app, -1);
+        assert_eq!(app.caret.as_deref(), Some("b"));
+        let mut sel: Vec<_> = app.selected.iter().map(String::as_str).collect();
+        sel.sort();
+        assert_eq!(sel, ["a", "b"]);
+    }
+
+    #[test]
+    fn batch_rename_is_undoable_and_skips_missing_ids_safely() {
+        let root = std::env::temp_dir().join(format!("orangelink-rename-{}", crate::model::new_id()));
+        let mut lib = Library::create(&root).unwrap();
+        for (id, name) in [("a", "甲"), ("b", "乙")] {
+            let it: Item = serde_json::from_value(serde_json::json!({
+                "id": id, "name": name, "file_name": format!("{id}.png"), "ext": "png",
+                "kind": "image", "size": 1, "width": 10, "height": 10, "added_at": 0, "modified_at": 0
+            }))
+            .unwrap();
+            lib.insert_item(it);
+        }
+        let mut app = App::with_config(&egui::Context::default(), Config::default());
+        app.lib = Some(lib);
+
+        // Missing ID in the middle must not shift names onto the wrong item.
+        app.apply_batch_rename(vec!["a".into(), "gone".into(), "b".into()], "{name}_{n}".into(), 1);
+        let lib = app.lib.as_ref().unwrap();
+        assert_eq!(lib.items["a"].name, "甲_01");
+        assert_eq!(lib.items["b"].name, "乙_02");
+        assert!(app.can_undo());
+
+        app.restore_items(false);
+        let lib = app.lib.as_ref().unwrap();
+        assert_eq!(lib.items["a"].name, "甲");
+        assert_eq!(lib.items["b"].name, "乙");
+        assert!(app.can_redo());
+
+        app.restore_items(true);
+        let lib = app.lib.as_ref().unwrap();
+        assert_eq!(lib.items["a"].name, "甲_01");
+        assert_eq!(lib.items["b"].name, "乙_02");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn ungrouped_tag_rename_is_undoable() {
+        let root = std::env::temp_dir().join(format!("orangelink-tagundo-{}", crate::model::new_id()));
+        let mut lib = Library::create(&root).unwrap();
+        let it: Item = serde_json::from_value(serde_json::json!({
+            "id": "a", "name": "a", "file_name": "a.png", "ext": "png",
+            "kind": "image", "size": 1, "width": 10, "height": 10,
+            "added_at": 0, "modified_at": 0, "tags": ["舊標籤"]
+        }))
+        .unwrap();
+        lib.insert_item(it);
+        let mut app = App::with_config(&egui::Context::default(), Config::default());
+        app.lib = Some(lib);
+        // Baseline frame captures initial LibraryMeta structure.
+        app.track_structure();
+        assert!(!app.can_undo());
+
+        // Renaming a tag that belongs to no TagGroup still captures affected items.
+        app.lib.as_mut().unwrap().rename_tag("舊標籤", "新標籤");
+        app.track_structure();
+        assert_eq!(app.lib.as_ref().unwrap().items["a"].tags, vec!["新標籤"]);
+        assert!(app.can_undo());
+
+        app.restore_items(false);
+        assert_eq!(app.lib.as_ref().unwrap().items["a"].tags, vec!["舊標籤"]);
+        app.restore_items(true);
+        assert_eq!(app.lib.as_ref().unwrap().items["a"].tags, vec!["新標籤"]);
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn floating_window_blocks_shortcuts_and_closes_topmost_first() {
+        let mut app = App::with_config(&egui::Context::default(), Config::default());
+        assert!(!app.has_floating_window());
+        assert!(!app.close_top_floating_window());
+
+        app.show_ai_log = true;
+        app.show_shortcuts = true;
+        app.whisper.open = true;
+        assert!(app.has_floating_window());
+
+        // Closes topmost first without wiping underlying floating windows.
+        assert!(app.close_top_floating_window());
+        assert!(!app.whisper.open && app.show_shortcuts && app.show_ai_log);
+        assert!(app.close_top_floating_window());
+        assert!(!app.show_shortcuts && app.show_ai_log);
+        assert!(app.close_top_floating_window());
+        assert!(!app.has_floating_window());
+    }
+
+    #[test]
+    fn close_viewer_clears_studio_state() {
+        let mut app = App::with_config(&egui::Context::default(), Config::default());
+        app.viewer = Some(Viewer { id: "v1".into(), zoom: 2.0, pan: egui::Vec2::new(10.0, 20.0) });
+        app.mark = (Some(1.0), Some(5.0));
+        app.crop_frame = Some(0.5);
+        app.viewer_tags_open = true;
+        app.clip_ui.sel.insert("c1".into());
+        app.text_cues_cache = Some(("v1".into(), vec![crate::media::Cue { start: 0.0, end: 1.0, text: "hi".into() }]));
+
+        app.close_viewer(true);
+        assert!(app.viewer.is_none());
+        assert_eq!(app.scroll_to.as_deref(), Some("v1"));
+        assert_eq!(app.mark, (None, None));
+        assert_eq!(app.crop_frame, None);
+        assert!(!app.viewer_tags_open);
+        assert!(app.clip_ui.sel.is_empty());
+        assert!(app.text_cues_cache.is_none());
+    }
+
+    #[test]
+    fn sidebar_stats_counts_items_kinds_and_trash() {
+        let root = std::env::temp_dir().join(format!("orangelink-stats-{}", crate::model::new_id()));
+        let mut lib = Library::create(&root).unwrap();
+        let mk = |id: &str, kind: &str, size: u64, deleted: bool, folders: &[&str], tags: &[&str]| -> Item {
+            serde_json::from_value(serde_json::json!({
+                "id": id, "name": id, "file_name": format!("{id}.bin"), "ext": "bin",
+                "kind": kind, "size": size, "width": 0, "height": 0,
+                "added_at": 0, "modified_at": 0, "deleted": deleted,
+                "folders": folders, "tags": tags
+            }))
+            .unwrap()
+        };
+        lib.insert_item(mk("i1", "image", 100, false, &["f1"], &["t1"]));
+        lib.insert_item(mk("v1", "video", 250, false, &[], &[]));
+        lib.insert_item(mk("a1", "audio", 50, false, &[], &["t1"]));
+        lib.insert_item(mk("d1", "other", 999, true, &[], &[]));
+
+        let stats = crate::ui::SidebarStats::compute(&lib);
+        assert_eq!(stats.total, 3);
+        assert_eq!(stats.trash, 1);
+        assert_eq!(stats.total_size, 400);
+        assert_eq!(stats.uncategorized, 2);
+        assert_eq!(stats.untagged, 1);
+        assert_eq!(stats.by_kind, [1, 1, 1, 0]);
+
         let _ = std::fs::remove_dir_all(&root);
     }
 }

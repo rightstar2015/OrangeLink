@@ -87,6 +87,10 @@ impl App {
             return false;
         }
         pdf.page = next as u32;
+        if let Some(v) = &mut self.viewer {
+            v.zoom = 1.0;
+            v.pan = egui::Vec2::ZERO;
+        }
         self.ask_pdf_pages();
         true
     }
@@ -94,6 +98,10 @@ impl App {
     pub(super) fn pdf_go(&mut self, page: u32) {
         let Some(pdf) = &mut self.pdf else { return };
         pdf.page = page.min(pdf.total.unwrap_or(1).saturating_sub(1));
+        if let Some(v) = &mut self.viewer {
+            v.zoom = 1.0;
+            v.pan = egui::Vec2::ZERO;
+        }
         self.ask_pdf_pages();
     }
 

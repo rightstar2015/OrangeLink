@@ -378,44 +378,74 @@ pub fn is_candidate(name: &str) -> bool {
     name.strip_prefix(CANDIDATE).is_some_and(|n| !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()))
 }
 
-/// The panel section at the top of the clips tab.
+/// The dedicated ⚡ 精華 tab in the video studio side panel.
 pub fn candidates_ui(app: &mut App, ui: &mut egui::Ui, id: &str) {
-    use egui::RichText;
-    let Some(s) = app.signals.as_ref().filter(|s| s.id == id) else { return };
+    use egui::{RichText, Stroke};
+    let Some(s) = app.signals.as_ref().filter(|s| s.id == id) else {
+        ui.label(RichText::new("此素材不支援精華分析").weak());
+        return;
+    };
     let mut analyze = false;
     let mut cancel = false;
-    ui.label(RichText::new("精華候選").strong());
-    let chat = match (&s.chat_file, &s.chat, &s.chat_rx) {
-        (None, ..) => "聊天室：找不到 .live_chat.json（下載時勾選聊天室，並和影片放在同一個資料夾）".to_string(),
-        (Some(_), _, Some(_)) => "聊天室：讀取中…".to_string(),
-        (Some(_), Some(c), _) => format!("聊天室：已讀取（{} 分鐘）", c.len() / 60),
-        (Some(_), None, None) => "聊天室：紀錄裡沒有可用的時間".to_string(),
-    };
-    ui.label(RichText::new(chat).small());
-    ui.horizontal(|ui| match (&s.loud, &s.loud_job) {
-        (_, Some(job)) => {
-            ui.spinner();
-            ui.label(RichText::new(format!("分析音量中… {}", crate::media::fmt_duration(job.progress.load(Ordering::Relaxed) as f64))).small());
-            cancel = ui.small_button("取消").clicked();
-        }
-        (Some(_), None) => {
-            ui.label(RichText::new("音量：已分析").small());
-            analyze = ui.small_button("重新分析").clicked();
-        }
-        (None, None) => {
-            ui.label(RichText::new("音量：未分析").small());
-            analyze = ui.small_button("分析音量").on_hover_text("用 FFmpeg 讀完整段聲音，長直播約需幾分鐘；結果會保存").clicked();
-        }
-    });
-    if let Some(e) = &s.loud_error {
-        ui.label(RichText::new(e).small().color(crate::ui::danger()));
-    }
-    let ready = s.chat.is_some() || s.loud.is_some();
-    let find = ui
-        .add_enabled(ready, egui::Button::new("自動找精華候選"))
-        .on_hover_text("在聊天熱度和音量的高峰前後建立片段；前後秒數可在設定調整")
-        .clicked();
-    ui.separator();
+    let mut open_settings = false;
+    let t = crate::ui::tokens();
+    egui::Frame::none()
+        .fill(t.bg_elevated)
+        .stroke(Stroke::new(1.0_f32, t.separator))
+        .rounding(crate::ui::ROUNDING)
+        .inner_margin(10.0)
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.label(RichText::new("直播精華自動偵測").strong());
+            ui.add_space(6.0);
+            let (chat_text, chat_ok) = match (&s.chat_file, &s.chat, &s.chat_rx) {
+                (None, ..) => ("找不到同名 .live_chat.json（下載時勾選聊天室並與影片同資料夾）".to_string(), false),
+                (Some(_), _, Some(_)) => ("聊天室：讀取中…".to_string(), false),
+                (Some(_), Some(c), _) => (format!("✓ 聊天室已載入（約 {} 分鐘）", c.len() / 60), true),
+                (Some(_), None, None) => ("聊天室紀錄沒有可用的時間資訊".to_string(), false),
+            };
+            ui.label(RichText::new(chat_text).small().color(if chat_ok { crate::ui::good() } else { t.text_muted }));
+            ui.add_space(4.0);
+            ui.horizontal(|ui| match (&s.loud, &s.loud_job) {
+                (_, Some(job)) => {
+                    ui.spinner();
+                    ui.label(RichText::new(format!("分析音量中… {}", crate::media::fmt_duration(job.progress.load(Ordering::Relaxed) as f64))).small());
+                    cancel = ui.small_button("取消").clicked();
+                }
+                (Some(_), None) => {
+                    ui.label(RichText::new("✓ 音量軌已分析").small().color(crate::ui::good()));
+                    analyze = ui.small_button("重新分析").clicked();
+                }
+                (None, None) => {
+                    ui.label(RichText::new("音量軌：未分析").small().weak());
+                    analyze = ui.small_button("分析音量").on_hover_text("用 FFmpeg 讀完整段聲音，長直播約需幾分鐘；結果會保存").clicked();
+                }
+            });
+            if let Some(e) = &s.loud_error {
+                ui.add_space(4.0);
+                ui.label(RichText::new(e).small().color(crate::ui::danger()));
+            }
+            ui.add_space(8.0);
+            let ready = s.chat.is_some() || s.loud.is_some();
+            let btn = egui::Button::new(RichText::new("⚡ 自動找精華候選").strong().color(if ready { egui::Color32::WHITE } else { t.text_muted }))
+                .fill(if ready { t.selection_bg } else { t.bg_control });
+            let find_resp = ui
+                .add_enabled(ready, btn)
+                .on_hover_text("在聊天熱度和音量的高峰前後建立片段；前後秒數與加權關鍵字可在設定調整");
+            if find_resp.clicked() {
+                app.act(Action::FindCandidates(id.to_string()));
+            }
+            ui.add_space(4.0);
+            if ui.link(RichText::new("調整精華參數與關鍵字…").small()).clicked() {
+                open_settings = true;
+            }
+        });
+    ui.add_space(8.0);
+    ui.label(
+        RichText::new("提示：分析完成後可在時間軸上看到橘色聊天熱度與藍色音量曲線，點一下即可跳轉；按 I／O 標記並按 Enter 加入片段，最後從上方一鍵匯出 Premiere XML。")
+            .small()
+            .weak(),
+    );
     if analyze {
         app.analyze_loudness();
     }
@@ -424,8 +454,8 @@ pub fn candidates_ui(app: &mut App, ui: &mut egui::Ui, id: &str) {
             s.loud_job = None;
         }
     }
-    if find {
-        app.act(Action::FindCandidates(id.to_string()));
+    if open_settings {
+        app.act(Action::OpenSettingsAt(crate::config::SettingsPage::Highlights));
     }
 }
 

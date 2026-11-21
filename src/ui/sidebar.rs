@@ -1,9 +1,60 @@
 //! The left sidebar: library views, folders, smart folders and tags.
 
 use super::*;
+use std::collections::HashMap;
+
+/// Counts and flat trees derived from the library, cached per `lib.revision`
+/// so the sidebar and inspector don't rescan every item on every frame.
+#[derive(Clone, Default)]
+pub struct SidebarStats {
+    pub total: usize,
+    pub uncategorized: usize,
+    pub untagged: usize,
+    pub trash: usize,
+    pub total_size: u64,
+    pub by_kind: [usize; 4],
+    pub folder_counts: HashMap<String, usize>,
+    pub tag_counts: Vec<(String, usize)>,
+    pub folder_flat: Vec<(String, String, usize)>,
+}
+
+impl SidebarStats {
+    pub fn compute(lib: &Library) -> Self {
+        let mut s = Self {
+            folder_counts: lib.folder_counts(),
+            tag_counts: lib.tag_counts(),
+            folder_flat: lib.folder_flat(),
+            ..Default::default()
+        };
+        for it in lib.items.values() {
+            if it.deleted {
+                s.trash += 1;
+            } else {
+                s.total += 1;
+                s.total_size += it.size;
+                s.uncategorized += usize::from(it.folders.is_empty());
+                s.untagged += usize::from(it.tags.is_empty());
+                let idx = MediaKind::ALL.iter().position(|k| *k == it.kind).unwrap_or(3);
+                s.by_kind[idx] += 1;
+            }
+        }
+        s
+    }
+}
 
 impl App {
+    /// Sidebar & inspector stats, rebuilt only when `lib.revision` advances.
+    pub(super) fn cached_sidebar_stats(&self) -> SidebarStats {
+        let Some(lib) = &self.lib else { return SidebarStats::default() };
+        let mut cache = self.sidebar_cache.borrow_mut();
+        if cache.0 != Some(lib.revision) {
+            *cache = (Some(lib.revision), SidebarStats::compute(lib));
+        }
+        cache.1.clone()
+    }
+
     pub fn sidebar(&mut self, ctx: &egui::Context) {
+        let stats = self.cached_sidebar_stats();
         egui::SidePanel::left("sidebar")
             .resizable(true)
             .default_width(230.0)
@@ -13,7 +64,8 @@ impl App {
                 ui.add_space(6.0);
                 // The library's name opens what can be done with the library; the
                 // help menu sits at the bottom.
-                ui.menu_button(RichText::new(format!("{} ⏷", lib.name())).heading().strong(), |ui| {
+                let lib_btn = ui
+                    .menu_button(RichText::new(format!("{}   ", lib.name())).heading().strong(), |ui| {
                     if ui.button("開啟其他資源庫…").clicked() {
                         self.act(Action::OpenLibraryDialog);
                         ui.close_menu();
@@ -79,52 +131,70 @@ impl App {
                         let _ = open::that_detached(&lib.root);
                         ui.close_menu();
                     }
-                });
+                    })
+                    .response;
+                paint_arrow(ui.painter(), lib_btn.rect.right_center() - vec2(10.0, 0.0), Arrow::Open, ui.visuals().weak_text_color());
+                lib_btn.on_hover_text(format!("資源庫位置：{}\n點一下開啟資源庫選單", lib.root.display()));
                 ui.separator();
 
-                let live = lib.items.values().filter(|i| !i.deleted);
-                let (mut total, mut uncategorized, mut untagged) = (0, 0, 0);
-                let mut by_kind = [0usize; 4];
-                for it in live {
-                    total += 1;
-                    uncategorized += it.folders.is_empty() as usize;
-                    untagged += it.tags.is_empty() as usize;
-                    by_kind[MediaKind::ALL.iter().position(|k| *k == it.kind).unwrap_or(3)] += 1;
-                }
-                let trash = lib.items.values().filter(|i| i.deleted).count();
-                let folder_counts = lib.folder_counts();
-                let tags = lib.tag_counts();
+                let total = stats.total;
+                let uncategorized = stats.uncategorized;
+                let untagged = stats.untagged;
+                let trash = stats.trash;
+                let by_kind = stats.by_kind;
+                let folder_counts = &stats.folder_counts;
+                let tags = &stats.tag_counts;
                 // Edited through a local so the closure below only needs `&self`.
                 let mut tag_search = std::mem::take(&mut self.tag_search);
+                let mut open_ai_log = false;
 
                 egui::TopBottomPanel::bottom("sidebar-help").show_inside(ui, |ui| {
-                    ui.menu_button("❓ 說明", |ui| {
-                        if ui.add(egui::Button::new("快速鍵一覽").shortcut_text("? / F1")).clicked() {
-                            self.act(Action::ShowShortcuts);
-                            ui.close_menu();
-                        }
-                        if ui.button(format!("查看新版本（目前 {}）", env!("CARGO_PKG_VERSION"))).clicked() {
-                            let _ = open::that_detached(crate::update::releases_url());
-                            ui.close_menu();
-                        }
-                        if ui.button("回報問題…").on_hover_text("在瀏覽器開啟 GitHub 回報頁面，需要 GitHub 帳號").clicked() {
-                            let _ = open::that_detached(crate::update::report_url());
-                            ui.close_menu();
-                        }
-                        ui.separator();
-                        if ui.button("開啟記錄資料夾").clicked() {
-                            if let Some(d) = crate::log::dir() {
-                                let _ = std::fs::create_dir_all(&d);
-                                let _ = open::that_detached(d);
+                    ui.horizontal(|ui| {
+                        ui.menu_button("❓ 說明", |ui| {
+                            if ui.add(egui::Button::new("快速鍵一覽").shortcut_text("? / F1")).clicked() {
+                                self.act(Action::ShowShortcuts);
+                                ui.close_menu();
                             }
-                            ui.close_menu();
-                        }
-                        if ui.button("複製最近的記錄").on_hover_text("複製最後 200 行，可以貼到回報裡；不會自動上傳").clicked() {
-                            ui.ctx().copy_text(crate::log::tail(200));
-                            ui.close_menu();
-                        }
-                        ui.separator();
-                        ui.label(RichText::new(format!("OrangeLink {}", env!("CARGO_PKG_VERSION"))).small().weak());
+                            if ui.button(format!("查看新版本（目前 {}）", env!("CARGO_PKG_VERSION"))).clicked() {
+                                let _ = open::that_detached(crate::update::releases_url());
+                                ui.close_menu();
+                            }
+                            if ui.button("回報問題…").on_hover_text("在瀏覽器開啟 GitHub 回報頁面，需要 GitHub 帳號").clicked() {
+                                let _ = open::that_detached(crate::update::report_url());
+                                ui.close_menu();
+                            }
+                            ui.separator();
+                            if ui.button("開啟記錄資料夾").clicked() {
+                                if let Some(d) = crate::log::dir() {
+                                    let _ = std::fs::create_dir_all(&d);
+                                    let _ = open::that_detached(d);
+                                }
+                                ui.close_menu();
+                            }
+                            if ui.button("複製最近的記錄").on_hover_text("複製最後 200 行，可以貼到回報裡；不會自動上傳").clicked() {
+                                ui.ctx().copy_text(crate::log::tail(200));
+                                ui.close_menu();
+                            }
+                            ui.separator();
+                            ui.label(RichText::new(format!("OrangeLink {}", env!("CARGO_PKG_VERSION"))).small().weak());
+                        });
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            if self.mcp.is_running() {
+                                if ui
+                                    .add(egui::Button::new(RichText::new("● MCP").small().color(good())).frame(false))
+                                    .on_hover_text("本機 MCP 伺服器執行中；按一下查看 AI 操作紀錄")
+                                    .clicked()
+                                {
+                                    open_ai_log = true;
+                                }
+                            } else if ui
+                                .add(egui::Button::new(RichText::new("○ MCP").small().weak()).frame(false))
+                                .on_hover_text("AI 助理整合（MCP）尚未啟用；按一下開啟整合設定")
+                                .clicked()
+                            {
+                                self.act(Action::OpenSettingsAt(crate::config::SettingsPage::Integration));
+                            }
+                        });
                     });
                 });
 
@@ -186,7 +256,7 @@ impl App {
                         if lib.meta.folders.is_empty() {
                             ui.label(RichText::new("尚無資料夾").small().weak());
                         }
-                        self.folder_tree(ui, lib, None, 0, &folder_counts);
+                        self.folder_tree(ui, lib, None, 0, folder_counts);
                     }
                     // Drop zone for moving a folder back to the top level.
                     if egui::DragAndDrop::has_payload_of_type::<DragFolder>(ui.ctx()) {
@@ -250,6 +320,9 @@ impl App {
                     }
                 });
                 self.tag_search = tag_search;
+                if open_ai_log {
+                    self.show_ai_log = true;
+                }
             });
     }
 

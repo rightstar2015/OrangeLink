@@ -136,7 +136,7 @@ impl App {
             .as_ref()
             .is_some_and(|l| l.missing.contains(&it.id));
         let hovered = resp.hovered() || resp.contains_pointer();
-        let v = ui.visuals().clone();
+        let hover_fg = ui.visuals().widgets.hovered.fg_stroke.color;
         let painter = ui.painter().clone();
         let pad = 6.0;
         // Small cells (narrow images in the justified layout) keep only what matters.
@@ -204,6 +204,20 @@ impl App {
             }
         }
 
+        if hovered && !missing && img.width() >= 130.0 && img.height() >= 90.0 && !egui::DragAndDrop::has_any_payload(ui.ctx()) {
+            let label = match it.kind {
+                MediaKind::Video => "✂ 剪輯",
+                _ => "👁 預覽",
+            };
+            let btn = egui::Button::new(RichText::new(label).small().color(Color32::WHITE))
+                .fill(Color32::from_black_alpha(185))
+                .stroke(Stroke::new(1.0_f32, Color32::from_white_alpha(60)));
+            let at = Rect::from_center_size(pos2(img.center().x, img.bottom() - 16.0), vec2(58.0, 20.0));
+            if ui.put(at, btn).on_hover_text("開啟預覽／剪輯工作台").clicked() {
+                self.act(Action::OpenViewer(it.id.clone()));
+            }
+        }
+
         if missing {
             let label = pill(
                 &painter,
@@ -230,10 +244,7 @@ impl App {
             painter.rect_stroke(
                 img,
                 rounding,
-                Stroke::new(
-                    1.5_f32,
-                    v.widgets.hovered.fg_stroke.color.gamma_multiply(0.45),
-                ),
+                Stroke::new(1.5_f32, hover_fg.gamma_multiply(0.45)),
             );
         }
         self.cell_tooltip(ui, resp, it);

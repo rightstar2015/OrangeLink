@@ -48,7 +48,7 @@ impl App {
             if ui.add_enabled(picked > 0, egui::Button::new("合併到選取的")).on_hover_text(tip_merge).clicked() {
                 self.act(Action::ResolveDuplicates { merge: true, only_selected: true });
             }
-            ui.menu_button(format!("全部 {} 組 ⏷", self.groups.len()), |ui| {
+            ui.menu_button(format!("全部 {} 組 ▼", self.groups.len()), |ui| {
                 ui.label(RichText::new("有選取的組留選取的，其他組留第一個").small().weak());
                 if ui.button("每組保留一個，其他移到垃圾桶").clicked() {
                     self.act(Action::ResolveDuplicates { merge: false, only_selected: false });
@@ -63,6 +63,7 @@ impl App {
     }
 
     pub fn grid_ui(&mut self, ui: &mut Ui) {
+        let panel_rect = ui.max_rect();
         if let (View::Ids { label, source, groups, .. }, false) = (&self.view, self.searching_everywhere()) {
             let (label, source, grouped) = (label.clone(), source.clone(), !groups.is_empty());
             self.results_bar(ui, &label, &source, grouped);
@@ -79,11 +80,76 @@ impl App {
             return self.empty_state(ui);
         }
         match self.config.view_mode {
-            ViewMode::Justified => return self.justified_ui(ui),
-            ViewMode::List => return self.list_ui(ui),
-            ViewMode::Grid => {}
+            ViewMode::Justified => self.justified_ui(ui),
+            ViewMode::List => self.list_ui(ui),
+            ViewMode::Grid => self.tiles_ui(ui),
         }
+        if self.selected.len() >= 2 && self.viewer.is_none() {
+            self.multi_action_bar(ui.ctx(), panel_rect);
+        }
+    }
 
+    /// Floating pill bar at the bottom-center of the grid when multiple items are selected.
+    fn multi_action_bar(&mut self, ctx: &egui::Context, panel_rect: Rect) {
+        let n = self.selected.len();
+        let ids = self.selected_ids();
+        let in_trash = self.view == View::Trash;
+        let t = tokens();
+        let pos = pos2(panel_rect.center().x, panel_rect.bottom() - 16.0);
+        egui::Area::new(egui::Id::new("multi-action-bar"))
+            .order(egui::Order::Foreground)
+            .pivot(Align2::CENTER_BOTTOM)
+            .fixed_pos(pos)
+            .show(ctx, |ui| {
+                egui::Frame::none()
+                    .fill(t.bg_elevated)
+                    .stroke(Stroke::new(1.0_f32, accent().gamma_multiply(0.8)))
+                    .rounding(18.0)
+                    .inner_margin(egui::Margin::symmetric(14.0, 6.0))
+                    .shadow(ui.visuals().popup_shadow)
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing.x = 6.0;
+                            ui.label(RichText::new(format!("已選取 {n} 項")).strong().color(accent()));
+                            ui.separator();
+                            ui.menu_button("★ 評分", |ui| {
+                                for r in (1..=5u8).rev() {
+                                    if ui.button(RichText::new("★".repeat(r as usize)).color(star())).clicked() {
+                                        self.act(Action::SetRating(ids.clone(), r));
+                                        ui.close_menu();
+                                    }
+                                }
+                                ui.separator();
+                                if ui.button("清除評分").clicked() {
+                                    self.act(Action::SetRating(ids.clone(), 0));
+                                    ui.close_menu();
+                                }
+                            });
+                            if ui.button("🏷 標籤").on_hover_text("聚焦右側標籤輸入框").clicked() {
+                                self.act(Action::FocusTagInput);
+                            }
+                            if ui.button("F2 改名").on_hover_text("批次重新命名").clicked() {
+                                self.act(Action::BatchRename(ids.clone()));
+                            }
+                            if in_trash {
+                                if ui.button("還原").clicked() {
+                                    self.act(Action::RestoreSelected);
+                                }
+                                if ui.button(RichText::new("永久刪除").color(danger())).clicked() {
+                                    self.act(Action::ConfirmDeleteForever);
+                                }
+                            } else if ui.button(RichText::new("🗑 刪除").color(danger())).on_hover_text("移到垃圾桶 (Delete)").clicked() {
+                                self.act(Action::TrashSelected);
+                            }
+                            if ui.small_button("✖").on_hover_text("取消選取 (Esc)").clicked() {
+                                self.act(Action::ClearSelection);
+                            }
+                        });
+                    });
+            });
+    }
+
+    fn tiles_ui(&mut self, ui: &mut Ui) {
         let gap = 12.0;
         let label_h = 40.0;
         let avail = ui.available_width() - 12.0;
@@ -207,7 +273,7 @@ impl App {
     /// A bar over the grid while FFmpeg is missing, until closed.
     fn ffmpeg_bar(&mut self, ui: &mut Ui) {
         egui::Frame::none().fill(warning().gamma_multiply(0.15)).rounding(ROUNDING).inner_margin(egui::Margin::symmetric(10.0, 6.0)).show(ui, |ui| {
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 let what = if cfg!(windows) && self.config.play_engine != crate::config::PlayEngine::Ffmpeg {
                     "影片縮圖、片段輸出和 Windows 無法播放的格式需要 FFmpeg"
                 } else {
@@ -220,12 +286,10 @@ impl App {
                 if ui.small_button("指定資料夾…").clicked() {
                     self.act(Action::OpenSettingsAt(crate::config::SettingsPage::Tools));
                 }
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    if ui.small_button("✖").on_hover_text("不再顯示").clicked() {
-                        self.config.ffmpeg_hint_dismissed = true;
-                        self.config.save();
-                    }
-                });
+                if ui.small_button("✖").on_hover_text("不再顯示").clicked() {
+                    self.config.ffmpeg_hint_dismissed = true;
+                    self.config.save();
+                }
             });
         });
         ui.add_space(4.0);
@@ -242,10 +306,12 @@ impl App {
             } else if empty_library {
                 ui.label(RichText::new("資源庫還是空的").size(18.0).strong());
                 ui.add_space(14.0);
-                let size = [180.0, 40.0];
-                ui.horizontal(|ui| {
+                let size = [168.0, 38.0];
+                ui.horizontal_wrapped(|ui| {
                     let w = size[0] * 3.0 + ui.spacing().item_spacing.x * 2.0;
-                    ui.add_space(((ui.available_width() - w) / 2.0).max(0.0));
+                    if ui.available_width() > w {
+                        ui.add_space((ui.available_width() - w) / 2.0);
+                    }
                     if ui.add_sized(size, egui::Button::new("📄 匯入檔案…")).clicked() {
                         self.act(Action::ImportFiles);
                     }
@@ -269,11 +335,17 @@ impl App {
                     ui.label(RichText::new(format!("目前的條件：{}", conditions.join("、"))).small().weak());
                 }
                 ui.add_space(10.0);
-                if ui.button("清除篩選").clicked() {
+                let had_filters = !self.search.trim().is_empty() || !self.tag_filter.is_empty() || self.filter_count() > 0;
+                let btn_label = if had_filters { "清除篩選" } else { "回到全部素材" };
+                if ui.button(btn_label).clicked() {
                     self.clear_filters();
                     self.search.clear();
                     if self.config.search_all {
                         self.config.search_all = false;
+                        self.config.save();
+                    }
+                    if !had_filters && self.view != View::All {
+                        self.act(Action::SetView(View::All));
                     }
                 }
             }
@@ -399,26 +471,25 @@ impl App {
         self.paint_cell_overlay(ui, img_rect, 6.0, it, &resp, previewing.is_some());
 
         let label_rect = Rect::from_min_max(pos2(rect.min.x + 2.0, img_rect.max.y + 4.0), rect.max);
-        let v = ui.visuals().clone();
+        let (text_color, weak_color) = (ui.visuals().text_color(), ui.visuals().weak_text_color());
         let name_rect = Rect::from_min_max(label_rect.min, pos2(label_rect.max.x - 2.0, label_rect.min.y + 18.0));
-        let color = if selected { accent() } else { v.text_color() };
+        let color = if selected { accent() } else { text_color };
         self.item_name(ui, name_rect, it, 13.0, color);
-        let clip = ui.painter().with_clip_rect(label_rect.intersect(ui.clip_rect()));
-        let mut detail = if it.width > 0 {
-            format!("{} × {}  ·  {}", it.width, it.height, human_size(it.size))
+        let detail = if size.x < 130.0 {
+            human_size(it.size)
+        } else if it.width > 0 {
+            let mut s = format!("{} × {}  ·  {}", it.width, it.height, human_size(it.size));
+            if size.x >= 185.0 {
+                if let Some(fps) = it.fps {
+                    s += &format!("  ·  {fps:.0}fps");
+                }
+            }
+            s
         } else {
             human_size(it.size)
         };
-        if let Some(fps) = it.fps {
-            detail += &format!("  ·  {fps:.0}fps");
-        }
-        clip.text(
-            label_rect.min + vec2(0.0, 18.0),
-            Align2::LEFT_TOP,
-            detail,
-            FontId::proportional(11.0),
-            v.weak_text_color(),
-        );
+        let detail_rect = Rect::from_min_max(label_rect.min + vec2(0.0, 18.0), label_rect.max);
+        cell::paint_name(ui, detail_rect, &detail, 11.0, weak_color);
 
         self.item_interactions(ui, &resp, it);
     }
@@ -593,8 +664,8 @@ impl App {
         let previewing = previewing.is_some();
         self.paint_cell_overlay(ui, img_rect, 4.0, it, &resp, previewing);
         let label = Rect::from_min_max(pos2(rect.min.x + 2.0, img_rect.max.y + 2.0), rect.max);
-        let v = ui.visuals().clone();
-        let color = if selected { accent() } else { v.text_color() };
+        let text_color = ui.visuals().text_color();
+        let color = if selected { accent() } else { text_color };
         self.item_name(ui, label, it, 12.0, color);
         self.item_interactions(ui, &resp, it);
     }
@@ -616,127 +687,150 @@ impl App {
             ("加入時間", 130.0, Some(SortKey::Added)),
         ];
         let fixed: f32 = cols.iter().map(|c| c.1).sum();
-        let name_w = (ui.available_width() - fixed - 48.0).max(160.0);
+        let name_w = (ui.available_width() - fixed - 52.0).max(160.0);
+        let total_w = 44.0 + name_w + fixed;
         let width_of = |i: usize| if i == 0 { name_w } else { cols[i].1 };
 
-        ui.horizontal(|ui| {
-            ui.add_space(44.0);
-            for (i, (title, _, key)) in cols.iter().enumerate() {
-                let arrow = match key {
-                    Some(k) if *k == self.sort => if self.sort_desc { " ⬇" } else { " ⬆" },
-                    _ => "",
-                };
-                let (rect, r) = ui.allocate_exact_size(vec2(width_of(i), 20.0), Sense::click());
-                let color = if r.hovered() && key.is_some() { accent() } else { ui.visuals().strong_text_color() };
-                ui.painter().text(rect.left_center(), Align2::LEFT_CENTER, format!("{title}{arrow}"), FontId::proportional(12.0), color);
-                if let (Some(k), true) = (key, r.clicked()) {
-                    if self.sort == *k {
-                        self.sort_desc = !self.sort_desc;
-                    } else {
-                        self.sort = *k;
+        ScrollArea::horizontal().id_salt("list-h").auto_shrink([false, false]).show(ui, |ui| {
+            ui.set_min_width(total_w);
+            ui.horizontal(|ui| {
+                ui.add_space(44.0);
+                for (i, (title, _, key)) in cols.iter().enumerate() {
+                    let arrow = match key {
+                        Some(k) if *k == self.sort => if self.sort_desc { " ⬇" } else { " ⬆" },
+                        _ => "",
+                    };
+                    let sense = if key.is_some() { Sense::click() } else { Sense::hover() };
+                    let (rect, r) = ui.allocate_exact_size(vec2(width_of(i), 20.0), sense);
+                    let color = if r.hovered() && key.is_some() { accent() } else { ui.visuals().strong_text_color() };
+                    ui.painter().text(rect.left_center(), Align2::LEFT_CENTER, format!("{title}{arrow}"), FontId::proportional(12.0), color);
+                    if let (Some(k), true) = (key, r.clicked()) {
+                        if self.sort == *k {
+                            self.sort_desc = !self.sort_desc;
+                        } else {
+                            self.sort = *k;
+                        }
                     }
                 }
-            }
-        });
-        ui.separator();
+            });
+            ui.separator();
 
-        // One item a row, with a header row before each group.
-        let rows = grouping::rows(&self.groups, self.visible.len(), 1);
-        let mut scroll = ScrollArea::vertical().id_salt("list").auto_shrink([false, false]).drag_to_scroll(false);
-        if let Some(offset) = self.glide(ui, rows.len() as f32 * row_h) {
-            scroll = scroll.vertical_scroll_offset(offset);
-        }
-        if let Some(offset) = self.restore_scroll.take() {
-            scroll = scroll.vertical_scroll_offset(offset);
-        }
-        if let Some(id) = self.scroll_to.take() {
-            if let Some(idx) = self.visible.iter().position(|x| *x == id) {
-                let r = rows.iter().position(|row| *row == Row::Items { first: idx, end: idx + 1 }).unwrap_or(idx);
-                let top = r as f32 * row_h;
-                if top < self.grid_scroll {
-                    scroll = scroll.vertical_scroll_offset(top);
-                } else if top + row_h > self.grid_scroll + self.grid_view_h {
-                    scroll = scroll.vertical_scroll_offset(top + row_h - self.grid_view_h);
+            // One item a row, with a header row before each group.
+            let rows = grouping::rows(&self.groups, self.visible.len(), 1);
+            let mut scroll = ScrollArea::vertical().id_salt("list").auto_shrink([false, false]).drag_to_scroll(false);
+            if let Some(offset) = self.glide(ui, rows.len() as f32 * row_h) {
+                scroll = scroll.vertical_scroll_offset(offset);
+            }
+            if let Some(offset) = self.restore_scroll.take() {
+                scroll = scroll.vertical_scroll_offset(offset);
+            }
+            if let Some(id) = self.scroll_to.take() {
+                if let Some(idx) = self.visible.iter().position(|x| *x == id) {
+                    let r = rows.iter().position(|row| *row == Row::Items { first: idx, end: idx + 1 }).unwrap_or(idx);
+                    let top = r as f32 * row_h;
+                    if top < self.grid_scroll {
+                        scroll = scroll.vertical_scroll_offset(top);
+                    } else if top + row_h > self.grid_scroll + self.grid_view_h {
+                        scroll = scroll.vertical_scroll_offset(top + row_h - self.grid_view_h);
+                    }
                 }
             }
-        }
-        let bg = self.grid_background(ui);
-        if let Some(offset) = self.marquee_autoscroll(ui, bg.rect) {
-            scroll = scroll.vertical_scroll_offset(offset);
-        }
-        let Some(lib) = &self.lib else { return };
-        ui.spacing_mut().item_spacing.y = 0.0;
-        let out = scroll.show_rows(ui, row_h, rows.len(), |ui, range| {
-            self.cell_origin.set(ui.max_rect().min - vec2(0.0, range.start as f32 * row_h));
-            for r in range {
-                let idx = match rows[r] {
-                    Row::Items { first, .. } => first,
-                    Row::Header(g) => {
-                        let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), row_h), Sense::hover());
-                        paint_group_header(ui, rect, &self.groups[g]);
-                        continue;
-                    }
-                };
-                let Some(it) = lib.items.get(&self.visible[idx]) else { continue };
-                let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), row_h), Sense::hover());
-                self.record_cell(&it.id, rect);
-                // Clicks anywhere on the row; dragging the thumbnail/name drags the files out,
-                // dragging the other columns falls through to the background's selection box.
-                let resp = ui.interact(rect, egui::Id::new(("item", &it.id)), Sense::click());
-                let grab_rect = Rect::from_min_size(rect.min, vec2(44.0 + name_w, row_h));
-                let grab = ui.interact(grab_rect, egui::Id::new(("item-grab", &it.id)), Sense::drag());
-                if grab.drag_started() {
-                    let ids = if self.selected.contains(&it.id) { self.selected_ids() } else { vec![it.id.clone()] };
-                    egui::DragAndDrop::set_payload(ui.ctx(), DragIds(ids));
-                }
-                let selected = self.selected.contains(&it.id);
-                let v = ui.visuals();
-                let painter = ui.painter();
-                if selected {
-                    painter.rect_filled(rect, 3.0, v.selection.bg_fill.gamma_multiply(0.45));
-                } else if resp.hovered() {
-                    painter.rect_filled(rect, 3.0, v.widgets.hovered.weak_bg_fill);
-                } else if idx % 2 == 1 {
-                    painter.rect_filled(rect, 0.0, v.faint_bg_color);
-                }
-                let thumb_rect = Rect::from_min_size(rect.min + vec2(6.0, 2.0), vec2(30.0, 30.0));
-                match self.thumb_tex(&it.id) {
-                    Some((tex, size)) => {
-                        painter.image(tex, fit_rect(thumb_rect, size), UV, Color32::WHITE);
-                    }
-                    None => {
-                        painter.text(thumb_rect.center(), Align2::CENTER_CENTER, it.kind.icon(), FontId::proportional(16.0), v.weak_text_color());
-                    }
-                }
-                let cells = [
-                    it.name.clone(),
-                    it.kind.label().to_string(),
-                    if it.width > 0 { format!("{} × {}", it.width, it.height) } else { String::new() },
-                    it.duration.map(fmt_duration).unwrap_or_default(),
-                    human_size(it.size),
-                    "★".repeat(it.rating as usize),
-                    fmt_time(it.added_at),
-                ];
-                let mut x = rect.min.x + 44.0;
-                for (i, text) in cells.iter().enumerate() {
-                    let w = width_of(i);
-                    let cell = Rect::from_min_size(pos2(x, rect.min.y), vec2(w - 8.0, row_h));
-                    let color = if i == 5 { star() } else if i == 0 { v.text_color() } else { v.weak_text_color() };
-                    painter.with_clip_rect(cell.intersect(ui.clip_rect())).text(cell.left_center(), Align2::LEFT_CENTER, text, FontId::proportional(13.0), color);
-                    x += w;
-                }
-                if self.renaming.borrow().as_ref().is_some_and(|e| e.is(&it.id, false)) {
-                    let name_cell = Rect::from_min_size(pos2(rect.min.x + 44.0, rect.center().y - 9.0), vec2(name_w - 8.0, 18.0));
-                    let color = ui.visuals().text_color();
-                    self.item_name(ui, name_cell, it, 13.0, color);
-                }
-                self.item_interactions(ui, &resp, it);
+            let bg = self.grid_background(ui);
+            if let Some(offset) = self.marquee_autoscroll(ui, bg.rect) {
+                scroll = scroll.vertical_scroll_offset(offset);
             }
+            let Some(lib) = &self.lib else { return };
+            ui.spacing_mut().item_spacing.y = 0.0;
+            let out = scroll.show_rows(ui, row_h, rows.len(), |ui, range| {
+                self.cell_origin.set(ui.max_rect().min - vec2(0.0, range.start as f32 * row_h));
+                for r in range {
+                    let idx = match rows[r] {
+                        Row::Items { first, .. } => first,
+                        Row::Header(g) => {
+                            let (rect, _) = ui.allocate_exact_size(vec2(total_w, row_h), Sense::hover());
+                            paint_group_header(ui, rect, &self.groups[g]);
+                            continue;
+                        }
+                    };
+                    let Some(it) = lib.items.get(&self.visible[idx]) else { continue };
+                    let (rect, _) = ui.allocate_exact_size(vec2(total_w, row_h), Sense::hover());
+                    self.record_cell(&it.id, rect);
+                    // Clicks anywhere on the row; dragging the thumbnail/name drags the files out,
+                    // dragging the other columns falls through to the background's selection box.
+                    let resp = ui.interact(rect, egui::Id::new(("item", &it.id)), Sense::click());
+                    let grab_rect = Rect::from_min_size(rect.min, vec2(44.0 + name_w, row_h));
+                    let grab = ui.interact(grab_rect, egui::Id::new(("item-grab", &it.id)), Sense::drag());
+                    if grab.drag_started() {
+                        let ids = if self.selected.contains(&it.id) { self.selected_ids() } else { vec![it.id.clone()] };
+                        egui::DragAndDrop::set_payload(ui.ctx(), DragIds(ids));
+                    }
+                    let selected = self.selected.contains(&it.id);
+                    let missing = lib.missing.contains(&it.id);
+                    let v = ui.visuals();
+                    let painter = ui.painter();
+                    if selected {
+                        painter.rect_filled(rect, 3.0, tokens().accent_soft);
+                        let bar = Rect::from_min_max(rect.min + vec2(0.0, 4.0), pos2(rect.min.x + 2.5, rect.max.y - 4.0));
+                        painter.rect_filled(bar, 1.5, accent());
+                    } else if resp.hovered() {
+                        painter.rect_filled(rect, 3.0, v.widgets.hovered.weak_bg_fill);
+                    } else if idx % 2 == 1 {
+                        painter.rect_filled(rect, 0.0, v.faint_bg_color);
+                    }
+                    let thumb_rect = Rect::from_min_size(rect.min + vec2(6.0, 2.0), vec2(30.0, 30.0));
+                    match self.thumb_tex(&it.id) {
+                        Some((tex, size)) => {
+                            painter.image(tex, fit_rect(thumb_rect, size), UV, Color32::WHITE);
+                        }
+                        None => {
+                            painter.text(thumb_rect.center(), Align2::CENTER_CENTER, it.kind.icon(), FontId::proportional(16.0), v.weak_text_color());
+                        }
+                    }
+                    let name_text = if missing {
+                        format!("⚠ {}", it.name)
+                    } else if it.source.is_some() {
+                        format!("🔗 {}", it.name)
+                    } else {
+                        it.name.clone()
+                    };
+                    let cells = [
+                        name_text,
+                        it.kind.label().to_string(),
+                        if it.width > 0 { format!("{} × {}", it.width, it.height) } else { String::new() },
+                        it.duration.map(fmt_duration).unwrap_or_default(),
+                        human_size(it.size),
+                        "★".repeat(it.rating as usize),
+                        fmt_time(it.added_at),
+                    ];
+                    let mut x = rect.min.x + 44.0;
+                    for (i, text) in cells.iter().enumerate() {
+                        let w = width_of(i);
+                        let cell = Rect::from_min_size(pos2(x, rect.min.y), vec2(w - 8.0, row_h));
+                        let color = if i == 5 {
+                            star()
+                        } else if i == 0 && missing {
+                            danger()
+                        } else if i == 0 {
+                            if selected { accent() } else { v.text_color() }
+                        } else {
+                            v.weak_text_color()
+                        };
+                        painter.with_clip_rect(cell.intersect(ui.clip_rect())).text(cell.left_center(), Align2::LEFT_CENTER, text, FontId::proportional(13.0), color);
+                        x += w;
+                    }
+                    if self.renaming.borrow().as_ref().is_some_and(|e| e.is(&it.id, false)) {
+                        let name_cell = Rect::from_min_size(pos2(rect.min.x + 44.0, rect.center().y - 9.0), vec2(name_w - 8.0, 18.0));
+                        let color = ui.visuals().text_color();
+                        self.item_name(ui, name_cell, it, 13.0, color);
+                    }
+                    self.item_interactions(ui, &resp, it);
+                }
+            });
+            self.grid_scroll = out.state.offset.y;
+            self.grid_view_h = out.inner_rect.height();
+            self.grid_cols = 1;
+            self.marquee_update(ui, &bg);
         });
-        self.grid_scroll = out.state.offset.y;
-        self.grid_view_h = out.inner_rect.height();
-        self.grid_cols = 1;
-        self.marquee_update(ui, &bg);
     }
 
     pub(super) fn item_menu(&self, ui: &mut Ui, id: &str, selected: bool) {

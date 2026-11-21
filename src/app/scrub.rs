@@ -1,10 +1,10 @@
 //! Small frames shown while hovering the progress bar. Frames are grabbed by FFmpeg one
 //! at a time on a background thread, at fixed steps, and kept for the item on screen.
 
-use super::App;
+use super::{state, App, Reply};
 use eframe::egui;
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     path::{Path, PathBuf},
     process::Stdio,
     sync::mpsc::{channel, Receiver},
@@ -18,10 +18,17 @@ const WIDTH: u32 = 200;
 pub struct Scrub {
     id: String,
     frames: HashMap<u32, egui::TextureHandle>,
+    failed: HashSet<u32>,
     order: Vec<u32>,
     pending: Option<(u32, Receiver<Option<egui::ColorImage>>)>,
     /// The step under the pointer most recently, fetched once the current grab is done.
     wanted: Option<u32>,
+}
+
+impl Scrub {
+    pub fn clear(&mut self) {
+        *self = Self::default();
+    }
 }
 
 /// Seconds between frames: about 300 steps over the video, never under 2 seconds.
@@ -54,8 +61,10 @@ impl App {
         if let Some(tex) = self.scrub.frames.get(&step) {
             return Some((tex.id(), tex.size_vec2()));
         }
-        self.scrub.wanted = Some(step);
-        self.start_scrub_grab(duration);
+        if !self.scrub.failed.contains(&step) {
+            self.scrub.wanted = Some(step);
+            self.start_scrub_grab(duration);
+        }
         // Meanwhile show the nearest frame grabbed so far.
         let near = self.scrub.frames.keys().min_by_key(|k| k.abs_diff(step))?;
         self.scrub.frames.get(near).map(|tex| (tex.id(), tex.size_vec2()))
@@ -81,7 +90,11 @@ impl App {
 
     pub(super) fn poll_scrub(&mut self) {
         let Some((step, rx)) = &self.scrub.pending else { return };
-        let Ok(frame) = rx.try_recv() else { return };
+        let frame = match state::poll(rx) {
+            Reply::Pending => return,
+            Reply::Done(img) => img,
+            Reply::Lost => None,
+        };
         let step = *step;
         self.scrub.pending = None;
         if let Some(img) = frame {
@@ -92,6 +105,8 @@ impl App {
                 let old = self.scrub.order.remove(0);
                 self.scrub.frames.remove(&old);
             }
+        } else {
+            self.scrub.failed.insert(step);
         }
         let duration = self.player.as_ref().map_or(0.0, |p| p.duration);
         self.start_scrub_grab(duration);

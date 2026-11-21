@@ -74,6 +74,9 @@ impl App {
         if has_any && (search.gained_focus() || search.clicked()) {
             ui.memory_mut(|m| m.open_popup(id));
         }
+        if !has_any || !ui.memory(|m| m.is_popup_open(id)) {
+            return;
+        }
         let typed = self.search.trim().to_lowercase();
         let wanted = |s: &String| typed.is_empty() || s.to_lowercase().contains(&typed) && s.to_lowercase() != typed;
         let pinned: Vec<String> = self.config.pinned_searches.iter().filter(|s| wanted(s)).cloned().collect();
@@ -193,6 +196,24 @@ impl App {
         if ui.add_enabled(self.history.can_go_forward(), egui::Button::new("→").frame(false)).on_hover_text("下一個檢視（Alt + →）").clicked() {
             self.act(Action::NavForward);
         }
+        ui.separator();
+        if ui
+            .add_enabled(self.can_undo(), egui::Button::new("↶").frame(false))
+            .on_hover_text(self.undo_tip())
+            .on_disabled_hover_text("沒有可以復原的操作（Ctrl+Z）")
+            .clicked()
+        {
+            self.act(Action::Undo);
+        }
+        if ui
+            .add_enabled(self.can_redo(), egui::Button::new("↷").frame(false))
+            .on_hover_text(self.redo_tip())
+            .on_disabled_hover_text("沒有可以重做的操作（Ctrl+Y）")
+            .clicked()
+        {
+            self.act(Action::Redo);
+        }
+        ui.separator();
         ui.menu_button(RichText::new("＋ 匯入").strong(), |ui| {
             if ui.button("匯入檔案…").clicked() {
                 self.act(Action::ImportFiles);
@@ -212,9 +233,9 @@ impl App {
 
         let search = ui.add(
             TextEdit::singleline(&mut self.search)
-                .hint_text("🔍 搜尋名稱、標籤、註解、網址…")
+                .hint_text("🔍 搜尋名稱、標籤、字幕…（如 ext:png rating:4）")
                 // Grows with the window, leaving room for the filter and the right side.
-                .desired_width((ui.available_width() - 560.0).clamp(160.0, 420.0)),
+                .desired_width((ui.available_width() - 620.0).clamp(150.0, 400.0)),
         );
         let search = if search.has_focus() {
             search
@@ -246,6 +267,18 @@ impl App {
         if !self.search.is_empty() && ui.small_button("✖").on_hover_text("清除搜尋").clicked() {
             self.search.clear();
         }
+        let syntax_btn = ui
+            .add(egui::Button::new(RichText::new("?").small().color(if self.syntax_open { accent() } else { tokens().text_muted })))
+            .on_hover_text("搜尋語法速查（點擊快速套用）");
+        if syntax_btn.clicked() {
+            self.syntax_open = !self.syntax_open;
+            if self.syntax_open {
+                self.filter_open = false;
+            }
+        }
+        if self.syntax_open {
+            self.syntax_popover(ctx, syntax_btn.rect);
+        }
         if ui.selectable_label(self.config.search_all, "搜尋全部").on_hover_text("開啟：搜尋時不限目前選的資料夾和標籤\n關閉：只搜尋目前選的範圍").clicked() {
             self.config.search_all = !self.config.search_all;
             self.config.save();
@@ -258,9 +291,50 @@ impl App {
         let button = ui.button(text).on_hover_text("格式、評分、顏色");
         if button.clicked() {
             self.filter_open = !self.filter_open;
+            if self.filter_open {
+                self.syntax_open = false;
+            }
         }
         if self.filter_open {
             self.filter_popover(ctx, button.rect);
+        }
+    }
+
+    /// Clickable search-syntax quick reference below the `?` button.
+    fn syntax_popover(&mut self, ctx: &egui::Context, anchor: Rect) {
+        let mut insert: Option<&'static str> = None;
+        let area = egui::Area::new(egui::Id::new("syntax-popover"))
+            .order(egui::Order::Foreground)
+            .fixed_pos(anchor.left_bottom() + vec2(0.0, 4.0))
+            .show(ctx, |ui| {
+                egui::Frame::popup(ui.style()).show(ui, |ui| {
+                    ui.set_max_width(420.0);
+                    ui.label(RichText::new("常用搜尋語法（點一下加入搜尋欄）").strong());
+                    ui.add_space(4.0);
+                    ui.horizontal_wrapped(|ui| {
+                        for token in ["ext:mp4", "ext:png", "rating:4", "dur>10m", "w>=1920", "-草稿", "貓 OR 狗"] {
+                            if ui.add(egui::Button::new(RichText::new(token).small().monospace().color(accent()))).clicked() {
+                                insert = Some(token);
+                            }
+                        }
+                    });
+                    ui.separator();
+                    super::shortcuts::search_syntax_table(ui);
+                });
+            });
+        if let Some(tok) = insert {
+            if !self.search.is_empty() && !self.search.ends_with(' ') {
+                self.search.push(' ');
+            }
+            self.search.push_str(tok);
+            self.syntax_open = false;
+            return;
+        }
+        let clicked_out = ctx.input(|i| i.pointer.any_pressed())
+            && !ctx.input(|i| i.pointer.interact_pos()).is_some_and(|p| area.response.rect.contains(p) || anchor.contains(p));
+        let escaped = ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, Key::Escape));
+        if clicked_out || escaped {
+            self.syntax_open = false;
         }
     }
 
@@ -366,59 +440,66 @@ impl App {
         let clicked_out = ctx.input(|i| i.pointer.any_pressed())
             && !ctx.input(|i| i.pointer.interact_pos()).is_some_and(|p| area.response.rect.contains(p) || anchor.contains(p))
             && !picker_open;
-        let escaped = ctx.input(|i| i.key_pressed(Key::Escape));
+        let escaped = ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, Key::Escape));
         if clicked_out || escaped {
             self.filter_open = false;
         }
     }
 
-    /// Chips for every condition in effect, each with ✖, then "全部清除".
+    /// Styled filter chips bar for every condition in effect, each with ✖, then "全部清除".
     pub(super) fn condition_row(&mut self, ui: &mut Ui) {
         // Only while it changes the results: a search is typed.
         let everywhere = self.searching_everywhere();
         if self.tag_filter.is_empty() && self.filter_count() == 0 && !everywhere {
             return;
         }
-        ui.horizontal_wrapped(|ui| {
-            ui.label(RichText::new("條件：").weak());
-            let mut remove_tag = None;
-            for t in &self.tag_filter {
-                if chip(ui, &format!("🏷 {t}")) {
-                    remove_tag = Some(t.clone());
-                }
-            }
-            if let Some(t) = remove_tag {
-                self.act(Action::ToggleTagFilter(t));
-            }
-            let mut remove_ext = None;
-            for e in &self.ext_filter {
-                if chip(ui, &e.to_uppercase()) {
-                    remove_ext = Some(e.clone());
-                }
-            }
-            if let Some(e) = remove_ext {
-                self.ext_filter.retain(|x| *x != e);
-            }
-            if self.min_rating > 0 && chip(ui, &format!("★{} 以上", self.min_rating)) {
-                self.min_rating = 0;
-            }
-            if let Some(c) = self.color_filter {
-                let (r, _) = ui.allocate_exact_size(vec2(14.0, 14.0), Sense::hover());
-                ui.painter().rect_filled(r, 3.0, Color32::from_rgb(c[0], c[1], c[2]));
-                // An edge, so white reads on the light theme and black on the dark.
-                ui.painter().rect_stroke(r, 3.0, Stroke::new(1.0_f32, tokens().outline));
-                if chip(ui, "顏色") {
-                    self.color_filter = None;
-                }
-            }
-            if everywhere && chip(ui, "搜尋全部") {
-                self.config.search_all = false;
-                self.config.save();
-            }
-            if (!self.tag_filter.is_empty() || self.filter_count() > 0) && ui.small_button("全部清除").clicked() {
-                self.clear_filters();
-            }
-        });
+        ui.add_space(2.0);
+        egui::Frame::none()
+            .fill(tokens().bg_faint)
+            .rounding(ROUNDING)
+            .inner_margin(egui::Margin::symmetric(8.0, 4.0))
+            .show(ui, |ui| {
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(RichText::new("篩選條件：").small().weak());
+                    let mut remove_tag = None;
+                    for t in &self.tag_filter {
+                        if accent_chip(ui, &format!("#{t}")) {
+                            remove_tag = Some(t.clone());
+                        }
+                    }
+                    if let Some(t) = remove_tag {
+                        self.act(Action::ToggleTagFilter(t));
+                    }
+                    let mut remove_ext = None;
+                    for e in &self.ext_filter {
+                        if accent_chip(ui, &format!("ext:{}", e.to_lowercase())) {
+                            remove_ext = Some(e.clone());
+                        }
+                    }
+                    if let Some(e) = remove_ext {
+                        self.ext_filter.retain(|x| *x != e);
+                    }
+                    if self.min_rating > 0 && accent_chip(ui, &format!("★{} 以上", self.min_rating)) {
+                        self.min_rating = 0;
+                    }
+                    if let Some(c) = self.color_filter {
+                        let (r, _) = ui.allocate_exact_size(vec2(14.0, 14.0), Sense::hover());
+                        ui.painter().rect_filled(r, 3.0, Color32::from_rgb(c[0], c[1], c[2]));
+                        // An edge, so white reads on the light theme and black on the dark.
+                        ui.painter().rect_stroke(r, 3.0, Stroke::new(1.0_f32, tokens().outline));
+                        if accent_chip(ui, "顏色") {
+                            self.color_filter = None;
+                        }
+                    }
+                    if everywhere && accent_chip(ui, "搜尋全部") {
+                        self.config.search_all = false;
+                        self.config.save();
+                    }
+                    if (!self.tag_filter.is_empty() || self.filter_count() > 0) && ui.small_button("全部清除").clicked() {
+                        self.clear_filters();
+                    }
+                });
+            });
     }
 
     /// Right to left: settings, thumbnail size, view mode, sort.

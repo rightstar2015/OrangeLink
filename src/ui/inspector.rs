@@ -47,7 +47,7 @@ pub(super) fn tag_box(ui: &mut Ui, input: &mut String, pick: &mut Option<usize>,
             }
         });
     }
-    let r = ui.add(TextEdit::singleline(input).id(id).hint_text(hint).desired_width(f32::INFINITY).lock_focus(true));
+    let r = ui.add(TextEdit::singleline(input).id(id).hint_text(hint).desired_width(f32::INFINITY).lock_focus(!suggestions.is_empty()));
     if focus {
         r.request_focus();
         r.scroll_to_me(Some(Align::Center));
@@ -61,7 +61,7 @@ pub(super) fn tag_box(ui: &mut Ui, input: &mut String, pick: &mut Option<usize>,
     let chosen = pick.or((tab && !suggestions.is_empty()).then_some(0));
     match chosen.filter(|_| tab || enter) {
         Some(p) => out.push(suggestions[p].clone()),
-        None if enter => out.extend(input.split([',', '，']).map(str::trim).filter(|t| !t.is_empty()).map(String::from)),
+        None if enter => out.extend(input.split(['、', ',', '，']).map(str::trim).filter(|t| !t.is_empty()).map(String::from)),
         None => {}
     }
     if !out.is_empty() || enter {
@@ -118,21 +118,20 @@ impl App {
 
     pub(super) fn inspector_empty(&self, ui: &mut Ui) {
         let Some(lib) = &self.lib else { return };
-        let live: Vec<_> = lib.items.values().filter(|i| !i.deleted).collect();
-        let total_size: u64 = live.iter().map(|i| i.size).sum();
+        let stats = self.cached_sidebar_stats();
         ui.label(RichText::new("資源庫").strong());
         egui::Grid::new("lib-stats").num_columns(2).spacing([16.0, 6.0]).show(ui, |ui| {
             ui.label(RichText::new("項目").weak());
-            ui.label(live.len().to_string());
+            ui.label(stats.total.to_string());
             ui.end_row();
             ui.label(RichText::new("總大小").weak());
-            ui.label(human_size(total_size));
+            ui.label(human_size(stats.total_size));
             ui.end_row();
             ui.label(RichText::new("資料夾").weak());
             ui.label(lib.meta.folders.len().to_string());
             ui.end_row();
             ui.label(RichText::new("標籤").weak());
-            ui.label(lib.tag_counts().len().to_string());
+            ui.label(stats.tag_counts.len().to_string());
             ui.end_row();
         });
         ui.add_space(16.0);
@@ -145,10 +144,11 @@ impl App {
         let thumb = self.preview_tex(&id).or_else(|| self.thumb_tex(&id));
         let progress = self.preview_progress(&id);
         let in_trash = self.view == View::Trash;
-        let (all_tags, folders, field_names, name) = match &self.lib {
+        let stats = self.cached_sidebar_stats();
+        let all_tags = stats.tag_counts;
+        let folders = stats.folder_flat;
+        let (field_names, name) = match &self.lib {
             Some(lib) => (
-                lib.tag_counts(),
-                lib.folder_flat(),
                 lib.meta.fields.clone(),
                 lib.items.get(&id).map(|i| i.name.clone()).unwrap_or_default(),
             ),
@@ -198,12 +198,22 @@ impl App {
             }
         }
 
+        // The sidebar's ＋ opens the section to reach the box; keep focus_tag for next frame.
+        if focus_tag && collapsed.iter().any(|k| k == "inspector:標籤") {
+            self.focus_tag = true;
+            pending.push(Action::ToggleSection("inspector:標籤".into()));
+        }
+
         let tag_input = &mut self.tag_input;
         let tag_pick = &mut self.tag_pick;
         let Some(lib) = self.lib.as_mut() else { return };
         let Some(it) = lib.items.get_mut(&id) else { return };
-        let before = it.clone();
-        let mut changed = false;
+        let mut before: Option<crate::model::Item> = None;
+        let snapshot = |slot: &mut Option<crate::model::Item>, item: &crate::model::Item| {
+            if slot.is_none() {
+                *slot = Some(item.clone());
+            }
+        };
 
         if basic_open { ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 2.0;
@@ -213,16 +223,12 @@ impl App {
                     .size(20.0)
                     .color(if filled { star() } else { ui.visuals().weak_text_color() });
                 if ui.add(egui::Label::new(star).sense(Sense::click())).clicked() {
+                    snapshot(&mut before, it);
                     it.rating = if it.rating == i { 0 } else { i };
-                    changed = true;
                 }
             }
         }); }
 
-        // The sidebar's ＋ opens the section to reach the box.
-        if focus_tag && collapsed.iter().any(|k| k == "inspector:標籤") {
-            pending.push(Action::ToggleSection("inspector:標籤".into()));
-        }
         if inspector_section(ui, &collapsed, "標籤", None, &mut pending).0 {
             ui.horizontal_wrapped(|ui| {
                 let mut remove = None;
@@ -236,14 +242,14 @@ impl App {
                     }
                 }
                 if let Some(t) = remove {
+                    snapshot(&mut before, it);
                     it.tags.retain(|x| *x != t);
-                    changed = true;
                 }
             });
-            for t in tag_box(ui, tag_input, tag_pick, &all_tags, &it.tags, "輸入標籤後按 Enter（可用逗號分隔）", focus_tag) {
+            for t in tag_box(ui, tag_input, tag_pick, &all_tags, &it.tags, "輸入標籤後按 Enter（可用逗號或頓號分隔）", focus_tag) {
                 if !it.tags.contains(&t) {
+                    snapshot(&mut before, it);
                     it.tags.push(t);
-                    changed = true;
                 }
             }
         }
@@ -258,8 +264,8 @@ impl App {
                 }
             }
             if let Some(f) = remove {
+                snapshot(&mut before, it);
                 it.folders.retain(|x| *x != f);
-                changed = true;
             }
             ui.menu_button("＋", |ui| {
                 if folders.is_empty() {
@@ -268,12 +274,12 @@ impl App {
                 for (fid, name, depth) in &folders {
                     let has = it.folders.contains(fid);
                     if ui.selectable_label(has, format!("{}📁 {name}", "    ".repeat(*depth))).clicked() {
+                        snapshot(&mut before, it);
                         if has {
                             it.folders.retain(|x| x != fid);
                         } else {
                             it.folders.push(fid.clone());
                         }
-                        changed = true;
                     }
                 }
             });
@@ -282,16 +288,29 @@ impl App {
 
         if inspector_section(ui, &collapsed, "註解與網址", None, &mut pending).0 {
         ui.label(RichText::new("註解").small().weak());
-        changed |= ui
-            .add(TextEdit::multiline(&mut it.annotation).desired_rows(3).desired_width(f32::INFINITY))
-            .changed();
+        let mut note_draft = it.annotation.clone();
+        let note_changed = ui
+            .scope(|ui| {
+                ui.visuals_mut().extreme_bg_color = tokens().bg_elevated;
+                ui.add(TextEdit::multiline(&mut note_draft).desired_rows(3).desired_width(f32::INFINITY)).changed()
+            })
+            .inner;
+        if note_changed {
+            snapshot(&mut before, it);
+            it.annotation = note_draft;
+        }
 
         ui.label(RichText::new("來源網址").small().weak());
         ui.horizontal(|ui| {
             let open_w = if it.url.is_empty() { 0.0 } else { 30.0 };
-            changed |= ui
-                .add(TextEdit::singleline(&mut it.url).hint_text("https://").desired_width(ui.available_width() - open_w))
-                .changed();
+            let mut url_draft = it.url.clone();
+            if ui
+                .add(TextEdit::singleline(&mut url_draft).hint_text("https://").desired_width(ui.available_width() - open_w))
+                .changed()
+            {
+                snapshot(&mut before, it);
+                it.url = url_draft;
+            }
             if !it.url.is_empty() && ui.small_button("↗").on_hover_text("在瀏覽器開啟").clicked() {
                 let _ = open::that_detached(&it.url);
             }
@@ -331,12 +350,12 @@ impl App {
                 });
                 let mut value = it.fields.get(name).cloned().unwrap_or_default();
                 if ui.add(TextEdit::singleline(&mut value).desired_width(f32::INFINITY)).changed() {
+                    snapshot(&mut before, it);
                     if value.trim().is_empty() {
                         it.fields.remove(name);
                     } else {
                         it.fields.insert(name.clone(), value);
                     }
-                    changed = true;
                 }
                 ui.end_row();
             }
@@ -438,7 +457,7 @@ impl App {
             }
             ui.label(RichText::new("位置").small().weak());
             match &it.source {
-                Some(src) => ui.label(RichText::new(format!("🔗 原位置\n{}", src.display())).small()),
+                Some(src) => ui.add(egui::Label::new(RichText::new(format!("🔗 原位置\n{}", src.display())).small()).wrap()),
                 None => ui.label(RichText::new("資源庫內（複本）").small()),
             };
             ui.end_row();
@@ -446,7 +465,11 @@ impl App {
         }
 
         ui.add_space(10.0);
+        let is_video = it.kind == MediaKind::Video;
         ui.horizontal_wrapped(|ui| {
+            if is_video && ui.button(RichText::new("✂ 剪輯工作台").color(accent())).clicked() {
+                pending.push(Action::OpenViewer(id.clone()));
+            }
             if ui.button("開啟").clicked() {
                 pending.push(Action::OpenExternal(id.clone()));
             }
@@ -462,7 +485,7 @@ impl App {
             }
         });
 
-        if changed {
+        if let Some(before) = before {
             lib.touch(&id);
             self.record_undo(vec![before], true);
         }
@@ -473,6 +496,7 @@ impl App {
 
     pub(super) fn inspector_multi(&mut self, ui: &mut Ui) {
         let ids = self.selected_ids();
+        let stats = self.cached_sidebar_stats();
         let Some(lib) = &self.lib else { return };
         let items: Vec<&crate::model::Item> = ids.iter().filter_map(|id| lib.items.get(id)).collect();
 
@@ -496,11 +520,27 @@ impl App {
         });
 
         ui.add_space(8.0);
-        ui.label(RichText::new("評分（套用到全部）").small().weak());
+        let first_rating = items.first().map_or(0, |i| i.rating);
+        let uniform_rating = items.iter().all(|i| i.rating == first_rating);
+        let rating_label = if uniform_rating {
+            "評分（套用到全部）"
+        } else {
+            "評分（目前為混合評分，點選套用到全部）"
+        };
+        ui.label(RichText::new(rating_label).small().weak());
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 2.0;
             for i in 1..=5u8 {
-                if ui.add(egui::Label::new(RichText::new("☆").size(20.0)).sense(Sense::click())).clicked() {
+                let filled = uniform_rating && first_rating >= i;
+                let color = if filled {
+                    star()
+                } else if !uniform_rating {
+                    star().gamma_multiply(0.45)
+                } else {
+                    ui.visuals().weak_text_color()
+                };
+                let glyph = if filled { "★" } else { "☆" };
+                if ui.add(egui::Label::new(RichText::new(glyph).size(20.0).color(color)).sense(Sense::click())).clicked() {
                     self.act(Action::SetRating(ids.clone(), i));
                 }
             }
@@ -527,17 +567,17 @@ impl App {
                 }
             }
         });
-        let folders = lib.folder_flat();
-        let all_tags = lib.tag_counts();
+        let folders = &stats.folder_flat;
+        let all_tags = &stats.tag_counts;
         let focus = std::mem::take(&mut self.focus_tag);
-        for t in tag_box(ui, &mut self.tag_input, &mut self.tag_pick, &all_tags, &common, "為全部新增標籤，按 Enter", focus) {
+        for t in tag_box(ui, &mut self.tag_input, &mut self.tag_pick, all_tags, &common, "為全部新增標籤，按 Enter", focus) {
             self.act(Action::AddTag(ids.clone(), t));
         }
 
         ui.add_space(8.0);
         let mut pending = Vec::new();
         ui.horizontal(|ui| {
-            ui.label(RichText::new("自訂欄位（輸入後按 Enter 套用到全部）").small().weak());
+            ui.label(RichText::new("自訂欄位（套用到全部）").small().weak());
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 if ui.small_button("＋ 欄位").clicked() {
                     pending.push(Action::NewField);
@@ -558,10 +598,18 @@ impl App {
                     }
                 });
                 let draft = self.field_drafts.entry(name.clone()).or_default();
-                let r = ui.add(TextEdit::singleline(draft).hint_text(hint).desired_width(f32::INFINITY));
-                if r.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) && !draft.trim().is_empty() {
-                    pending.push(Action::SetField(ids.clone(), name.clone(), std::mem::take(draft)));
-                }
+                ui.horizontal(|ui| {
+                    let has_draft = !draft.trim().is_empty();
+                    let w = (ui.available_width() - if has_draft { 28.0 } else { 0.0 }).max(60.0);
+                    let r = ui.add(TextEdit::singleline(draft).hint_text(hint).desired_width(w));
+                    let apply_clicked = has_draft && ui.small_button("✓").on_hover_text("套用到選取的項目").clicked();
+                    let esc = ui.input(|i| i.key_pressed(Key::Escape));
+                    if (apply_clicked || (r.lost_focus() && !esc)) && !draft.trim().is_empty() {
+                        pending.push(Action::SetField(ids.clone(), name.clone(), std::mem::take(draft)));
+                    } else if r.lost_focus() && esc {
+                        draft.clear();
+                    }
+                });
                 ui.end_row();
             }
         });
@@ -570,15 +618,28 @@ impl App {
         }
 
         ui.add_space(8.0);
-        ui.menu_button("📁 加入資料夾…", |ui| {
-            if folders.is_empty() {
-                ui.label(RichText::new("尚無資料夾").weak());
-            }
-            for (fid, name, depth) in &folders {
-                if ui.button(format!("{}📁 {name}", "    ".repeat(*depth))).clicked() {
-                    self.act(Action::AddToFolder(ids.clone(), fid.clone()));
-                    ui.close_menu();
+        let used_folders: std::collections::HashSet<&String> = items.iter().flat_map(|i| i.folders.iter()).collect();
+        ui.horizontal_wrapped(|ui| {
+            ui.menu_button("📁 加入資料夾…", |ui| {
+                if folders.is_empty() {
+                    ui.label(RichText::new("尚無資料夾").weak());
                 }
+                for (fid, name, depth) in folders {
+                    if ui.button(format!("{}📁 {name}", "    ".repeat(*depth))).clicked() {
+                        self.act(Action::AddToFolder(ids.clone(), fid.clone()));
+                        ui.close_menu();
+                    }
+                }
+            });
+            if !used_folders.is_empty() {
+                ui.menu_button("📁 移出資料夾…", |ui| {
+                    for (fid, name, depth) in folders {
+                        if used_folders.contains(fid) && ui.button(format!("{}📁 {name}", "    ".repeat(*depth))).clicked() {
+                            self.act(Action::RemoveFromFolder(ids.clone(), fid.clone()));
+                            ui.close_menu();
+                        }
+                    }
+                });
             }
         });
         ui.add_space(8.0);

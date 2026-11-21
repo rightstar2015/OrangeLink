@@ -97,9 +97,17 @@ pub fn markdown() -> String {
 
 /// Two columns: the keys, and what they do.
 fn table(ui: &mut Ui, id: &str, rows: impl Iterator<Item = &'static Shortcut>) {
-    egui::Grid::new(id).num_columns(2).spacing([16.0, 4.0]).show(ui, |ui| {
+    let t = tokens();
+    egui::Grid::new(id).num_columns(2).spacing([16.0, 5.0]).show(ui, |ui| {
         for k in rows {
-            ui.label(RichText::new(k.keys).small().monospace());
+            egui::Frame::none()
+                .fill(t.kbd_bg)
+                .stroke(Stroke::new(1.0_f32, t.separator))
+                .rounding(3.0)
+                .inner_margin(egui::Margin::symmetric(5.0, 1.0))
+                .show(ui, |ui| {
+                    ui.label(RichText::new(k.keys).small().monospace());
+                });
             ui.add(egui::Label::new(RichText::new(k.what).small().weak()).wrap());
             ui.end_row();
         }
@@ -137,12 +145,13 @@ impl App {
             return;
         }
         let mut open = true;
+        let center = ctx.screen_rect().center();
         egui::Window::new("快速鍵")
             .open(&mut open)
             .collapsible(false)
             .resizable(true)
             .default_size([620.0, 520.0])
-            .anchor(Align2::CENTER_CENTER, [0.0, 0.0])
+            .default_pos([center.x - 310.0, (center.y - 260.0).max(24.0)])
             .show(ctx, |ui| {
                 ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
                     for scope in Scope::ALL {

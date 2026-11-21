@@ -21,7 +21,7 @@ struct Running {
 
 #[derive(Default)]
 pub struct WhisperState {
-    open: bool,
+    pub(super) open: bool,
     /// Items waiting, including those not started yet.
     queue: Vec<String>,
     running: Option<Running>,

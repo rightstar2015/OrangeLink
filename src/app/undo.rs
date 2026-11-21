@@ -56,6 +56,36 @@ impl App {
         self.edits.redo.clear();
     }
 
+    pub fn can_undo(&self) -> bool {
+        !self.edits.undo.is_empty()
+    }
+
+    pub fn can_redo(&self) -> bool {
+        !self.edits.redo.is_empty()
+    }
+
+    fn step_summary(step: &UndoStep) -> String {
+        match (step.meta.is_some(), step.items.len()) {
+            (true, 0) => "資料夾／分類結構".to_string(),
+            (true, n) => format!("資料夾／分類結構與 {n} 個項目"),
+            (false, n) => format!("{n} 個項目"),
+        }
+    }
+
+    pub fn undo_tip(&self) -> String {
+        match self.edits.undo.last() {
+            Some(s) => format!("復原：{}（Ctrl+Z）", Self::step_summary(s)),
+            None => "復原（Ctrl+Z）".to_string(),
+        }
+    }
+
+    pub fn redo_tip(&self) -> String {
+        match self.edits.redo.last() {
+            Some(s) => format!("重做：{}（Ctrl+Y）", Self::step_summary(s)),
+            None => "重做（Ctrl+Y）".to_string(),
+        }
+    }
+
     /// Records structural edits (folders, smart folders, tag groups, fields) made
     /// since the last frame, whichever code path made them. Runs once per frame.
     pub(super) fn track_structure(&mut self) {
@@ -65,13 +95,19 @@ impl App {
         };
         let captured = std::mem::take(&mut lib.captured);
         match &self.edits.meta_seen {
-            Some((rev, _)) if *rev == lib.meta_rev => {}
+            Some((rev, _)) if *rev == lib.meta_rev => {
+                if !captured.is_empty() {
+                    self.push_undo(UndoStep { seq: 0, time: self.now, items: captured, meta: None });
+                }
+            }
             Some((_, before)) => {
                 let before = before.clone();
                 let changed = !before.same_structure(&lib.meta);
                 self.edits.meta_seen = Some((lib.meta_rev, lib.meta.clone()));
                 if changed {
                     self.push_undo(UndoStep { seq: 0, time: self.now, items: captured, meta: Some(before) });
+                } else if !captured.is_empty() {
+                    self.push_undo(UndoStep { seq: 0, time: self.now, items: captured, meta: None });
                 }
             }
             None => self.edits.meta_seen = Some((lib.meta_rev, lib.meta.clone())),

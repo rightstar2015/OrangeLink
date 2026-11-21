@@ -84,19 +84,21 @@ impl App {
     pub fn settings_window(&mut self, ctx: &egui::Context) {
         self.apply_pending_settings(ctx);
         if !self.show_settings {
+            self.chat_keywords_draft = None;
             return;
         }
         let mut open = true;
         let before = self.config.clone();
         let mut out = PageOut::default();
+        let center = ctx.screen_rect().center();
         egui::Window::new("設定")
             .open(&mut open)
             .collapsible(false)
             .resizable(true)
             .default_size([720.0, 560.0])
+            .default_pos([center.x - 360.0, (center.y - 280.0).max(24.0)])
             .min_width(560.0)
             .max_width(860.0)
-            .anchor(Align2::CENTER_CENTER, [0.0, 0.0])
             .show(ctx, |ui| {
                 ui.add(TextEdit::singleline(&mut self.settings_search).hint_text("🔍 搜尋設定…").desired_width(f32::INFINITY));
                 ui.separator();
@@ -140,6 +142,9 @@ impl App {
         if let Some(page) = out.reset {
             self.config.reset_page(page);
             self.ui_scale_draft = self.config.ui_scale;
+            if page == SettingsPage::Highlights {
+                self.chat_keywords_draft = None;
+            }
             if page == SettingsPage::Tools {
                 out.ffmpeg_change = Some(None);
             }
@@ -179,6 +184,7 @@ impl App {
         }
         if !open {
             self.show_settings = false;
+            self.chat_keywords_draft = None;
             self.config.save();
             if self.settings_apply_at.is_some() {
                 self.settings_apply_at = Some(self.now);
@@ -328,9 +334,15 @@ impl App {
                 if f.show(ui, "加權關鍵字 聊天室") {
                     ui.horizontal(|ui| {
                         ui.label("加權關鍵字");
-                        let mut words = c.chat_keywords.join("、");
-                        if ui.add(TextEdit::singleline(&mut words).desired_width(280.0)).on_hover_text("聊天室訊息含這些字會加重計分，用頓號或逗號分隔").changed() {
-                            c.chat_keywords = words.split(['、', ',', '，']).map(|w| w.trim().to_string()).filter(|w| !w.is_empty()).collect();
+                        let draft = self.chat_keywords_draft.get_or_insert_with(|| c.chat_keywords.join("、"));
+                        let r = ui
+                            .add(TextEdit::singleline(draft).desired_width(280.0))
+                            .on_hover_text("聊天室訊息含這些字會加重計分，用頓號或逗號分隔");
+                        if r.changed() {
+                            c.chat_keywords = split_tags(draft);
+                        }
+                        if r.lost_focus() {
+                            *draft = c.chat_keywords.join("、");
                         }
                     });
                 }

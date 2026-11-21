@@ -19,6 +19,8 @@ pub(crate) struct Tokens {
     pub bg_sunken: Color32,
     /// Side panels, windows, menus.
     pub bg_panel: Color32,
+    /// Raised cards, note boxes, and studio panels.
+    pub bg_elevated: Color32,
     /// Alternate rows and other faint highlights.
     pub bg_faint: Color32,
     /// Buttons and other controls at rest.
@@ -30,6 +32,8 @@ pub(crate) struct Tokens {
     /// Behind an image or video in the preview: neutral, in both themes, so it
     /// doesn't tint how the picture looks.
     pub bg_viewer: Color32,
+    /// Keycap hints (`I`, `O`, `V`).
+    pub kbd_bg: Color32,
 
     // Text, from the strongest to the faintest.
     pub text: Color32,
@@ -44,6 +48,8 @@ pub(crate) struct Tokens {
     // OrangeLink's own colours, on top of the palette.
     /// The orange: active filters, headings, the selected thumbnail's frame.
     pub accent: Color32,
+    /// Soft translucent orange wash for active sidebar rows, filter chips, and toggles.
+    pub accent_soft: Color32,
     /// Selected list rows and selected text.
     pub selection_bg: Color32,
     pub selection_fg: Color32,
@@ -71,16 +77,19 @@ const fn gray(v: u8) -> Color32 {
 const DARK: Tokens = Tokens {
     bg_sunken: gray(12),  // Mocha crust (17, 17, 27), a little deeper so thumbnails stand off the panel
     bg_panel: gray(30),   // Mocha base    (30, 30, 46)
+    bg_elevated: gray(38),
     bg_faint: gray(36),   // between base and surface 0
     bg_control: gray(50), // Mocha surface0 (49, 50, 68)
     bg_hover: gray(64),   // between surface0 and surface1
     bg_pressed: gray(78), // Mocha surface1 (69, 71, 90), a step lighter
     bg_viewer: gray(16),
+    kbd_bg: gray(20),
     text: gray(220),       // Mocha text     (205, 214, 244)
     text_muted: gray(172), // Mocha subtext0 (166, 173, 200)
     separator: gray(46),
     outline: gray(112), // Mocha overlay0 (108, 112, 134)
     accent: Color32::from_rgb(255, 140, 50),
+    accent_soft: Color32::from_rgba_premultiplied(42, 23, 8, 42),
     selection_bg: Color32::from_rgb(220, 110, 30),
     selection_fg: Color32::WHITE,
     link: Color32::from_rgb(255, 140, 50),
@@ -96,17 +105,20 @@ const DARK: Tokens = Tokens {
 const LIGHT_TOKENS: Tokens = Tokens {
     bg_sunken: LATTE.crust,
     bg_panel: LATTE.base,
+    bg_elevated: Color32::WHITE,
     bg_faint: LATTE.mantle,
     bg_control: LATTE.surface0,
     bg_hover: LATTE.surface1,
     bg_pressed: LATTE.surface2,
     bg_viewer: gray(16),
+    kbd_bg: LATTE.crust,
     text: LATTE.text,
     text_muted: LATTE.subtext0,
     separator: LATTE.surface0,
     outline: LATTE.overlay0,
     accent: Color32::from_rgb(196, 92, 0),
-    selection_bg: Color32::from_rgb(220, 110, 30),
+    accent_soft: Color32::from_rgba_premultiplied(25, 12, 0, 32),
+    selection_bg: Color32::from_rgb(184, 83, 0),
     selection_fg: Color32::WHITE,
     link: Color32::from_rgb(196, 92, 0),
     star: Color32::from_rgb(190, 128, 0),
@@ -123,7 +135,7 @@ const WINDOW_ROUNDING: f32 = 8.0;
 const MENU_ROUNDING: f32 = 6.0;
 
 /// Type sizes (points). CJK glyphs need a little more than egui's defaults to stay legible small.
-const TEXT_SMALL: f32 = 10.5;
+const TEXT_SMALL: f32 = 11.2;
 const TEXT_BODY: f32 = 12.5;
 const TEXT_HEADING: f32 = 18.0;
 const TEXT_MONO: f32 = 12.0;

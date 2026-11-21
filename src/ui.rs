@@ -11,6 +11,8 @@ mod toolbar;
 
 pub(crate) use theme::*;
 
+pub use preview::SignalPlotCache;
+pub use sidebar::SidebarStats;
 pub use smooth_scroll::Glide;
 pub use toolbar::FormatGroups;
 
@@ -106,6 +108,28 @@ fn chip(ui: &mut Ui, text: &str) -> bool {
     chip_parts(ui, text, false).1
 }
 
+/// An accented filter chip (soft orange fill + subtle border) with a close button.
+fn accent_chip(ui: &mut Ui, text: &str) -> bool {
+    let mut removed = false;
+    let t = tokens();
+    egui::Frame::none()
+        .fill(t.accent_soft)
+        .stroke(Stroke::new(1.0_f32, accent().gamma_multiply(0.45)))
+        .rounding(CHIP_ROUNDING)
+        .inner_margin(egui::Margin::symmetric(8.0, 2.0))
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 5.0;
+                ui.label(RichText::new(text).small().color(accent()));
+                let x = ui.add(egui::Label::new(RichText::new("✖").small().color(accent().gamma_multiply(0.8))).sense(Sense::click()));
+                if x.on_hover_text("移除這個條件").clicked() {
+                    removed = true;
+                }
+            });
+        });
+    removed
+}
+
 /// A chip whose label can be clicked too: (label clicked, ✖ clicked).
 fn chip_parts(ui: &mut Ui, text: &str, clickable: bool) -> (bool, bool) {
     let (mut clicked, mut removed) = (false, false);
@@ -167,7 +191,7 @@ fn tree_row(
     sense: Sense,
 ) -> egui::Response {
     let resp = nav_row_ex(ui, selected, indent + 14.0, label, count, dot, sense);
-    let color = if selected { tokens().selection_fg } else { ui.visuals().weak_text_color() };
+    let color = if selected { accent() } else { ui.visuals().weak_text_color() };
     paint_arrow(ui.painter(), resp.rect.left_center() + vec2(14.0 + indent, 0.0), arrow, color);
     resp
 }
@@ -183,41 +207,49 @@ fn nav_row_ex(
     dot: Option<Color32>,
     sense: Sense,
 ) -> egui::Response {
-    let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 24.0), sense);
+    let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 25.0), sense);
     let v = ui.visuals();
+    let t = tokens();
     let painter = ui.painter();
     let drop_hover = resp.dnd_hover_payload::<DragIds>().is_some()
         || resp.dnd_hover_payload::<DragFolder>().is_some()
         || resp.dnd_hover_payload::<DragSmart>().is_some();
     if selected {
-        painter.rect_filled(rect, ROUNDING, v.selection.bg_fill);
+        painter.rect_filled(rect, ROUNDING, t.accent_soft);
+        let bar = Rect::from_min_max(rect.min + vec2(0.0, 4.0), pos2(rect.min.x + 2.5, rect.max.y - 4.0));
+        painter.rect_filled(bar, 1.5, accent());
     } else if resp.hovered() || drop_hover {
         painter.rect_filled(rect, ROUNDING, v.widgets.hovered.weak_bg_fill);
     }
     if drop_hover {
         painter.rect_stroke(rect, ROUNDING, Stroke::new(1.5_f32, accent()));
     }
-    let color = if selected { tokens().selection_fg } else { v.text_color() };
-    let mut text_x = 8.0 + indent;
+    let color = if selected { accent() } else { v.text_color() };
+    let mut text_x = 10.0 + indent;
     if let Some(c) = dot {
-        painter.circle_filled(rect.left_center() + vec2(text_x + 5.0, 0.0), 5.0, c);
+        painter.circle_filled(rect.left_center() + vec2(text_x + 5.0, 0.0), 4.5, c);
         text_x += 16.0;
     }
-    let label_rect = Rect::from_min_max(rect.min + vec2(text_x, 0.0), rect.max - vec2(40.0, 0.0));
+    let count_str = count.map(|n| n.to_string());
+    let right_pad = match &count_str {
+        Some(s) => (s.len() as f32 * 7.5 + 16.0).max(32.0),
+        None => 8.0,
+    };
+    let label_rect = Rect::from_min_max(rect.min + vec2(text_x, 0.0), rect.max - vec2(right_pad, 0.0));
     painter.with_clip_rect(label_rect).text(
         label_rect.left_center(),
         Align2::LEFT_CENTER,
         label,
-        FontId::proportional(14.0),
+        FontId::proportional(13.5),
         color,
     );
-    if let Some(n) = count {
+    if let Some(s) = count_str {
         painter.text(
             rect.right_center() - vec2(8.0, 0.0),
             Align2::RIGHT_CENTER,
-            n.to_string(),
-            FontId::proportional(12.0),
-            if selected { tokens().selection_fg } else { v.weak_text_color() },
+            s,
+            FontId::proportional(11.5),
+            if selected { accent() } else { v.weak_text_color() },
         );
     }
     resp
@@ -229,9 +261,13 @@ fn section_header(ui: &mut Ui, title: &str, open: bool, add: Option<&str>) -> (b
     let (mut fold, mut added) = (false, false);
     ui.add_space(10.0);
     ui.horizontal(|ui| {
-        let arrow = if open { "⏷" } else { "⏵" };
-        let text = RichText::new(format!("{arrow} {title}")).small().strong().weak();
-        fold = ui.add(egui::Label::new(text).sense(Sense::click())).on_hover_text(if open { "收合" } else { "展開" }).clicked();
+        let arrow = if open { Arrow::Open } else { Arrow::Closed };
+        let (arrow_rect, arrow_resp) = ui.allocate_exact_size(vec2(12.0, 16.0), Sense::click());
+        paint_arrow(ui.painter(), arrow_rect.center(), arrow, ui.visuals().weak_text_color());
+        let text = RichText::new(title).small().strong().weak();
+        let label_resp = ui.add(egui::Label::new(text).sense(Sense::click()));
+        let tip = if open { "收合" } else { "展開" };
+        fold = arrow_resp.on_hover_text(tip).clicked() || label_resp.on_hover_text(tip).clicked();
         if let Some(tip) = add {
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 added = ui.small_button("＋").on_hover_text(tip).clicked();
@@ -312,7 +348,16 @@ impl App {
                 }
                 let jobs = self.background_jobs();
                 self.jobs_button(ui, &jobs);
-                self.unsaved_badge(ui);
+                if self.save_error.is_some() {
+                    self.unsaved_badge(ui);
+                } else if let Some(lib) = &self.lib {
+                    ui.separator();
+                    if lib.has_unsaved() {
+                        ui.label(RichText::new("• 儲存中…").small().weak());
+                    } else {
+                        ui.label(RichText::new("✓ 已自動存檔").small().color(good().gamma_multiply(0.85)));
+                    }
+                }
                 // Thumbnails come and go with scrolling: not worth a toast.
                 // Nor are jobs over in a moment (a quick scan at start).
                 let running = jobs.iter().any(|j| j.kind != JobKind::Thumbnails);
@@ -337,7 +382,8 @@ impl App {
                         }
                     }
                     if let Some(lib) = &self.lib {
-                        ui.add(egui::Label::new(RichText::new(lib.root.display().to_string()).small().weak()).truncate());
+                        ui.add(egui::Label::new(RichText::new(lib.name()).small().weak()).truncate())
+                            .on_hover_text(lib.root.display().to_string());
                     }
                 });
             });
@@ -497,10 +543,14 @@ impl App {
     }
 
     pub fn dialogs(&mut self, ctx: &egui::Context) {
-        let Some(mut dialog) = self.dialog.take() else { return };
+        let Some(mut dialog) = self.dialog.take() else {
+            self.dialog_focused = false;
+            return;
+        };
         let mut close = ctx.input(|i| i.key_pressed(Key::Escape));
         let mut commit = false;
         let mut small_import = None;
+        let focus_once = !std::mem::replace(&mut self.dialog_focused, true);
         let window = |title: &str| {
             egui::Window::new(title.to_string())
                 .collapsible(false)
@@ -512,8 +562,10 @@ impl App {
                 let title = if rename.is_some() { "重新命名資料夾" } else { "新增資料夾" };
                 window(title).show(ctx, |ui| {
                     let r = ui.add(TextEdit::singleline(name).hint_text("資料夾名稱").desired_width(260.0));
-                    r.request_focus();
-                    if ui.input(|i| i.key_pressed(Key::Enter)) {
+                    if focus_once {
+                        r.request_focus();
+                    }
+                    if r.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
                         commit = true;
                     }
                     ui.horizontal(|ui| {
@@ -525,8 +577,10 @@ impl App {
             Dialog::TagRename { name, .. } => {
                 window("重新命名標籤").show(ctx, |ui| {
                     let r = ui.add(TextEdit::singleline(name).desired_width(260.0));
-                    r.request_focus();
-                    if ui.input(|i| i.key_pressed(Key::Enter)) {
+                    if focus_once {
+                        r.request_focus();
+                    }
+                    if r.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
                         commit = true;
                     }
                     ui.label(RichText::new("若新名稱已存在，兩個標籤會合併").small().weak());
@@ -551,8 +605,10 @@ impl App {
                 let title = if rename.is_some() { "重新命名欄位" } else { "新增自訂欄位" };
                 window(title).show(ctx, |ui| {
                     let r = ui.add(TextEdit::singleline(name).hint_text("例如：授權、客戶、拍攝地點").desired_width(260.0));
-                    r.request_focus();
-                    if ui.input(|i| i.key_pressed(Key::Enter)) {
+                    if focus_once {
+                        r.request_focus();
+                    }
+                    if r.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
                         commit = true;
                     }
                     ui.label(RichText::new("欄位會出現在每個素材的右側面板，內容也能被搜尋").small().weak());
@@ -566,8 +622,10 @@ impl App {
                 let title = if rename.is_some() { "重新命名標籤群組" } else { "新增標籤群組" };
                 window(title).show(ctx, |ui| {
                     let r = ui.add(TextEdit::singleline(name).hint_text("例如：角色、場景、情緒").desired_width(260.0));
-                    r.request_focus();
-                    if ui.input(|i| i.key_pressed(Key::Enter)) {
+                    if focus_once {
+                        r.request_focus();
+                    }
+                    if r.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
                         commit = true;
                     }
                     ui.horizontal(|ui| {
@@ -584,8 +642,10 @@ impl App {
                 };
                 window(title).show(ctx, |ui| {
                     let r = ui.add(TextEdit::singleline(name).hint_text("名稱").desired_width(260.0));
-                    r.request_focus();
-                    if ui.input(|i| i.key_pressed(Key::Enter)) {
+                    if focus_once {
+                        r.request_focus();
+                    }
+                    if r.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
                         commit = true;
                     }
                     if rename.is_none() && !*group {
@@ -600,11 +660,17 @@ impl App {
             Dialog::BatchRename { ids, pattern, start } => {
                 let preview = self.batch_rename_preview(ids, pattern, *start);
                 window("批次重新命名").show(ctx, |ui| {
-                    ui.set_max_width(380.0);
+                    ui.set_max_width(400.0);
                     ui.label(format!("{} 個項目", ids.len()));
                     ui.horizontal(|ui| {
                         ui.label("格式");
-                        ui.add(TextEdit::singleline(pattern).desired_width(220.0));
+                        let r = ui.add(TextEdit::singleline(pattern).desired_width(240.0));
+                        if focus_once {
+                            r.request_focus();
+                        }
+                        if r.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
+                            commit = true;
+                        }
                     });
                     ui.horizontal(|ui| {
                         ui.label("起始編號");
@@ -612,12 +678,12 @@ impl App {
                     });
                     ui.label(RichText::new("{name} = 原名稱，{n} = 流水號。只改顯示名稱，不改硬碟上的檔名。").small().weak());
                     ui.add_space(4.0);
-                    for (old, new) in preview.iter().take(4) {
-                        ui.label(RichText::new(format!("{old}  →  {new}")).small());
-                    }
-                    if preview.len() > 4 {
-                        ui.label(RichText::new("…").small().weak());
-                    }
+                    ScrollArea::vertical().id_salt("batch-rename-preview").max_height(140.0).show(ui, |ui| {
+                        for (_, old, new) in &preview {
+                            ui.label(RichText::new(format!("{old}  →  {new}")).small());
+                        }
+                    });
+                    ui.add_space(4.0);
                     ui.horizontal(|ui| {
                         commit |= ui.button("套用").clicked();
                         close |= ui.button("取消").clicked();
@@ -646,11 +712,15 @@ impl App {
                             }
                             let mode = if w.link { "🔗 保留原位置" } else { "複製" };
                             ui.label(RichText::new(mode).small().weak());
+                            let exists = w.path.is_dir();
                             let mut text = RichText::new(w.path.display().to_string()).small();
-                            if !w.path.is_dir() {
+                            if !exists {
                                 text = text.color(danger());
                             }
-                            ui.label(text);
+                            let lbl = ui.label(text);
+                            if !exists {
+                                lbl.on_hover_text("找不到這個資料夾（可能已被移除、改名，或外接硬碟／網路磁碟未連線）");
+                            }
                         });
                         ui.horizontal(|ui| {
                             ui.add_space(24.0);
@@ -757,8 +827,7 @@ impl App {
                     }
                 }
             }
-            Dialog::Backups => {
-                let backups = self.lib.as_ref().map(|l| l.list_backups()).unwrap_or_default();
+            Dialog::Backups(backups) => {
                 let mut restore = None;
                 window("從備份還原").show(ctx, |ui| {
                     ui.set_max_width(460.0);
@@ -768,7 +837,7 @@ impl App {
                         ui.label(RichText::new("還沒有備份（每天第一次開啟資源庫時會自動建立）").weak());
                     }
                     ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
-                        for (path, n) in &backups {
+                        for (path, n) in backups.iter() {
                             ui.horizontal(|ui| {
                                 let name = path.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
                                 ui.label(format!("{name}（{n} 個項目）"));
@@ -955,7 +1024,7 @@ impl App {
                 Dialog::TagGroupName { rename, name, tag } => self.apply_tag_group_dialog(rename, name, tag),
                 Dialog::BatchRename { ids, pattern, start } => self.apply_batch_rename(ids, pattern, start),
                 Dialog::FieldName { rename, name } => self.apply_field_dialog(rename, name),
-                Dialog::WatchFolders { .. } | Dialog::Backups | Dialog::Unreadable | Dialog::Integrity(_) => {}
+                Dialog::WatchFolders { .. } | Dialog::Backups(_) | Dialog::Unreadable | Dialog::Integrity(_) => {}
                 Dialog::ImportPreview { paths, link, folder, tags, .. } => {
                     self.act(Action::StartImportWith { paths, link, folder, tags: split_tags(&tags) });
                 }
@@ -967,8 +1036,11 @@ impl App {
                     self.act(Action::StartImport { paths, link });
                 }
             }
+            self.dialog_focused = false;
         } else if !close {
             self.dialog = Some(dialog);
+        } else {
+            self.dialog_focused = false;
         }
         if let Some(paths) = small_import {
             self.act(Action::ImportByMode(paths));
@@ -1019,20 +1091,42 @@ impl App {
 
     pub fn drag_overlay(&self, ctx: &egui::Context) {
         let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Tooltip, egui::Id::new("dnd-overlay")));
-        if let Some(payload) = egui::DragAndDrop::payload::<DragIds>(ctx) {
+        let drag_tip = |text: String| {
             if let Some(pos) = ctx.pointer_latest_pos() {
-                let text = format!("{} 個項目 → 放到資料夾或標籤", payload.0.len());
                 let galley = painter.layout_no_wrap(text, FontId::proportional(13.0), Color32::WHITE);
                 let rect = Rect::from_min_size(pos + vec2(14.0, 14.0), galley.size() + vec2(16.0, 8.0));
                 painter.rect_filled(rect, ROUNDING, accent());
                 painter.galley(rect.min + vec2(8.0, 4.0), galley, Color32::WHITE);
             }
+        };
+        if let Some(payload) = egui::DragAndDrop::payload::<DragIds>(ctx) {
+            drag_tip(format!("{} 個項目 → 放到資料夾或標籤", payload.0.len()));
+        } else if let Some(payload) = egui::DragAndDrop::payload::<DragFolder>(ctx) {
+            let name = self.lib.as_ref().and_then(|l| l.folder_name(&payload.0)).unwrap_or("資料夾");
+            drag_tip(format!("📁 移動「{name}」"));
+        } else if let Some(payload) = egui::DragAndDrop::payload::<DragSmart>(ctx) {
+            let name = self.lib.as_ref().and_then(|l| l.smart_folder(&payload.0)).map_or("智慧資料夾", |s| s.name.as_str());
+            drag_tip(format!("✨ 移動「{name}」"));
         }
         if ctx.input(|i| !i.raw.hovered_files.is_empty()) {
             let screen = ctx.screen_rect();
-            painter.rect_filled(screen, 0.0, Color32::from_black_alpha(170));
+            painter.rect_filled(screen, 0.0, Color32::from_black_alpha(175));
             painter.rect_stroke(screen.shrink(12.0), 12.0, Stroke::new(3.0_f32, accent()));
-            painter.text(screen.center(), Align2::CENTER_CENTER, "放開以匯入", FontId::proportional(28.0), Color32::WHITE);
+            let folder_note = match (&self.view, self.config.import_into_current_folder, &self.lib) {
+                (View::Folder(fid), true, Some(lib)) => lib.folder_name(fid).map(|n| format!("加入資料夾「{n}」")),
+                _ => None,
+            };
+            let mode_note = match self.config.import_mode {
+                ImportMode::Copy => "複製到資源庫",
+                ImportMode::Link => "保留在原位置",
+                ImportMode::Ask => "放開後選擇存放方式",
+            };
+            painter.text(screen.center() - vec2(0.0, 10.0), Align2::CENTER_CENTER, "放開以匯入", FontId::proportional(28.0), Color32::WHITE);
+            let sub = match folder_note {
+                Some(f) => format!("{mode_note}  ·  {f}"),
+                None => mode_note.to_string(),
+            };
+            painter.text(screen.center() + vec2(0.0, 24.0), Align2::CENTER_CENTER, sub, FontId::proportional(14.0), tokens().text_muted);
         }
     }
 }

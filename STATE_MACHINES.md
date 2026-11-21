@@ -56,19 +56,16 @@ cargo test state::
 - 畫面只會顯示目前項目的原圖。GIF 依時間選影格的邏輯集中在 `state::animation_frame`，預覽和懸停預覽共用。
 - **使用者看得到的改變**：預覽切換到無法解碼的檔案（例如影片）時，會立刻釋放上一張原圖的貼圖。懸停預覽 GIF 在一輪播完的瞬間，不會再閃回縮圖。
 
-### 3. 自動更新（`app::UpdateState`）
+### 3. 新版提示（`app::UpdateState`）
 
-改之前分散在 4 個欄位：`update_rx`、`new_version`、`update_download`、`update_ready`。下載失敗或取消之後沒有辦法重試。
+改之前分散在 4 個欄位：`update_rx`、`new_version`、`update_download`、`update_ready`。0.1.8 起不再自己下載和安裝，只剩檢查和提示。
 
 ```text
   Checking ──沒有新版，或檢查沒有回應──▶ Latest
-     └──有新版──▶ Available ──開啟自動更新，且 latest.json 有 zip、hash 和簽章──▶ Downloading ──成功──▶ Ready
-                    ▲                                                        │                     │
-                    └──── 失敗或取消（保留原因，可「重試下載」）◀────────────┘    關閉時安裝；
-                                                                                  儲存失敗時不安裝
+     └──有通過簽章的新版──▶ Available（⬆ 徽章；開啟「檢查新版本並詢問」時跳出「發現新版本」）
 ```
 
-- **使用者看得到的改變**：下載失敗或取消後，⬆ 徽章會顯示原因並提供「重試下載」，失敗的提示訊息（紅框）上也有「重試」。關閉自動更新時，可以在 ⬆ 徽章裡手動「下載並在關閉時安裝」。
+- **使用者看得到的改變**：有新版時，⬆ 徽章和「發現新版本」視窗都可以開啟該版本的 GitHub release 頁面，手動下載。
 
 ### 4. 匯入（`app::ImportRun`，存在 `App::import: Option<ImportRun>`）
 

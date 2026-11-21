@@ -1384,5 +1384,6 @@
  "關閉 (Esc)": "Close (Esc)",
  "並排比較需要選 2～4 張圖片": "Side by side needs 2–4 pictures selected",
  "並排比較": "Compare side by side",
- "2～4 張圖片並排，一起縮放與移動": "2–4 pictures side by side, zoomed and moved together"
+ "2～4 張圖片並排，一起縮放與移動": "2–4 pictures side by side, zoomed and moved together",
+ "已排在目前的匯入之後": "Queued after the current import"
 }

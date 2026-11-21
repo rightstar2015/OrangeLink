@@ -27,6 +27,9 @@ impl App {
         }
         if self.import_running() {
             self.import_queue.push_back(ImportRequest { paths, link, folder, tags, silent });
+            if !silent {
+                self.toast(t!("已排在目前的匯入之後"));
+            }
             return;
         }
         let cancel = Arc::new(AtomicBool::new(false));

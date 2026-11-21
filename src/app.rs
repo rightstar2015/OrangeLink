@@ -4871,6 +4871,33 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    /// Dropping files while an import ran was turned away (匯入進行中，請稍候):
+    /// the files had to be dropped again later.
+    #[test]
+    fn files_dropped_during_an_import_wait_their_turn() {
+        let root = std::env::temp_dir().join(format!("orangelink-importdrop-{}", crate::model::new_id()));
+        let ctx = egui::Context::default();
+        let mut app = App::with_config(&ctx, Config::default());
+        app.config.import_mode = crate::config::ImportMode::Copy;
+        app.lib = Some(Library::create(&root).unwrap());
+        let _tx = fake_import(&mut app);
+        app.act(Action::ImportPaths(vec![root.join("a.png")]));
+        app.process_actions(&ctx);
+        assert_eq!(app.import_queue.len(), 1, "queued, not turned away");
+        assert!(app.toast.list.iter().any(|t| t.msg.contains("排在目前的匯入之後")));
+        app.config.import_mode = crate::config::ImportMode::Ask;
+        app.act(Action::ImportPaths(vec![root.join("b.png")]));
+        app.process_actions(&ctx);
+        assert!(matches!(&app.dialog, Some(Dialog::ImportMode { .. })), "still asks how to import");
+        app.act(Action::ImportPaths(vec![root.join("c.png")]));
+        app.process_actions(&ctx);
+        assert!(matches!(&app.dialog, Some(Dialog::ImportMode { paths, .. }) if paths == &[root.join("b.png")]), "an open window isn't replaced");
+        if let Some(run) = app.import.take() {
+            run.cancel.store(true, Ordering::Relaxed);
+        }
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     #[test]
     fn a_finished_import_starts_the_next_queued_one() {
         let root = std::env::temp_dir().join(format!("orangelink-importnext-{}", crate::model::new_id()));

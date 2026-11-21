@@ -192,7 +192,8 @@ impl FfmpegPlayer {
 
     fn position(&self) -> f64 {
         let pos = self.base + self.started.map(|s| s.elapsed().as_secs_f64()).unwrap_or(0.0);
-        pos.min(self.duration.max(0.0))
+        // An unknown length (0) is no end: the clock would stay at 0 forever.
+        if self.duration > 0.0 { pos.min(self.duration) } else { pos.max(0.0) }
     }
 
     fn stop_processes(&mut self) {
@@ -779,6 +780,16 @@ pub fn preview_size(w: u32, h: u32, max_width: u32) -> Option<[usize; 2]> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_video_of_unknown_length_still_moves_past_zero() {
+        let mut ff = FfmpegPlayer::new(PathBuf::new(), PathBuf::new(), 0.0, 30.0, None, 1.0);
+        ff.base = 5.0;
+        assert_eq!(ff.position(), 5.0, "the clock was held at 0");
+        let mut ff = FfmpegPlayer::new(PathBuf::new(), PathBuf::new(), 3.0, 30.0, None, 1.0);
+        ff.base = 5.0;
+        assert_eq!(ff.position(), 3.0);
+    }
 
     fn ff_engine(p: &Player) -> &FfmpegPlayer {
         match &p.backend {

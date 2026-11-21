@@ -32,6 +32,8 @@ notify = "8"
 global-hotkey = "0.9"
 # Checking downloads.
 sha2 = "0.10"
+# Drawing a font file's own sample text (thumbnail and preview). egui already uses it.
+ab_glyph = "0.2"
 
 [profile.release]
 opt-level = 3

@@ -3645,6 +3645,7 @@ dependencies = [
 name = "orangelink"
 version = "0.1.9"
 dependencies = [
+ "ab_glyph",
  "anyhow",
  "arboard",
  "base64",

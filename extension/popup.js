@@ -23,9 +23,11 @@ async function check() {
 }
 
 document.getElementById("save").addEventListener("click", async () => {
-  const match = code.value.trim().match(/^(\d{4,5})-([0-9a-f]{32})$/i);
-  if (!match) return show("配對碼格式不正確，請從 OrangeLink 設定重新複製。", "bad");
-  await chrome.storage.local.set({ port: Number(match[1]), token: match[2] });
+  const match = code.value.trim().match(/^(\d{1,5})-([0-9a-f]{32})$/i);
+  const port = Number(match?.[1]);
+  if (!match || port < 1 || port > 65535) return show("配對碼格式不正確，請從 OrangeLink 設定重新複製。", "bad");
+  // OrangeLink compares the token as it wrote it, in lowercase.
+  await chrome.storage.local.set({ port, token: match[2].toLowerCase() });
   check();
 });
 

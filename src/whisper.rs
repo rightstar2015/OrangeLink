@@ -9,7 +9,7 @@ use std::{
     path::{Path, PathBuf},
     process::{Command, Stdio},
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
         mpsc::{channel, Receiver, Sender},
         Arc,
     },
@@ -54,27 +54,79 @@ pub fn has_filter(ffmpeg_dir: &Path) -> bool {
         .is_ok_and(|o| String::from_utf8_lossy(&o.stdout).lines().any(|l| l.split_whitespace().nth(1) == Some("whisper")))
 }
 
-pub fn download_model(name: &str) -> Result<(), String> {
+/// What a cancelled model download answers.
+pub const CANCELLED: &str = "已取消";
+
+/// A model download on a background thread, for the jobs list: cancellable, and
+/// how far along it is.
+pub struct Download {
+    pub rx: Receiver<Result<(), String>>,
+    pub cancel: Arc<AtomicBool>,
+    /// Bytes written so far, and the model's size (0 until known).
+    pub got: Arc<AtomicU64>,
+    pub total: Arc<AtomicU64>,
+}
+
+impl Download {
+    pub fn start(name: String, ctx: egui::Context) -> Self {
+        let (tx, rx) = channel();
+        let d = Self { rx, cancel: Arc::default(), got: Arc::default(), total: Arc::default() };
+        let (cancel, got, total) = (d.cancel.clone(), d.got.clone(), d.total.clone());
+        std::thread::spawn(move || {
+            let _ = tx.send(download_model(&name, &cancel, &got, &total, &ctx));
+            ctx.request_repaint();
+        });
+        d
+    }
+
+    pub fn progress(&self) -> Option<f32> {
+        let total = self.total.load(Ordering::Relaxed);
+        (total > 0).then(|| (self.got.load(Ordering::Relaxed) as f64 / total as f64).min(1.0) as f32)
+    }
+}
+
+/// Downloads a model; curl is ended, and the partial file removed, once `cancel` is set.
+fn download_model(name: &str, cancel: &AtomicBool, got: &AtomicU64, total: &AtomicU64, ctx: &egui::Context) -> Result<(), String> {
     let dir = models_dir().ok_or("找不到 APPDATA 資料夾")?;
     let file = model_file(name);
     let url = format!("https://huggingface.co/ggerganov/whisper.cpp/resolve/main/{file}");
     // The largest model is about 3 GB.
     let curl = || crate::self_update::curl(8 * 1024 * 1024 * 1024);
-    let listing = || curl().ok()?.args(["-L", "--fail", "-sS", "--max-time", "30", MODELS_API]).output().ok().filter(|o| o.status.success()).map(|o| o.stdout);
+    let listing = || {
+        let mut cmd = curl().ok()?;
+        cmd.args(["-L", "--fail", "-sS", "--max-time", "30", MODELS_API]);
+        let list = crate::process::output_or_cancel(&mut cmd, cancel).ok()??;
+        let list = list.status.success().then_some(list.stdout)?;
+        total.store(lfs_size(&list, &file).unwrap_or(0), Ordering::Relaxed);
+        Some(list)
+    };
     let fetch = |part: &Path| {
-        let out = curl()?
-            .args(["-L", "--fail", "-sS", "--max-time", "3600", "-o"])
-            .arg(part)
-            .arg(&url)
-            .output()
-            .map_err(|e| format!("無法執行 curl：{e}"))?;
-        if out.status.success() {
-            Ok(())
-        } else {
-            Err(String::from_utf8_lossy(&out.stderr).trim().to_string())
+        let mut cmd = curl()?;
+        cmd.args(["-L", "--fail", "-sS", "--max-time", "3600", "-o"]).arg(part).arg(&url);
+        let finished = AtomicBool::new(false);
+        // The size of the partial file, for the progress shown; read here, not on the UI thread.
+        let out = std::thread::scope(|s| {
+            s.spawn(|| {
+                while !finished.load(Ordering::Relaxed) {
+                    got.store(std::fs::metadata(part).map_or(0, |m| m.len()), Ordering::Relaxed);
+                    ctx.request_repaint();
+                    std::thread::sleep(Duration::from_millis(500));
+                }
+            });
+            let out = crate::process::output_or_cancel(&mut cmd, cancel);
+            finished.store(true, Ordering::Relaxed);
+            out
+        });
+        match out.map_err(|e| format!("無法執行 curl：{e}"))? {
+            None => Err(CANCELLED.to_string()),
+            Some(out) if out.status.success() => Ok(()),
+            Some(out) => Err(String::from_utf8_lossy(&out.stderr).trim().to_string()),
         }
     };
-    download_verified(&dir, &file, listing, fetch)
+    if cancel.load(Ordering::Relaxed) {
+        return Err(CANCELLED.to_string());
+    }
+    download_verified(&dir, &file, listing, fetch).map_err(|e| if cancel.load(Ordering::Relaxed) { CANCELLED.to_string() } else { e })
 }
 
 /// Downloads `file` into `dir` with `fetch` and keeps it only when it matches the
@@ -102,6 +154,13 @@ fn download_verified(dir: &Path, file: &str, listing: impl FnOnce() -> Option<Ve
 }
 
 const MODELS_API: &str = "https://huggingface.co/api/models/ggerganov/whisper.cpp/tree/main";
+
+/// `file`'s size in bytes in the Hugging Face tree listing.
+fn lfs_size(listing: &[u8], file: &str) -> Option<u64> {
+    let v: serde_json::Value = serde_json::from_slice(listing).ok()?;
+    let entry = v.as_array()?.iter().find(|e| e.get("path").and_then(|p| p.as_str()) == Some(file))?;
+    entry.get("lfs")?.get("size")?.as_u64()
+}
 
 /// `file`'s SHA-256 in the Hugging Face tree listing (`[{"path": …, "lfs": {"oid": …}}]`).
 fn lfs_hash(listing: &[u8], file: &str) -> Option<String> {

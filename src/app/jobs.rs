@@ -10,6 +10,7 @@ pub enum JobKind {
     Import,
     Ytdlp,
     Whisper,
+    ModelDownload,
     SubtitleIndex,
     Loudness,
     Thumbnails,
@@ -27,6 +28,7 @@ impl JobKind {
             JobKind::Import => "import",
             JobKind::Ytdlp => "download",
             JobKind::Whisper => "subtitles",
+            JobKind::ModelDownload => "model_download",
             JobKind::SubtitleIndex => "subtitle_index",
             JobKind::Loudness => "loudness",
             JobKind::Thumbnails => "thumbnails",
@@ -90,6 +92,7 @@ impl App {
         }
         jobs.extend(self.ytdlp_job());
         jobs.extend(self.whisper_job());
+        jobs.extend(self.model_download_job());
         jobs.extend(self.subtitle_index_job());
         jobs.extend(self.loudness_job());
         jobs.extend(self.stream_job());
@@ -129,6 +132,7 @@ impl App {
             JobKind::Import => self.cancel_imports(),
             JobKind::Ytdlp => self.cancel_ytdlp(),
             JobKind::Whisper => self.cancel_whisper(),
+            JobKind::ModelDownload => self.cancel_model_download(),
             JobKind::SubtitleIndex => self.subtitle_index = None,
             JobKind::Loudness => self.cancel_loudness(),
             JobKind::ClipExport => self.cancel_clip_queue(),
@@ -154,7 +158,7 @@ impl App {
     pub fn show_job(&mut self, kind: JobKind) {
         match kind {
             JobKind::Ytdlp => self.yt.open = true,
-            JobKind::Whisper => self.show_whisper(),
+            JobKind::Whisper | JobKind::ModelDownload => self.show_whisper(),
             _ => {}
         }
     }

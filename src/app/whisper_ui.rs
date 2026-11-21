@@ -27,7 +27,7 @@ pub struct WhisperState {
     running: Option<Running>,
     filter_rx: Option<Receiver<bool>>,
     filter_ok: Option<bool>,
-    download_rx: Option<Receiver<Result<(), String>>>,
+    download: Option<whisper::Download>,
     status: (String, bool),
     done: usize,
 }
@@ -72,9 +72,11 @@ impl App {
         if let Some(ok) = super::state::take(&mut self.whisper.filter_rx).finished() {
             self.whisper.filter_ok = Some(ok.unwrap_or(false));
         }
-        if let Some(result) = super::state::take(&mut self.whisper.download_rx).finished() {
+        if let Some(result) = self.whisper.download.as_ref().and_then(|d| super::state::poll(&d.rx).finished()) {
+            self.whisper.download = None;
             self.whisper.status = match result.map_err(str::to_string).and_then(|r| r) {
                 Ok(()) => ("模型下載完成".into(), false),
+                Err(e) if e == whisper::CANCELLED => ("已取消下載模型".into(), false),
                 Err(e) => (format!("模型下載失敗：{e}"), true),
             };
         }
@@ -174,6 +176,27 @@ impl App {
         Some(job)
     }
 
+    /// The model download under way, for the status bar's jobs list.
+    pub(super) fn model_download_job(&self) -> Option<super::jobs::BgJob> {
+        let d = self.whisper.download.as_ref()?;
+        let mb = |b: u64| b as f64 / 1_048_576.0;
+        let got = d.got.load(std::sync::atomic::Ordering::Relaxed);
+        let detail = match d.total.load(std::sync::atomic::Ordering::Relaxed) {
+            0 => format!("{:.0} MB", mb(got)),
+            total => format!("{:.0} / {:.0} MB", mb(got), mb(total)),
+        };
+        let mut job = super::jobs::BgJob::new(super::jobs::JobKind::ModelDownload, format!("下載語音模型：{}", self.config.whisper_model), detail, d.progress());
+        job.has_window = true;
+        Some(job)
+    }
+
+    /// Stops the model download; curl is ended and the partial file removed.
+    pub(super) fn cancel_model_download(&mut self) {
+        if let Some(d) = &self.whisper.download {
+            d.cancel.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+    }
+
     /// Stops the transcription and drops the items waiting after it.
     pub(super) fn cancel_whisper(&mut self) {
         self.whisper.queue.clear();
@@ -246,15 +269,22 @@ impl App {
                     }
                 }
                 Some(true) if !have_model => {
-                    let busy = w.download_rx.is_some();
                     ui.label(RichText::new("第一次使用這個模型需要下載，來源為 Hugging Face（whisper.cpp）。").small());
-                    ui.horizontal(|ui| {
-                        if ui.add_enabled(!busy, egui::Button::new("下載模型")).clicked() {
-                            download = true;
+                    ui.horizontal(|ui| match &w.download {
+                        None => {
+                            if ui.button("下載模型").clicked() {
+                                download = true;
+                            }
                         }
-                        if busy {
-                            ui.spinner();
-                            ui.label("下載中，可以先關閉這個視窗…");
+                        Some(d) => {
+                            match d.progress() {
+                                Some(p) => ui.add(egui::ProgressBar::new(p).show_percentage().desired_width(160.0)),
+                                None => ui.spinner(),
+                            };
+                            if ui.button("取消下載").clicked() {
+                                d.cancel.store(true, std::sync::atomic::Ordering::Relaxed);
+                            }
+                            ui.label(RichText::new("可以先關閉這個視窗").small().weak());
                         }
                     });
                 }
@@ -289,13 +319,7 @@ impl App {
             self.check_whisper_filter();
         }
         if download {
-            let (tx, rx) = channel();
-            let (name, ctx) = (self.config.whisper_model.clone(), self.egui_ctx.clone());
-            std::thread::spawn(move || {
-                let _ = tx.send(whisper::download_model(&name));
-                ctx.request_repaint();
-            });
-            self.whisper.download_rx = Some(rx);
+            self.whisper.download = Some(whisper::Download::start(self.config.whisper_model.clone(), self.egui_ctx.clone()));
             self.whisper.status = (String::new(), false);
         }
         if start {
@@ -313,12 +337,32 @@ mod tests {
     fn a_model_download_whose_thread_died_shows_as_failed() {
         let mut app = App::with_config(&egui::Context::default(), crate::config::Config::default());
         let (tx, rx) = std::sync::mpsc::channel();
-        app.whisper.download_rx = Some(rx);
+        app.whisper.download = Some(whisper::Download { rx, cancel: Default::default(), got: Default::default(), total: Default::default() });
         app.whisper.status = ("正在下載模型…".into(), false);
         drop(tx); // the download thread panicked
         app.poll_whisper();
-        assert!(app.whisper.download_rx.is_none(), "no longer downloading");
+        assert!(app.whisper.download.is_none(), "no longer downloading");
         assert!(app.whisper.status.1 && app.whisper.status.0.contains("失敗"), "{:?}", app.whisper.status);
+    }
+
+    #[test]
+    fn a_model_download_is_a_job_that_can_be_cancelled() {
+        let mut app = App::with_config(&egui::Context::default(), crate::config::Config::default());
+        let (tx, rx) = std::sync::mpsc::channel();
+        let d = whisper::Download { rx, cancel: Default::default(), got: Default::default(), total: Default::default() };
+        d.total.store(200 << 20, std::sync::atomic::Ordering::Relaxed);
+        d.got.store(50 << 20, std::sync::atomic::Ordering::Relaxed);
+        let cancel = d.cancel.clone();
+        app.whisper.download = Some(d);
+        let jobs = app.background_jobs();
+        let job = jobs.iter().find(|j| j.kind == super::super::jobs::JobKind::ModelDownload).expect("in the jobs list");
+        assert_eq!(job.progress, Some(0.25));
+        assert!(job.can_cancel && job.detail.contains("50 / 200 MB"), "{}", job.detail);
+        app.cancel_job(super::super::jobs::JobKind::ModelDownload);
+        assert!(cancel.load(std::sync::atomic::Ordering::Relaxed));
+        tx.send(Err(whisper::CANCELLED.to_string())).unwrap();
+        app.poll_whisper();
+        assert!(app.whisper.download.is_none() && !app.whisper.status.1, "{:?}", app.whisper.status);
     }
 
     #[test]

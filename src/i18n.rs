@@ -83,9 +83,15 @@ impl Lang {
         match parts.next()? {
             "zh" => {
                 let rest: Vec<&str> = parts.collect();
-                let simplified = rest.iter().any(|p| matches!(*p, "hans" | "cn" | "sg" | "my"));
-                let traditional = rest.iter().any(|p| matches!(*p, "hant" | "tw" | "hk" | "mo"));
-                Some(if simplified && !traditional { Lang::ZhCn } else { Lang::ZhTw })
+                // The script decides when there is one (zh-Hans-HK is simplified).
+                let simplified = if rest.contains(&"hans") {
+                    true
+                } else if rest.contains(&"hant") {
+                    false
+                } else {
+                    rest.iter().any(|p| matches!(*p, "cn" | "sg" | "my"))
+                };
+                Some(if simplified { Lang::ZhCn } else { Lang::ZhTw })
             }
             "en" => Some(Lang::En),
             "ja" => Some(Lang::Ja),

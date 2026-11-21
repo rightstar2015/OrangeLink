@@ -160,7 +160,7 @@ impl App {
         let secs = job.progress.load(Ordering::Relaxed) as f64;
         let progress = it.and_then(|i| i.duration).filter(|d| *d > 0.0).map(|d| (secs / d).clamp(0.0, 1.0) as f32);
         let name = it.map_or_else(String::new, |i| i.name.clone());
-        Some(super::jobs::BgJob::new(super::jobs::JobKind::Loudness, format!("分析音量：{name}"), format!("已讀 {}", crate::media::fmt_duration(secs)), progress))
+        Some(super::jobs::BgJob::new(super::jobs::JobKind::Loudness, t!("分析音量：{name}", name), t!("已讀 {secs}", secs = crate::media::fmt_duration(secs)), progress))
     }
 
     pub(super) fn cancel_loudness(&mut self) {
@@ -171,7 +171,7 @@ impl App {
 
     pub fn analyze_loudness(&mut self) {
         let (Some(lib), Some(ff)) = (&self.lib, self.ffmpeg_dir.clone()) else {
-            return self.toast("需要 FFmpeg 才能分析音量");
+            return self.toast(t!("需要 FFmpeg 才能分析音量"));
         };
         let Some(s) = self.signals.as_mut() else { return };
         let Some(it) = lib.items.get(&s.id) else { return };
@@ -197,8 +197,8 @@ impl App {
         let Some(s) = self.signals.as_ref().filter(|s| s.id == id) else { return };
         let (chat, hits, loud) = (s.chat.clone(), s.chat_hits.clone(), s.loud.clone());
         match self.make_candidates(id, chat.as_deref(), hits.as_ref(), loud.as_deref()) {
-            0 => self.toast("沒有找到明顯的高峰；可以先分析音量，或確認有聊天室紀錄"),
-            n => self.toast(format!("已建立 {n} 個候選片段；不要的刪掉，要的改個名字就會保留")),
+            0 => self.toast(t!("沒有找到明顯的高峰；可以先分析音量，或確認有聊天室紀錄")),
+            n => self.toast(t!("已建立 {n} 個候選片段；不要的刪掉，要的改個名字就會保留", n)),
         }
     }
 
@@ -220,7 +220,7 @@ impl App {
                 name: format!("{CANDIDATE}{:02}", n + 1),
                 start: s.start,
                 end: s.end,
-                note: signals::describe(chat, hits, loud, s.start, s.end).map(|d| if s.peaks > 1 { format!("{d}（{} 個高峰合併）", s.peaks) } else { d }),
+                note: signals::describe(chat, hits, loud, s.start, s.end).map(|d| if s.peaks > 1 { t!("{why}（{peaks} 個高峰合併）", why = d, peaks = s.peaks) } else { d }),
                 score: Some((s.score * 10.0).round() / 10.0),
                 ..Default::default()
             })
@@ -242,7 +242,7 @@ impl App {
         let Some(lib) = &self.lib else { return };
         let media: Vec<String> = ids.into_iter().filter(|id| lib.items.get(id).is_some_and(|i| matches!(i.kind, MediaKind::Video | MediaKind::Audio))).collect();
         if media.is_empty() {
-            return self.toast("只有影片和音訊可以整場處理");
+            return self.toast(t!("只有影片和音訊可以整場處理"));
         }
         let n = media.len();
         for id in media {
@@ -251,7 +251,7 @@ impl App {
             }
         }
         self.start_next_stream();
-        self.toast(format!("整場處理：{n} 個項目排入背景工作（音量 → 精華候選 → 字幕）"));
+        self.toast(t!("整場處理：{n} 個項目排入背景工作（音量 → 精華候選 → 字幕）", n));
     }
 
     fn start_next_stream(&mut self) {
@@ -300,7 +300,7 @@ impl App {
                 let name = run.name.clone();
                 self.stream.run = None;
                 crate::log::error("highlights", format!("整場處理「{name}」：{}", super::state::LOST));
-                self.toast_error(format!("「{name}」整場處理失敗：{}", super::state::LOST));
+                self.toast_error(t!("「{name}」整場處理失敗：{state}", name, state = super::state::LOST));
                 return self.start_next_stream();
             }
         };
@@ -312,7 +312,7 @@ impl App {
             Err(e) => {
                 if e != "已取消" {
                     crate::log::error("highlights", format!("整場處理「{name}」：{e}"));
-                    self.toast(format!("「{name}」分析音量失敗：{e}"));
+                    self.toast(t!("「{name}」分析音量失敗：{e}", name, e));
                 }
                 return self.start_next_stream();
             }
@@ -335,13 +335,13 @@ impl App {
             ""
         } else if result.can_whisper {
             self.queue_whisper(&id);
-            "，字幕已排入轉錄"
+            t!("，字幕已排入轉錄")
         } else {
-            "，沒有字幕（需要 Whisper 模型，在「產生字幕」視窗下載）"
+            t!("，沒有字幕（需要 Whisper 模型，在「產生字幕」視窗下載）")
         };
-        let found = if n > 0 { format!("{n} 個精華候選") } else { "沒有找到明顯的高峰".to_string() };
-        let chat = if result.chat.is_none() { "（沒有聊天室紀錄，只依音量）" } else { "" };
-        self.toast_with(format!("「{name}」：{found}{chat}{subtitles}"), "查看", Action::Media(id, MediaTask::Open));
+        let found = if n > 0 { t!("{n} 個精華候選", n) } else { t!("沒有找到明顯的高峰").to_string() };
+        let chat = if result.chat.is_none() { t!("（沒有聊天室紀錄，只依音量）") } else { "" };
+        self.toast_with(t!("「{name}」：{found}{chat}{subtitles}", name, found, chat, subtitles), t!("查看"), Action::Media(id, MediaTask::Open));
         self.start_next_stream();
     }
 
@@ -351,11 +351,11 @@ impl App {
         let secs = run.progress.load(Ordering::Relaxed) as f64;
         let progress = run.duration.filter(|d| *d > 0.0).map(|d| (secs / d).clamp(0.0, 1.0) as f32);
         let left = self.stream.queue.len();
-        let mut detail = format!("分析音量 {}", crate::media::fmt_duration(secs));
+        let mut detail = t!("分析音量 {secs}", secs = crate::media::fmt_duration(secs));
         if left > 0 {
-            detail += &format!("（還有 {left} 個）");
+            detail += &t!("（還有 {left} 個）", left);
         }
-        Some(super::jobs::BgJob::new(super::jobs::JobKind::Stream, format!("整場處理：{}", run.name), detail, progress))
+        Some(super::jobs::BgJob::new(super::jobs::JobKind::Stream, t!("整場處理：{run}", run = run.name), detail, progress))
     }
 
     pub(super) fn cancel_stream(&mut self) {
@@ -367,7 +367,7 @@ impl App {
 /// The name a kept candidate gets: `候選 03` becomes `精華 03`.
 pub fn kept_name(name: &str) -> String {
     match name.strip_prefix(CANDIDATE) {
-        Some(n) if is_candidate(name) => format!("精華 {n}"),
+        Some(n) if is_candidate(name) => t!("精華 {n}", n),
         _ => name.to_string(),
     }
 }
@@ -381,7 +381,7 @@ pub fn is_candidate(name: &str) -> bool {
 pub fn candidates_ui(app: &mut App, ui: &mut egui::Ui, id: &str) {
     use egui::{RichText, Stroke};
     let Some(s) = app.signals.as_ref().filter(|s| s.id == id) else {
-        ui.label(RichText::new("此素材不支援精華分析").weak());
+        ui.label(RichText::new(t!("此素材不支援精華分析")).weak());
         return;
     };
     let mut analyze = false;
@@ -395,29 +395,29 @@ pub fn candidates_ui(app: &mut App, ui: &mut egui::Ui, id: &str) {
         .inner_margin(10.0)
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
-            ui.label(RichText::new("直播精華自動偵測").strong());
+            ui.label(RichText::new(t!("直播精華自動偵測")).strong());
             ui.add_space(6.0);
             let (chat_text, chat_ok) = match (&s.chat_file, &s.chat, &s.chat_rx) {
-                (None, ..) => ("找不到同名 .live_chat.json（下載時勾選聊天室並與影片同資料夾）".to_string(), false),
-                (Some(_), _, Some(_)) => ("聊天室：讀取中…".to_string(), false),
-                (Some(_), Some(c), _) => (format!("✔ 聊天室已載入（約 {} 分鐘）", c.len() / 60), true),
-                (Some(_), None, None) => ("聊天室紀錄沒有可用的時間資訊".to_string(), false),
+                (None, ..) => (t!("找不到同名 .live_chat.json（下載時勾選聊天室並與影片同資料夾）").to_string(), false),
+                (Some(_), _, Some(_)) => (t!("聊天室：讀取中…").to_string(), false),
+                (Some(_), Some(c), _) => (t!("✔ 聊天室已載入（約 {n} 分鐘）", n = c.len() / 60), true),
+                (Some(_), None, None) => (t!("聊天室紀錄沒有可用的時間資訊").to_string(), false),
             };
             ui.label(RichText::new(chat_text).small().color(if chat_ok { crate::ui::good() } else { t.text_muted }));
             ui.add_space(4.0);
             ui.horizontal(|ui| match (&s.loud, &s.loud_job) {
                 (_, Some(job)) => {
                     ui.spinner();
-                    ui.label(RichText::new(format!("分析音量中… {}", crate::media::fmt_duration(job.progress.load(Ordering::Relaxed) as f64))).small());
-                    cancel = ui.small_button("取消").clicked();
+                    ui.label(RichText::new(t!("分析音量中… {done}", done = crate::media::fmt_duration(job.progress.load(Ordering::Relaxed) as f64))).small());
+                    cancel = ui.small_button(t!("取消")).clicked();
                 }
                 (Some(_), None) => {
-                    ui.label(RichText::new("✔ 音量軌已分析").small().color(crate::ui::good()));
-                    analyze = ui.small_button("重新分析").clicked();
+                    ui.label(RichText::new(t!("✔ 音量軌已分析")).small().color(crate::ui::good()));
+                    analyze = ui.small_button(t!("重新分析")).clicked();
                 }
                 (None, None) => {
-                    ui.label(RichText::new("音量軌：未分析").small().weak());
-                    analyze = ui.small_button("分析音量").on_hover_text("用 FFmpeg 讀完整段聲音，長直播約需幾分鐘；結果會保存").clicked();
+                    ui.label(RichText::new(t!("音量軌：未分析")).small().weak());
+                    analyze = ui.small_button(t!("分析音量")).on_hover_text(t!("用 FFmpeg 讀完整段聲音，長直播約需幾分鐘；結果會保存")).clicked();
                 }
             });
             if let Some(e) = &s.loud_error {
@@ -426,22 +426,22 @@ pub fn candidates_ui(app: &mut App, ui: &mut egui::Ui, id: &str) {
             }
             ui.add_space(8.0);
             let ready = s.chat.is_some() || s.loud.is_some();
-            let btn = egui::Button::new(RichText::new("⚡ 自動找精華候選").strong().color(if ready { egui::Color32::WHITE } else { t.text_muted }))
+            let btn = egui::Button::new(RichText::new(t!("⚡ 自動找精華候選")).strong().color(if ready { egui::Color32::WHITE } else { t.text_muted }))
                 .fill(if ready { t.selection_bg } else { t.bg_control });
             let find_resp = ui
                 .add_enabled(ready, btn)
-                .on_hover_text("在聊天熱度和音量的高峰前後建立片段；前後秒數與加權關鍵字可在設定調整");
+                .on_hover_text(t!("在聊天熱度和音量的高峰前後建立片段；前後秒數與加權關鍵字可在設定調整"));
             if find_resp.clicked() {
                 app.act(Action::FindCandidates(id.to_string()));
             }
             ui.add_space(4.0);
-            if ui.link(RichText::new("調整精華參數與關鍵字…").small()).clicked() {
+            if ui.link(RichText::new(t!("調整精華參數與關鍵字…")).small()).clicked() {
                 open_settings = true;
             }
         });
     ui.add_space(8.0);
     ui.label(
-        RichText::new("提示：分析完成後可在時間軸上看到橘色聊天熱度與藍色音量曲線，點一下即可跳轉；按 I／O 標記並按 Enter 加入片段，最後從上方一鍵匯出 Premiere XML。")
+        RichText::new(t!("提示：分析完成後可在時間軸上看到橘色聊天熱度與藍色音量曲線，點一下即可跳轉；按 I／O 標記並按 Enter 加入片段，最後從上方一鍵匯出 Premiere XML。"))
             .small()
             .weak(),
     );

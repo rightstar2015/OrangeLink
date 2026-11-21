@@ -267,7 +267,7 @@ fn run(
     // shut down at the end of this function.
     unsafe {
         if let Err(e) = MFStartup(MF_VERSION, MFSTARTUP_FULL) {
-            fail(format!("Media Foundation 無法啟動：{}", e.message()));
+            fail(t!("Media Foundation 無法啟動：{message}", message = e.message()));
             return;
         }
     }
@@ -281,7 +281,7 @@ fn run(
                 let _ = engine.engine.Shutdown();
             }
         }
-        Err(e) => fail(format!("Media Foundation 無法開啟：{}", e.message())),
+        Err(e) => fail(t!("Media Foundation 無法開啟：{message}", message = e.message())),
     }
     // SAFETY: pairs with the MFStartup above, after the engine is shut down and dropped.
     unsafe {
@@ -404,23 +404,23 @@ impl Engine {
                         // failure"; the code says more. It goes to the log.
                         let detail = err.GetExtendedErrorCode().err().map(|x| format!("{:#010x}", x.code().0)).unwrap_or_default();
                         let what = match code {
-                            3 => "Windows 解碼這個檔案時出錯",
-                            4 => "Windows 不支援這個檔案的格式",
-                            _ => "Windows 無法播放這個檔案",
+                            3 => t!("Windows 解碼這個檔案時出錯"),
+                            4 => t!("Windows 不支援這個檔案的格式"),
+                            _ => t!("Windows 無法播放這個檔案"),
                         };
-                        return Err(format!("{what}（Media Foundation {code} {detail}）"));
+                        return Err(t!("{what}（Media Foundation {code} {detail}）", what, code, detail));
                     }
                 }
                 let ready = e.GetReadyState() >= HAVE_METADATA;
                 if !ready {
                     if opened.elapsed() > Duration::from_secs(15) {
-                        return Err("Media Foundation 開啟檔案逾時".into());
+                        return Err(t!("Media Foundation 開啟檔案逾時").into());
                     }
                     continue;
                 }
                 let has_video = e.HasVideo().as_bool();
                 if video && !has_video {
-                    return Err("Windows 沒有這個影片格式的解碼器".into());
+                    return Err(t!("Windows 沒有這個影片格式的解碼器").into());
                 }
                 // A rough seek waits until the one before has landed and its frame
                 // gone out (only the newest is kept), so a drag shows frames

@@ -14,22 +14,22 @@ impl App {
     fn results_bar(&mut self, ui: &mut Ui, label: &str, source: &crate::app::IdsSource, grouped: bool) {
         use crate::app::IdsSource;
         ui.horizontal_wrapped(|ui| {
-            let text = if grouped { format!("{label}（{} 組、{} 個）", self.groups.len(), self.visible.len()) } else { format!("{label}（{} 個）", self.visible.len()) };
+            let text = if grouped { t!("{label}（{groups} 組、{n} 個）", label, groups = self.groups.len(), n = self.visible.len()) } else { t!("{label}（{n} 個）", label, n = self.visible.len()) };
             ui.label(RichText::new(text).strong().color(accent()));
             if let IdsSource::Similar(target) = source {
                 let (value, default) = if target.is_some() { (&mut self.similar_near, crate::similarity::NEAR) } else { (&mut self.similar_dupes, crate::similarity::DUPES) };
-                ui.label(RichText::new("差異上限").small());
+                ui.label(RichText::new(t!("差異上限")).small());
                 let r = ui
                     .add(egui::Slider::new(value, 0..=24).show_value(true))
-                    .on_hover_text(format!("縮圖指紋 64 位元中最多幾位不同。越小越嚴格；預設 {default}。放開後重新比對"));
+                    .on_hover_text(t!("縮圖指紋 64 位元中最多幾位不同。越小越嚴格；預設 {default}。放開後重新比對", default));
                 if r.drag_stopped() || (r.changed() && !r.dragged()) {
                     self.act(Action::RerunResults);
                 }
             }
-            if !matches!(source, IdsSource::Plain) && ui.small_button("重新比對").clicked() {
+            if !matches!(source, IdsSource::Plain) && ui.small_button(t!("重新比對")).clicked() {
                 self.act(Action::RerunResults);
             }
-            if ui.small_button("✖ 返回全部").clicked() {
+            if ui.small_button(t!("✖ 返回全部")).clicked() {
                 self.act(Action::SetView(View::All));
             }
         });
@@ -38,23 +38,23 @@ impl App {
         }
         let picked = self.result_groups().iter().filter(|g| g.iter().any(|id| self.selected.contains(id))).count();
         ui.horizontal_wrapped(|ui| {
-            let hint = if picked == 0 { "每組第一個是建議保留的（評分最高、最早加入）；點一下改選要保留的那個（多組時 Ctrl＋點）".to_string() } else { format!("已在 {picked} 組選了要保留的") };
+            let hint = if picked == 0 { t!("每組第一個是建議保留的（評分最高、最早加入）；點一下改選要保留的那個（多組時 Ctrl＋點）").to_string() } else { t!("已在 {picked} 組選了要保留的", picked) };
             ui.label(RichText::new(hint).small().weak());
-            let tip_keep = "選取的那個留下，同一組的其他移到垃圾桶（可復原）";
-            let tip_merge = "其他項目的標籤、資料夾、註解、片段、自訂欄位和使用次數併到選取的那個，再把它們移到垃圾桶（可復原）";
-            if ui.add_enabled(picked > 0, egui::Button::new("保留選取的")).on_hover_text(tip_keep).clicked() {
+            let tip_keep = t!("選取的那個留下，同一組的其他移到垃圾桶（可復原）");
+            let tip_merge = t!("其他項目的標籤、資料夾、註解、片段、自訂欄位和使用次數併到選取的那個，再把它們移到垃圾桶（可復原）");
+            if ui.add_enabled(picked > 0, egui::Button::new(t!("保留選取的"))).on_hover_text(tip_keep).clicked() {
                 self.act(Action::ResolveDuplicates { merge: false, only_selected: true });
             }
-            if ui.add_enabled(picked > 0, egui::Button::new("合併到選取的")).on_hover_text(tip_merge).clicked() {
+            if ui.add_enabled(picked > 0, egui::Button::new(t!("合併到選取的"))).on_hover_text(tip_merge).clicked() {
                 self.act(Action::ResolveDuplicates { merge: true, only_selected: true });
             }
-            ui.menu_button(format!("全部 {} 組 ▼", self.groups.len()), |ui| {
-                ui.label(RichText::new("有選取的組留選取的，其他組留第一個").small().weak());
-                if ui.button("每組保留一個，其他移到垃圾桶").clicked() {
+            ui.menu_button(t!("全部 {n} 組 ▼", n = self.groups.len()), |ui| {
+                ui.label(RichText::new(t!("有選取的組留選取的，其他組留第一個")).small().weak());
+                if ui.button(t!("每組保留一個，其他移到垃圾桶")).clicked() {
                     self.act(Action::ResolveDuplicates { merge: false, only_selected: false });
                     ui.close_menu();
                 }
-                if ui.button("每組合併成一個").on_hover_text(tip_merge).clicked() {
+                if ui.button(t!("每組合併成一個")).on_hover_text(tip_merge).clicked() {
                     self.act(Action::ResolveDuplicates { merge: true, only_selected: false });
                     ui.close_menu();
                 }
@@ -70,7 +70,7 @@ impl App {
             ui.add_space(4.0);
         }
         if self.searching_everywhere() {
-            ui.label(RichText::new(format!("在全部素材中搜尋（{} 個）", self.visible.len())).small().color(accent()));
+            ui.label(RichText::new(t!("在全部素材中搜尋（{n} 個）", n = self.visible.len())).small().color(accent()));
             ui.add_space(4.0);
         }
         if self.ffmpeg_dir.is_none() && !self.config.ffmpeg_hint_dismissed {
@@ -111,9 +111,9 @@ impl App {
                     .show(ui, |ui| {
                         ui.horizontal(|ui| {
                             ui.spacing_mut().item_spacing.x = 6.0;
-                            ui.label(RichText::new(format!("已選取 {n} 項")).strong().color(accent()));
+                            ui.label(RichText::new(t!("已選取 {n} 項", n)).strong().color(accent()));
                             ui.separator();
-                            ui.menu_button("★ 評分", |ui| {
+                            ui.menu_button(t!("★ 評分"), |ui| {
                                 for r in (1..=5u8).rev() {
                                     if ui.button(RichText::new("★".repeat(r as usize)).color(star())).clicked() {
                                         self.act(Action::SetRating(ids.clone(), r));
@@ -121,28 +121,28 @@ impl App {
                                     }
                                 }
                                 ui.separator();
-                                if ui.button("清除評分").clicked() {
+                                if ui.button(t!("清除評分")).clicked() {
                                     self.act(Action::SetRating(ids.clone(), 0));
                                     ui.close_menu();
                                 }
                             });
-                            if ui.button("🏷 標籤").on_hover_text("聚焦右側標籤輸入框").clicked() {
+                            if ui.button(t!("🏷 標籤")).on_hover_text(t!("聚焦右側標籤輸入框")).clicked() {
                                 self.act(Action::FocusTagInput);
                             }
-                            if ui.button("F2 改名").on_hover_text("批次重新命名").clicked() {
+                            if ui.button(t!("F2 改名")).on_hover_text(t!("批次重新命名")).clicked() {
                                 self.act(Action::BatchRename(ids.clone()));
                             }
                             if in_trash {
-                                if ui.button("還原").clicked() {
+                                if ui.button(t!("還原")).clicked() {
                                     self.act(Action::RestoreSelected);
                                 }
-                                if ui.button(RichText::new("永久刪除").color(danger())).clicked() {
+                                if ui.button(RichText::new(t!("永久刪除")).color(danger())).clicked() {
                                     self.act(Action::ConfirmDeleteForever);
                                 }
-                            } else if ui.button(RichText::new("🗑 刪除").color(danger())).on_hover_text("移到垃圾桶 (Delete)").clicked() {
+                            } else if ui.button(RichText::new(t!("🗑 刪除")).color(danger())).on_hover_text(t!("移到垃圾桶 (Delete)")).clicked() {
                                 self.act(Action::TrashSelected);
                             }
-                            if ui.small_button("✖").on_hover_text("取消選取 (Esc)").clicked() {
+                            if ui.small_button("✖").on_hover_text(t!("取消選取 (Esc)")).clicked() {
                                 self.act(Action::ClearSelection);
                             }
                         });
@@ -276,18 +276,18 @@ impl App {
         egui::Frame::none().fill(warning().gamma_multiply(0.15)).rounding(ROUNDING).inner_margin(egui::Margin::symmetric(10.0, 6.0)).show(ui, |ui| {
             ui.horizontal_wrapped(|ui| {
                 let what = if cfg!(windows) && self.config.play_engine != crate::config::PlayEngine::Ffmpeg {
-                    "影片縮圖、片段輸出和 Windows 無法播放的格式需要 FFmpeg"
+                    t!("影片縮圖、片段輸出和 Windows 無法播放的格式需要 FFmpeg")
                 } else {
-                    "影片縮圖和播放需要 FFmpeg"
+                    t!("影片縮圖和播放需要 FFmpeg")
                 };
                 ui.label(RichText::new(what).color(warning()));
-                if ui.small_button("安裝").on_hover_text("以 winget 安裝 Gyan.FFmpeg").clicked() {
+                if ui.small_button(t!("安裝")).on_hover_text(t!("以 winget 安裝 Gyan.FFmpeg")).clicked() {
                     self.act(Action::InstallFfmpeg);
                 }
-                if ui.small_button("指定資料夾…").clicked() {
+                if ui.small_button(t!("指定資料夾…")).clicked() {
                     self.act(Action::OpenSettingsAt(crate::config::SettingsPage::Tools));
                 }
-                if ui.small_button("✖").on_hover_text("不再顯示").clicked() {
+                if ui.small_button("✖").on_hover_text(t!("不再顯示")).clicked() {
                     self.config.ffmpeg_hint_dismissed = true;
                     self.config.save();
                 }
@@ -303,9 +303,9 @@ impl App {
         ui.vertical_centered(|ui| {
             ui.add_space(ui.available_height() * 0.25);
             if self.view == View::Trash {
-                ui.label(RichText::new("垃圾桶是空的").size(16.0).weak());
+                ui.label(RichText::new(t!("垃圾桶是空的")).size(16.0).weak());
             } else if empty_library {
-                ui.label(RichText::new("資源庫還是空的").size(18.0).strong());
+                ui.label(RichText::new(t!("資源庫還是空的")).size(18.0).strong());
                 ui.add_space(14.0);
                 let size = [168.0, 38.0];
                 ui.horizontal_wrapped(|ui| {
@@ -313,31 +313,31 @@ impl App {
                     if ui.available_width() > w {
                         ui.add_space((ui.available_width() - w) / 2.0);
                     }
-                    if ui.add_sized(size, egui::Button::new("📄 匯入檔案…")).clicked() {
+                    if ui.add_sized(size, egui::Button::new(t!("📄 匯入檔案…"))).clicked() {
                         self.act(Action::ImportFiles);
                     }
-                    if ui.add_sized(size, egui::Button::new("📁 匯入資料夾…")).clicked() {
+                    if ui.add_sized(size, egui::Button::new(t!("📁 匯入資料夾…"))).clicked() {
                         self.act(Action::ImportFolder);
                     }
-                    if ui.add_sized(size, egui::Button::new("⬇ 從網址下載…")).clicked() {
+                    if ui.add_sized(size, egui::Button::new(t!("⬇ 從網址下載…"))).clicked() {
                         self.act(Action::OpenYtdlp);
                     }
                 });
                 ui.add_space(10.0);
-                ui.label(RichText::new("也可以直接把檔案或資料夾拖進視窗，或用 Ctrl+V 貼上").weak());
-                if ui.link("安裝瀏覽器擴充功能，在網頁上按右鍵就能加入素材").clicked() {
+                ui.label(RichText::new(t!("也可以直接把檔案或資料夾拖進視窗，或用 Ctrl+V 貼上")).weak());
+                if ui.link(t!("安裝瀏覽器擴充功能，在網頁上按右鍵就能加入素材")).clicked() {
                     self.act(Action::OpenSettingsAt(crate::config::SettingsPage::Integration));
                 }
             } else {
-                ui.label(RichText::new("沒有符合條件的項目").size(16.0).weak());
+                ui.label(RichText::new(t!("沒有符合條件的項目")).size(16.0).weak());
                 let conditions = self.condition_summary();
                 if !conditions.is_empty() {
                     ui.add_space(6.0);
-                    ui.label(RichText::new(format!("目前的條件：{}", conditions.join("、"))).small().weak());
+                    ui.label(RichText::new(t!("目前的條件：{conditions}", conditions = conditions.join(t!("、")))).small().weak());
                 }
                 ui.add_space(10.0);
                 let had_filters = !self.search.trim().is_empty() || !self.tag_filter.is_empty() || self.filter_count() > 0;
-                let btn_label = if had_filters { "清除篩選" } else { "回到全部素材" };
+                let btn_label = if had_filters { t!("清除篩選") } else { t!("回到全部素材") };
                 if ui.button(btn_label).clicked() {
                     self.clear_filters();
                     self.search.clear();
@@ -357,24 +357,24 @@ impl App {
     fn condition_summary(&self) -> Vec<String> {
         let mut out = Vec::new();
         if !self.search.trim().is_empty() {
-            out.push(format!("搜尋「{}」", self.search.trim()));
+            out.push(t!("搜尋「{search}」", search = self.search.trim()));
         }
-        out.extend(self.tag_filter.iter().map(|t| format!("標籤 #{t}")));
+        out.extend(self.tag_filter.iter().map(|t| t!("標籤 #{t}", t)));
         if !self.ext_filter.is_empty() {
-            out.push(format!("格式 {}", self.ext_filter.iter().map(|e| e.to_uppercase()).collect::<Vec<_>>().join("／")));
+            out.push(t!("格式 {exts}", exts = self.ext_filter.iter().map(|e| e.to_uppercase()).collect::<Vec<_>>().join(t!("／"))));
         }
         if self.min_rating > 0 {
-            out.push(format!("★{} 以上", self.min_rating));
+            out.push(t!("★{min_rating} 以上", min_rating = self.min_rating));
         }
         if self.color_filter.is_some() {
-            out.push("顏色".into());
+            out.push(t!("顏色").into());
         }
         match &self.view {
             View::All => {}
-            View::Uncategorized => out.push("未分類".into()),
-            View::Untagged => out.push("未標籤".into()),
-            View::Kind(k) => out.push(format!("類型 {}", k.label())),
-            _ => out.push("目前選的資料夾或分類".into()),
+            View::Uncategorized => out.push(t!("未分類").into()),
+            View::Untagged => out.push(t!("未標籤").into()),
+            View::Kind(k) => out.push(t!("類型 {label}", label = k.label())),
+            _ => out.push(t!("目前選的資料夾或分類").into()),
         }
         out
     }
@@ -700,13 +700,13 @@ impl App {
         let row_h = 34.0;
         // (title, width, sort key)
         let cols: [(&str, f32, Option<SortKey>); 7] = [
-            ("名稱", 0.0, Some(SortKey::Name)),
-            ("類型", 70.0, None),
-            ("尺寸", 110.0, Some(SortKey::Dimensions)),
-            ("長度", 70.0, None),
-            ("大小", 90.0, Some(SortKey::FileSize)),
-            ("評分", 80.0, Some(SortKey::Rating)),
-            ("加入時間", 130.0, Some(SortKey::Added)),
+            (t!("名稱"), 0.0, Some(SortKey::Name)),
+            (t!("類型"), 70.0, None),
+            (t!("尺寸"), 110.0, Some(SortKey::Dimensions)),
+            (t!("長度"), 70.0, None),
+            (t!("大小"), 90.0, Some(SortKey::FileSize)),
+            (t!("評分"), 80.0, Some(SortKey::Rating)),
+            (t!("加入時間"), 130.0, Some(SortKey::Added)),
         ];
         let fixed: f32 = cols.iter().map(|c| c.1).sum();
         let name_w = (ui.available_width() - fixed - 52.0).max(160.0);
@@ -860,30 +860,30 @@ impl App {
         let item = lib.items.get(id);
         let trash = self.view == View::Trash;
         if n > 1 {
-            ui.label(RichText::new(format!("{n} 個項目")).weak());
+            ui.label(RichText::new(t!("{n} 個項目", n)).weak());
             ui.separator();
         }
-        let only_this = |r: egui::Response| if n > 1 { r.on_hover_text("只開啟按右鍵的這一個") } else { r };
-        if only_this(menu_item(ui, "在預覽中開啟", "Enter")).clicked() {
+        let only_this = |r: egui::Response| if n > 1 { r.on_hover_text(t!("只開啟按右鍵的這一個")) } else { r };
+        if only_this(menu_item(ui, t!("在預覽中開啟"), "Enter")).clicked() {
             self.act(Action::OpenViewer(id.to_string()));
             ui.close_menu();
         }
-        if only_this(ui.button("在檔案總管中顯示")).clicked() {
+        if only_this(ui.button(t!("在檔案總管中顯示"))).clicked() {
             self.act(Action::ShowInExplorer(id.to_string()));
             ui.close_menu();
         }
-        if menu_item(ui, "複製檔案", "Ctrl+C").clicked() {
+        if menu_item(ui, t!("複製檔案"), "Ctrl+C").clicked() {
             self.act(Action::CopyFiles);
             ui.close_menu();
         }
-        let label = if n > 1 { format!("複製 {n} 個檔案路徑") } else { "複製檔案路徑".to_string() };
+        let label = if n > 1 { t!("複製 {n} 個檔案路徑", n) } else { t!("複製檔案路徑").to_string() };
         let r = ui.button(label);
-        if (if n > 1 { r.on_hover_text("一行一個") } else { r }).clicked() {
+        if (if n > 1 { r.on_hover_text(t!("一行一個")) } else { r }).clicked() {
             self.act(Action::CopyPaths(targets.clone()));
             ui.close_menu();
         }
-        ui.menu_button("開啟方式", |ui| {
-            if only_this(ui.button("預設程式")).clicked() {
+        ui.menu_button(t!("開啟方式"), |ui| {
+            if only_this(ui.button(t!("預設程式"))).clicked() {
                 self.act(Action::OpenExternal(id.to_string()));
                 ui.close_menu();
             }
@@ -893,22 +893,22 @@ impl App {
                     ui.close_menu();
                 }
             }
-            if ui.button("其他程式…").on_hover_text("在設定中新增程式").clicked() {
+            if ui.button(t!("其他程式…")).on_hover_text(t!("在設定中新增程式")).clicked() {
                 self.act(Action::OpenSettings);
                 ui.close_menu();
             }
             if cfg!(windows) {
                 ui.separator();
-                if ui.button("Windows 選單…").on_hover_text("檔案總管的右鍵選單：7-Zip、傳送到、內容等").clicked() {
+                if ui.button(t!("Windows 選單…")).on_hover_text(t!("檔案總管的右鍵選單：7-Zip、傳送到、內容等")).clicked() {
                     self.act(Action::ShellMenu(targets.clone()));
                     ui.close_menu();
                 }
             }
         });
         ui.separator();
-        ui.menu_button("加入資料夾", |ui| {
+        ui.menu_button(t!("加入資料夾"), |ui| {
             if let View::Folder(f) = &self.view {
-                if ui.button("從此資料夾移除").clicked() {
+                if ui.button(t!("從此資料夾移除")).clicked() {
                     self.act(Action::RemoveFromFolder(targets.clone(), f.clone()));
                     ui.close_menu();
                 }
@@ -916,7 +916,7 @@ impl App {
             }
             let folders = lib.folder_flat();
             if folders.is_empty() {
-                ui.label(RichText::new("尚無資料夾").weak());
+                ui.label(RichText::new(t!("尚無資料夾")).weak());
             }
             for (fid, name, depth) in folders {
                 if ui.button(format!("{}📁 {name}", "    ".repeat(depth))).clicked() {
@@ -925,14 +925,14 @@ impl App {
                 }
             }
             ui.separator();
-            if ui.button("＋ 新增資料夾…").clicked() {
+            if ui.button(t!("＋ 新增資料夾…")).clicked() {
                 self.act(Action::NewFolder(None));
                 ui.close_menu();
             }
         });
-        ui.menu_button("評分", |ui| {
+        ui.menu_button(t!("評分"), |ui| {
             for r in (0..=5u8).rev() {
-                let label = if r == 0 { "清除評分".to_string() } else { "★".repeat(r as usize) };
+                let label = if r == 0 { t!("清除評分").to_string() } else { "★".repeat(r as usize) };
                 if menu_item(ui, label, &r.to_string()).clicked() {
                     self.act(Action::SetRating(targets.clone(), r));
                     ui.close_menu();
@@ -940,25 +940,25 @@ impl App {
             }
         });
         if n > 1 {
-            if menu_item(ui, "批次重新命名…", "F2").clicked() {
+            if menu_item(ui, t!("批次重新命名…"), "F2").clicked() {
                 self.act(Action::BatchRename(targets.clone()));
                 ui.close_menu();
             }
-        } else if menu_item(ui, "重新命名…", "F2").clicked() {
+        } else if menu_item(ui, t!("重新命名…"), "F2").clicked() {
             self.act(Action::StartRename(id.to_string(), false));
             ui.close_menu();
         }
-        ui.menu_button("整理", |ui| {
-            if ui.button("尋找相似的素材").clicked() {
+        ui.menu_button(t!("整理"), |ui| {
+            if ui.button(t!("尋找相似的素材")).clicked() {
                 self.act(Action::FindSimilar(id.to_string()));
                 ui.close_menu();
             }
-            if targets.len() > 1 && ui.button(format!("把這 {} 個互相關聯", targets.len())).on_hover_text("在右側面板的「相關素材」互相列出").clicked() {
+            if targets.len() > 1 && ui.button(t!("把這 {n} 個互相關聯", n = targets.len())).on_hover_text(t!("在右側面板的「相關素材」互相列出")).clicked() {
                 self.act(Action::LinkItems(targets.clone()));
                 ui.close_menu();
             }
             if let Some(it) = item.filter(|_| !lib.meta.fields.is_empty()) {
-                ui.menu_button("依自訂欄位建立智慧資料夾", |ui| {
+                ui.menu_button(t!("依自訂欄位建立智慧資料夾"), |ui| {
                     for name in &lib.meta.fields {
                         if let Some(v) = it.fields.get(name).filter(|v| !v.trim().is_empty()) {
                             if ui.button(format!("{name} = {v}")).clicked() {
@@ -966,55 +966,55 @@ impl App {
                                 ui.close_menu();
                             }
                         }
-                        if ui.button(format!("已填寫「{name}」")).clicked() {
+                        if ui.button(t!("已填寫「{name}」", name)).clicked() {
                             self.act(Action::FieldSmartFolder(name.clone(), String::new()));
                             ui.close_menu();
                         }
                     }
                 });
             }
-            if ui.button("重新產生縮圖").clicked() {
+            if ui.button(t!("重新產生縮圖")).clicked() {
                 self.act(Action::RegenerateThumbnails(targets.clone()));
                 ui.close_menu();
             }
             let relink = lib.missing.contains(id) || item.is_some_and(|i| i.source.is_some());
-            if relink && ui.button("重新指定檔案位置…").clicked() {
+            if relink && ui.button(t!("重新指定檔案位置…")).clicked() {
                 self.act(Action::RelinkItem(id.to_string()));
                 ui.close_menu();
             }
         });
         let is_media = item.is_some_and(|it| matches!(it.kind, MediaKind::Video | MediaKind::Audio));
         if is_media && !trash {
-            ui.menu_button("影音", |ui| {
-                if ui.button("產生字幕（語音轉文字）…").clicked() {
+            ui.menu_button(t!("影音"), |ui| {
+                if ui.button(t!("產生字幕（語音轉文字）…")).clicked() {
                     self.act(Action::OpenWhisper(targets.clone()));
                     ui.close_menu();
                 }
                 if ui
-                    .button("整場處理（音量 → 精華候選 → 字幕）")
-                    .on_hover_text("在背景依序分析音量、讀聊天室紀錄、建立精華候選，沒有字幕的排入語音轉文字；可多選，進度在狀態列的背景工作")
+                    .button(t!("整場處理（音量 → 精華候選 → 字幕）"))
+                    .on_hover_text(t!("在背景依序分析音量、讀聊天室紀錄、建立精華候選，沒有字幕的排入語音轉文字；可多選，進度在狀態列的背景工作"))
                     .clicked()
                 {
                     self.act(Action::ProcessStreams(targets.clone()));
                     ui.close_menu();
                 }
-                let hint = "在預覽中開啟這個項目並開始；結果在「片段」分頁";
-                if ui.button("分析音量").on_hover_text(hint).clicked() {
+                let hint = t!("在預覽中開啟這個項目並開始；結果在「片段」分頁");
+                if ui.button(t!("分析音量")).on_hover_text(hint).clicked() {
                     self.act(Action::Media(id.to_string(), MediaTask::Loudness));
                     ui.close_menu();
                 }
-                if ui.button("自動找精華候選").on_hover_text(hint).clicked() {
+                if ui.button(t!("自動找精華候選")).on_hover_text(hint).clicked() {
                     self.act(Action::Media(id.to_string(), MediaTask::Candidates));
                     ui.close_menu();
                 }
             });
         }
-        ui.menu_button("匯出", |ui| {
-            if ui.button("匯出檔案…").clicked() {
+        ui.menu_button(t!("匯出"), |ui| {
+            if ui.button(t!("匯出檔案…")).clicked() {
                 self.act(Action::ExportSelected);
                 ui.close_menu();
             }
-            let label = if n > 1 { format!("Premiere 用 XML（{n} 個）…") } else { "Premiere 用 XML…".to_string() };
+            let label = if n > 1 { t!("Premiere 用 XML（{n} 個）…", n) } else { t!("Premiere 用 XML…").to_string() };
             if ui.button(label).clicked() {
                 self.act(Action::ExportPremiereXmlFor(targets.clone()));
                 ui.close_menu();
@@ -1022,15 +1022,15 @@ impl App {
         });
         ui.separator();
         if trash {
-            if ui.button("還原").clicked() {
+            if ui.button(t!("還原")).clicked() {
                 self.act(Action::RestoreSelected);
                 ui.close_menu();
             }
-            if menu_item(ui, RichText::new("永久刪除").color(danger()), "Delete").clicked() {
+            if menu_item(ui, RichText::new(t!("永久刪除")).color(danger()), "Delete").clicked() {
                 self.act(Action::ConfirmDeleteForever);
                 ui.close_menu();
             }
-        } else if menu_item(ui, "移到垃圾桶", "Delete").clicked() {
+        } else if menu_item(ui, t!("移到垃圾桶"), "Delete").clicked() {
             self.act(Action::TrashSelected);
             ui.close_menu();
         }

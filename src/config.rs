@@ -55,14 +55,14 @@ impl SettingsPage {
 
     pub fn label(self) -> &'static str {
         match self {
-            SettingsPage::General => "一般",
-            SettingsPage::ImportDelete => "匯入與刪除",
-            SettingsPage::Preview => "預覽與播放",
-            SettingsPage::Highlights => "直播精華",
-            SettingsPage::ExternalApps => "外部程式",
-            SettingsPage::Integration => "整合",
-            SettingsPage::Tools => "工具",
-            SettingsPage::Advanced => "進階",
+            SettingsPage::General => t!("一般"),
+            SettingsPage::ImportDelete => t!("匯入與刪除"),
+            SettingsPage::Preview => t!("預覽與播放"),
+            SettingsPage::Highlights => t!("直播精華"),
+            SettingsPage::ExternalApps => t!("外部程式"),
+            SettingsPage::Integration => t!("整合"),
+            SettingsPage::Tools => t!("工具"),
+            SettingsPage::Advanced => t!("進階"),
         }
     }
 }
@@ -92,7 +92,7 @@ impl PlayEngine {
 
     pub fn label(self) -> &'static str {
         match self {
-            PlayEngine::Auto => "自動",
+            PlayEngine::Auto => t!("自動"),
             PlayEngine::MediaFoundation => "Media Foundation",
             PlayEngine::Ffmpeg => "FFmpeg",
         }
@@ -115,10 +115,10 @@ impl VideoEncoder {
 
     pub fn label(self) -> &'static str {
         match self {
-            VideoEncoder::Auto => "自動",
-            VideoEncoder::H264Nvenc => "NVENC H.264（NVIDIA 顯卡）",
-            VideoEncoder::HevcNvenc => "NVENC HEVC／H.265（NVIDIA 顯卡）",
-            VideoEncoder::X264 => "x264（CPU）",
+            VideoEncoder::Auto => t!("自動"),
+            VideoEncoder::H264Nvenc => t!("NVENC H.264（NVIDIA 顯卡）"),
+            VideoEncoder::HevcNvenc => t!("NVENC HEVC／H.265（NVIDIA 顯卡）"),
+            VideoEncoder::X264 => t!("x264（CPU）"),
         }
     }
 }
@@ -142,10 +142,10 @@ impl ExportShape {
 
     pub fn label(self) -> &'static str {
         match self {
-            ExportShape::Original => "原比例（重新編碼）",
-            ExportShape::Vertical => "直式 9:16",
-            ExportShape::Copy => "不重新編碼（最快）",
-            ExportShape::AudioOnly => "只要音訊（m4a）",
+            ExportShape::Original => t!("原比例（重新編碼）"),
+            ExportShape::Vertical => t!("直式 9:16"),
+            ExportShape::Copy => t!("不重新編碼（最快）"),
+            ExportShape::AudioOnly => t!("只要音訊（m4a）"),
         }
     }
 }
@@ -170,17 +170,17 @@ pub struct ExportPreset {
 
 impl Default for ExportPreset {
     fn default() -> Self {
-        Self { name: "新的預設組".into(), shape: ExportShape::Original, full_hd: true, loudnorm: false, folder: None, import: true, subtitles: false }
+        Self { name: t!("新的預設組").into(), shape: ExportShape::Original, full_hd: true, loudnorm: false, folder: None, import: true, subtitles: false }
     }
 }
 
 pub fn default_export_presets() -> Vec<ExportPreset> {
     vec![
-        ExportPreset { name: "原比例".into(), ..Default::default() },
-        ExportPreset { name: "Shorts（1080×1920、-14 LUFS）".into(), shape: ExportShape::Vertical, loudnorm: true, ..Default::default() },
-        ExportPreset { name: "Shorts 含字幕".into(), shape: ExportShape::Vertical, loudnorm: true, subtitles: true, ..Default::default() },
-        ExportPreset { name: "快速剪下（不重新編碼）".into(), shape: ExportShape::Copy, ..Default::default() },
-        ExportPreset { name: "只要音訊".into(), shape: ExportShape::AudioOnly, ..Default::default() },
+        ExportPreset { name: t!("原比例").into(), ..Default::default() },
+        ExportPreset { name: t!("Shorts（1080×1920、-14 LUFS）").into(), shape: ExportShape::Vertical, loudnorm: true, ..Default::default() },
+        ExportPreset { name: t!("Shorts 含字幕").into(), shape: ExportShape::Vertical, loudnorm: true, subtitles: true, ..Default::default() },
+        ExportPreset { name: t!("快速剪下（不重新編碼）").into(), shape: ExportShape::Copy, ..Default::default() },
+        ExportPreset { name: t!("只要音訊").into(), shape: ExportShape::AudioOnly, ..Default::default() },
     ]
 }
 
@@ -202,6 +202,8 @@ pub struct Config {
 
     pub theme: ThemeSetting,
     pub ui_scale: f32,
+    /// The interface language; None follows Windows' display language.
+    pub language: Option<crate::i18n::Lang>,
 
     pub import_mode: ImportMode,
     pub skip_duplicates: bool,
@@ -348,6 +350,7 @@ impl Config {
             SettingsPage::General => {
                 self.theme = d.theme;
                 self.ui_scale = d.ui_scale;
+                self.language = d.language;
                 self.scroll_smoothness = d.scroll_smoothness;
                 self.drag_out = d.drag_out;
             }
@@ -450,6 +453,7 @@ impl Default for Config {
             group_by: crate::grouping::GroupBy::None,
             theme: ThemeSetting::Dark,
             ui_scale: 1.0,
+            language: None,
             import_mode: ImportMode::Ask,
             skip_duplicates: true,
             import_into_current_folder: true,
@@ -542,7 +546,7 @@ fn config_path() -> Option<PathBuf> {
     std::env::var_os("APPDATA").map(|d| PathBuf::from(d).join("OrangeLink").join("config.json"))
 }
 
-const CONFIG_VERSION: u32 = 3;
+const CONFIG_VERSION: u32 = 4;
 
 /// Why the config file couldn't be read this run, and where the original was kept.
 static LOAD_PROBLEM: std::sync::OnceLock<String> = std::sync::OnceLock::new();
@@ -572,15 +576,15 @@ impl Config {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return (Self::loaded(Self::default()), None),
             Err(e) => {
                 let config = Self { unread_file: true, ..Self::loaded(Self::default()) };
-                return (config, Some(format!("無法讀取設定檔 {}：{e}，這次使用預設值；原檔在能讀取並另存一份之前不會被覆蓋", path.display())));
+                return (config, Some(t!("無法讀取設定檔 {n}：{e}，這次使用預設值；原檔在能讀取並另存一份之前不會被覆蓋", n = path.display(), e)));
             }
         };
         match serde_json::from_slice::<Self>(bytes.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(&bytes)) {
             Ok(c) => (Self::loaded(c), None),
             Err(e) => {
                 let kept = keep_broken(path, &bytes);
-                let kept = kept.map_or_else(|| "（備份原檔失敗）".to_string(), |k| format!("原檔已保留為 {}", k.display()));
-                (Self::loaded(Self::default()), Some(format!("設定檔格式錯誤（{e}），改用預設設定；{kept}")))
+                let kept = kept.map_or_else(|| t!("（備份原檔失敗）").to_string(), |k| t!("原檔已保留為 {path}", path = k.display()));
+                (Self::loaded(Self::default()), Some(t!("設定檔格式錯誤（{e}），改用預設設定；{kept}", e, kept)))
             }
         }
     }
@@ -598,6 +602,11 @@ impl Config {
         if self.config_version < 3 {
             // v3 added in-app playback, so double-click previews media by default.
             self.media_dblclick_external = false;
+        }
+        if self.config_version < 4 {
+            // v4 added interface languages. Earlier installs were in Traditional
+            // Chinese and stay in it; a new install follows Windows.
+            self.language.get_or_insert(crate::i18n::Lang::ZhTw);
         }
         self.config_version = CONFIG_VERSION;
     }
@@ -657,6 +666,18 @@ mod tests {
         assert_eq!(c.mcp_token, "secret", "tokens are never reset");
         // Every category has a name.
         assert!(SettingsPage::ALL.iter().all(|p| !p.label().is_empty()));
+    }
+
+    #[test]
+    fn an_earlier_install_stays_in_traditional_chinese_and_a_new_one_follows_windows() {
+        use crate::i18n::Lang;
+        let old: Config = serde_json::from_str(r#"{"config_version": 3, "theme": "Light"}"#).unwrap();
+        assert_eq!(Config::loaded(old).language, Some(Lang::ZhTw));
+        let picked: Config = serde_json::from_str(r#"{"config_version": 4, "language": "Ja"}"#).unwrap();
+        assert_eq!(Config::loaded(picked).language, Some(Lang::Ja));
+        let system: Config = serde_json::from_str(r#"{"config_version": 4, "language": null}"#).unwrap();
+        assert_eq!(Config::loaded(system).language, None);
+        assert_eq!(Config::default().language, None, "a first start follows Windows");
     }
 
     #[test]

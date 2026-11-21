@@ -233,34 +233,64 @@ pub fn apply_theme(ctx: &egui::Context) {
     }
 }
 
-/// egui's bundled fonts have no CJK glyphs: a Windows system font (Microsoft
-/// JhengHei first) is added behind them, for both families. Read from disk once
-/// per context.
+/// egui's bundled fonts have no CJK glyphs: Windows system fonts are added
+/// behind them, for both families. The first is the interface language's
+/// (Microsoft JhengHei for Traditional Chinese, Yu Gothic for Japanese…); Malgun
+/// Gothic comes after it for Hangul, which the Chinese and Japanese fonts lack.
+/// Read from disk again only when the language changes.
 fn load_fonts(ctx: &egui::Context) {
+    let lang = crate::i18n::current();
     let done = egui::Id::new("orangelink-fonts-loaded");
-    if ctx.data(|d| d.get_temp::<bool>(done)).unwrap_or(false) {
+    if ctx.data(|d| d.get_temp::<crate::i18n::Lang>(done)) == Some(lang) {
         return;
     }
     let mut fonts = egui::FontDefinitions::default();
-    let candidates = [
-        r"C:\Windows\Fonts\msjh.ttc",
-        r"C:\Windows\Fonts\msyh.ttc",
-        r"C:\Windows\Fonts\mingliu.ttc",
-        r"C:\Windows\Fonts\simsun.ttc",
-        "/System/Library/Fonts/PingFang.ttc",
-        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
-    ];
-    for path in candidates {
-        if let Ok(bytes) = std::fs::read(path) {
-            fonts.font_data.insert("cjk".into(), egui::FontData::from_owned(bytes));
-            for family in [FontFamily::Proportional, FontFamily::Monospace] {
-                fonts.families.entry(family).or_default().push("cjk".into());
+    let dirs = font_dirs(std::env::var_os("SystemRoot"));
+    let read = |names: &[&str]| {
+        names.iter().find_map(|name| {
+            if name.starts_with('/') {
+                return std::fs::read(name).ok();
             }
-            break;
+            dirs.iter().find_map(|d| std::fs::read(d.join(name)).ok())
+        })
+    };
+    let hangul = ["malgun.ttf", "gulim.ttc"];
+    let main = read(cjk_fonts(lang));
+    let korean = (lang != crate::i18n::Lang::Ko).then(|| read(&hangul)).flatten();
+    for (name, bytes) in [("cjk", main), ("hangul", korean)] {
+        let Some(bytes) = bytes else { continue };
+        fonts.font_data.insert(name.into(), egui::FontData::from_owned(bytes));
+        for family in [FontFamily::Proportional, FontFamily::Monospace] {
+            fonts.families.entry(family).or_default().push(name.into());
         }
     }
     ctx.set_fonts(fonts);
-    ctx.data_mut(|d| d.insert_temp(done, true));
+    ctx.data_mut(|d| d.insert_temp(done, lang));
+}
+
+/// The CJK fonts to try for `lang`, best first: each language's own glyph
+/// shapes, then the others so any CJK text still shows.
+fn cjk_fonts(lang: crate::i18n::Lang) -> &'static [&'static str] {
+    use crate::i18n::Lang;
+    const LINUX: &str = "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc";
+    const MAC: &str = "/System/Library/Fonts/PingFang.ttc";
+    match lang {
+        Lang::ZhTw | Lang::En => &["msjh.ttc", "msyh.ttc", "mingliu.ttc", "simsun.ttc", "YuGothM.ttc", "meiryo.ttc", MAC, LINUX],
+        Lang::ZhCn => &["msyh.ttc", "simsun.ttc", "msjh.ttc", "mingliu.ttc", "YuGothM.ttc", "meiryo.ttc", MAC, LINUX],
+        Lang::Ja => &["YuGothM.ttc", "meiryo.ttc", "msgothic.ttc", "msjh.ttc", "msyh.ttc", MAC, LINUX],
+        Lang::Ko => &["malgun.ttf", "gulim.ttc", "msjh.ttc", "msyh.ttc", MAC, LINUX],
+    }
+}
+
+/// Where Windows keeps its fonts: `%SystemRoot%\Fonts` (Windows is not always
+/// on C:), then `C:\Windows\Fonts`.
+fn font_dirs(system_root: Option<std::ffi::OsString>) -> Vec<std::path::PathBuf> {
+    let mut dirs: Vec<std::path::PathBuf> = system_root.filter(|r| !r.is_empty()).map(|r| std::path::PathBuf::from(r).join("Fonts")).into_iter().collect();
+    let fallback = std::path::PathBuf::from(r"C:\Windows\Fonts");
+    if !dirs.contains(&fallback) {
+        dirs.push(fallback);
+    }
+    dirs
 }
 
 /// OrangeLink's layers and colours over the Catppuccin base, and the shared
@@ -322,4 +352,27 @@ fn brand(style: &mut egui::Style, t: &Tokens) {
         (TextStyle::Monospace, FontId::new(TEXT_MONO, FontFamily::Monospace)),
     ]
     .into();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    #[test]
+    fn fonts_are_looked_for_where_windows_is_installed() {
+        assert_eq!(font_dirs(Some(r"D:\Windows".into())), [PathBuf::from(r"D:\Windows\Fonts"), PathBuf::from(r"C:\Windows\Fonts")]);
+        assert_eq!(font_dirs(Some(r"C:\Windows".into())), [PathBuf::from(r"C:\Windows\Fonts")]);
+        assert_eq!(font_dirs(None), [PathBuf::from(r"C:\Windows\Fonts")]);
+        assert_eq!(font_dirs(Some("".into())), [PathBuf::from(r"C:\Windows\Fonts")]);
+    }
+
+    #[test]
+    fn each_language_tries_its_own_font_first() {
+        use crate::i18n::Lang;
+        assert_eq!(cjk_fonts(Lang::ZhTw)[0], "msjh.ttc");
+        assert_eq!(cjk_fonts(Lang::ZhCn)[0], "msyh.ttc");
+        assert_eq!(cjk_fonts(Lang::Ja)[0], "YuGothM.ttc");
+        assert_eq!(cjk_fonts(Lang::Ko)[0], "malgun.ttf");
+    }
 }

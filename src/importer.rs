@@ -260,7 +260,7 @@ fn is_big_image(path: &Path, size: u64) -> bool {
 fn guarded<T>(f: impl FnOnce() -> Result<T>) -> Result<T> {
     std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)).unwrap_or_else(|p| {
         let why = p.downcast_ref::<&str>().map(|s| s.to_string()).or_else(|| p.downcast_ref::<String>().cloned()).unwrap_or_default();
-        Err(anyhow::anyhow!("處理檔案時發生內部錯誤 {why}"))
+        Err(anyhow::anyhow!(t!("處理檔案時發生內部錯誤 {why}", why)))
     })
 }
 

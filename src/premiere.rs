@@ -283,10 +283,10 @@ pub fn build_xml(lib: &Library, ids: &[String], project: &str, seq: Sequences) -
     let mut placed_ids = HashSet::new();
     ordered.retain(|(i, _)| placed_ids.insert(i.id.clone()));
     if seq.sequence {
-        sequence_xml(&mut out, &format!("{project} 片段"), "sequence-1", &placed(&ordered, false), seq.gap, (1920, 1080), false);
+        sequence_xml(&mut out, &t!("{project} 片段", project), "sequence-1", &placed(&ordered, false), seq.gap, (1920, 1080), false);
     }
     if seq.vertical {
-        sequence_xml(&mut out, &format!("{project} 直式"), "sequence-2", &placed(&ordered, true), seq.gap, (1080, 1920), true);
+        sequence_xml(&mut out, &t!("{project} 直式", project), "sequence-2", &placed(&ordered, true), seq.gap, (1080, 1920), true);
     }
     out.push_str("</children></project></xmeml>\n");
     out

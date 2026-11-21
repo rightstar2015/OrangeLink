@@ -16,10 +16,10 @@ impl MediaKind {
 
     pub fn label(self) -> &'static str {
         match self {
-            MediaKind::Image => "圖片",
-            MediaKind::Video => "影片",
-            MediaKind::Audio => "音訊",
-            MediaKind::Other => "其他",
+            MediaKind::Image => t!("圖片"),
+            MediaKind::Video => t!("影片"),
+            MediaKind::Audio => t!("音訊"),
+            MediaKind::Other => t!("其他"),
         }
     }
 

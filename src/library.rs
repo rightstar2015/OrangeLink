@@ -258,7 +258,7 @@ impl LibraryLock {
         match fs::OpenOptions::new().read(true).write(true).create(true).truncate(false).share_mode(0).open(&path) {
             Ok(file) => Ok(Some(Self { _file: file })),
             Err(e) if e.raw_os_error() == Some(SHARING_VIOLATION) => {
-                anyhow::bail!("這個資源庫已經在另一個 OrangeLink 視窗開啟（同時開啟會互相覆寫存檔），請切換到那個視窗")
+                anyhow::bail!(t!("這個資源庫已經在另一個 OrangeLink 視窗開啟（同時開啟會互相覆寫存檔），請切換到那個視窗"))
             }
             Err(e) => {
                 crate::log::error("library", format!("無法建立 {}：{e}，這次不鎖定資源庫", path.display()));
@@ -335,7 +335,7 @@ fn keep_aside(path: &Path) -> Result<PathBuf> {
             return Ok(to);
         }
     }
-    anyhow::bail!("太多損壞的備份檔")
+    anyhow::bail!(t!("太多損壞的備份檔"))
 }
 
 impl Library {
@@ -366,7 +366,7 @@ impl Library {
 
     pub fn open(root: &Path) -> Result<Self> {
         let lib_file = root.join(LIB_FILE);
-        let bytes = fs::read(&lib_file).context("讀取 library.json 失敗")?;
+        let bytes = fs::read(&lib_file).context(t!("讀取 library.json 失敗"))?;
         // Damaged (a disk error, a hand edit): the folders, smart folders, tags and
         // fields come from the newest backup that has them, and the damaged file
         // is kept. Items live in their own files and are read as usual.
@@ -374,14 +374,10 @@ impl Library {
             Ok(meta) => (meta, None),
             Err(e) => {
                 let Some((meta, from)) = meta_from_backup(root) else {
-                    anyhow::bail!("library.json 格式錯誤（{e}），也沒有可以還原的備份");
+                    anyhow::bail!(t!("library.json 格式錯誤（{e}），也沒有可以還原的備份", e));
                 };
-                let kept = keep_aside(&lib_file).context("無法保留損壞的 library.json")?;
-                let note = format!(
-                    "library.json 損壞，資料夾、智慧資料夾、標籤群組和自訂欄位已從備份 {} 還原；損壞的檔案保留為 {}",
-                    from.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default(),
-                    kept.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default()
-                );
+                let kept = keep_aside(&lib_file).context(t!("無法保留損壞的 library.json"))?;
+                let note = t!("library.json 損壞，資料夾、智慧資料夾、標籤群組和自訂欄位已從備份 {backup} 還原；損壞的檔案保留為 {kept}", backup = from.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default(), kept = kept.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default());
                 crate::log::error("library", format!("{}：{e}；{note}", root.display()));
                 (meta, Some(note))
             }
@@ -443,7 +439,7 @@ impl Library {
         }
         if lib.recovered.is_some() {
             lib.meta_dirty = true;
-            lib.flush().context("無法寫入還原的 library.json")?;
+            lib.flush().context(t!("無法寫入還原的 library.json"))?;
         }
         if !lib.meta.smart_defaults_seeded {
             lib.seed_default_smart_folders();
@@ -574,7 +570,7 @@ impl Library {
             meta: LibraryMeta,
             items: Vec<Item>,
         }
-        let backup: Backup = serde_json::from_slice(&fs::read(path)?).context("備份檔格式錯誤")?;
+        let backup: Backup = serde_json::from_slice(&fs::read(path)?).context(t!("備份檔格式錯誤"))?;
         self.write_backup(&format!("backup-{}-before-restore.json", chrono::Local::now().format("%Y%m%d-%H%M%S")))?;
         rotate_backups(&self.root);
         let affected: Vec<String> = backup.items.iter().filter(|i| self.items.contains_key(&i.id)).map(|i| i.id.clone()).collect();
@@ -673,7 +669,7 @@ impl Library {
         let restored = found.len();
         for item in found {
             let meta = item_dir(&self.root, &item.id).join(META_FILE);
-            keep_aside(&meta).context("無法保留損壞的檔案")?;
+            keep_aside(&meta).context(t!("無法保留損壞的檔案"))?;
             let id = item.id.clone();
             self.insert_item(item);
             self.dirty.insert(id.clone());
@@ -788,12 +784,12 @@ impl Library {
         }
         let mut parts = Vec::new();
         if let Some(e) = &meta_error {
-            parts.push(format!("資源庫設定（library.json）：{e:#}"));
+            parts.push(t!("資源庫設定（library.json）：{e}", e = format!("{:#}", e)));
         }
         if let Some((id, e)) = failed.first() {
             let name = self.items.get(id).map(|i| i.name.as_str()).unwrap_or(id);
-            let more = if failed.len() > 1 { format!("等 {} 個素材", failed.len()) } else { String::new() };
-            parts.push(format!("「{name}」{more}：{e:#}"));
+            let more = if failed.len() > 1 { t!("等 {n} 個素材", n = failed.len()) } else { String::new() };
+            parts.push(t!("「{name}」{more}：{e}", name, more, e = format!("{:#}", e)));
         }
         for (id, e) in &failed {
             crate::log::error("save", format!("{id}: {e:#}"));
@@ -802,7 +798,7 @@ impl Library {
             crate::log::error("save", format!("library.json: {e:#}"));
         }
         self.dirty.extend(failed.into_iter().map(|(id, _)| id));
-        anyhow::bail!("{}", parts.join("；"))
+        anyhow::bail!("{}", parts.join(t!("；")))
     }
 
     /// Content hashes plus imported-from paths, for duplicate detection on import.
@@ -1058,63 +1054,63 @@ impl Library {
         let f = SavedFilter::default;
         let tree: Vec<(&str, Vec<(&str, SavedFilter)>)> = vec![
             (
-                "依類型",
+                t!("依類型"),
                 vec![
-                    ("圖片", SavedFilter { kind: Some(MediaKind::Image), ..f() }),
-                    ("影片", SavedFilter { kind: Some(MediaKind::Video), ..f() }),
-                    ("音訊", SavedFilter { kind: Some(MediaKind::Audio), ..f() }),
+                    (t!("圖片"), SavedFilter { kind: Some(MediaKind::Image), ..f() }),
+                    (t!("影片"), SavedFilter { kind: Some(MediaKind::Video), ..f() }),
+                    (t!("音訊"), SavedFilter { kind: Some(MediaKind::Audio), ..f() }),
                     (
-                        "字幕與文字",
+                        t!("字幕與文字"),
                         SavedFilter { exts: ["srt", "vtt", "ass", "ssa", "lrc", "txt"].map(String::from).to_vec(), ..f() },
                     ),
                 ],
             ),
             (
-                "依評分",
+                t!("依評分"),
                 vec![
                     ("★★★★★", SavedFilter { min_rating: 5, ..f() }),
-                    ("★4 以上", SavedFilter { min_rating: 4, ..f() }),
-                    ("未評分", SavedFilter { unrated: true, ..f() }),
+                    (t!("★4 以上"), SavedFilter { min_rating: 4, ..f() }),
+                    (t!("未評分"), SavedFilter { unrated: true, ..f() }),
                 ],
             ),
             (
-                "依加入時間",
+                t!("依加入時間"),
                 vec![
-                    ("今天", SavedFilter { added_days: Some(1), ..f() }),
-                    ("最近 7 天", SavedFilter { added_days: Some(7), ..f() }),
-                    ("最近 30 天", SavedFilter { added_days: Some(30), ..f() }),
+                    (t!("今天"), SavedFilter { added_days: Some(1), ..f() }),
+                    (t!("最近 7 天"), SavedFilter { added_days: Some(7), ..f() }),
+                    (t!("最近 30 天"), SavedFilter { added_days: Some(30), ..f() }),
                 ],
             ),
             (
-                "依尺寸",
+                t!("依尺寸"),
                 vec![
-                    ("橫向", SavedFilter { orientation: Some(Orientation::Landscape), ..f() }),
-                    ("直向", SavedFilter { orientation: Some(Orientation::Portrait), ..f() }),
-                    ("正方形", SavedFilter { orientation: Some(Orientation::Square), ..f() }),
-                    ("4K 以上", SavedFilter { min_long_side: Some(3840), ..f() }),
-                    ("大檔案（100 MB 以上）", SavedFilter { min_size_mb: Some(100), ..f() }),
+                    (t!("橫向"), SavedFilter { orientation: Some(Orientation::Landscape), ..f() }),
+                    (t!("直向"), SavedFilter { orientation: Some(Orientation::Portrait), ..f() }),
+                    (t!("正方形"), SavedFilter { orientation: Some(Orientation::Square), ..f() }),
+                    (t!("4K 以上"), SavedFilter { min_long_side: Some(3840), ..f() }),
+                    (t!("大檔案（100 MB 以上）"), SavedFilter { min_size_mb: Some(100), ..f() }),
                 ],
             ),
             (
-                "整理狀態",
+                t!("整理狀態"),
                 vec![
-                    ("未分類", SavedFilter { uncategorized: true, ..f() }),
-                    ("未標籤", SavedFilter { untagged: true, ..f() }),
-                    ("保留在原位置", SavedFilter { linked: Some(true), ..f() }),
-                    ("找不到原始檔", SavedFilter { missing: true, ..f() }),
-                    ("從未使用", SavedFilter { never_used: true, ..f() }),
+                    (t!("未分類"), SavedFilter { uncategorized: true, ..f() }),
+                    (t!("未標籤"), SavedFilter { untagged: true, ..f() }),
+                    (t!("保留在原位置"), SavedFilter { linked: Some(true), ..f() }),
+                    (t!("找不到原始檔"), SavedFilter { missing: true, ..f() }),
+                    (t!("從未使用"), SavedFilter { never_used: true, ..f() }),
                 ],
             ),
             (
-                "剪輯",
+                t!("剪輯"),
                 vec![
                     (
-                        "待處理的直播",
+                        t!("待處理的直播"),
                         SavedFilter { kind: Some(MediaKind::Video), min_duration: Some(30.0 * 60.0), has_clips: Some(false), ..f() },
                     ),
-                    ("有精華候選", SavedFilter { has_candidates: true, ..f() }),
-                    ("有片段", SavedFilter { has_clips: Some(true), ..f() }),
-                    ("沒有字幕的影音", SavedFilter { has_subtitle: Some(false), ..f() }),
+                    (t!("有精華候選"), SavedFilter { has_candidates: true, ..f() }),
+                    (t!("有片段"), SavedFilter { has_clips: Some(true), ..f() }),
+                    (t!("沒有字幕的影音"), SavedFilter { has_subtitle: Some(false), ..f() }),
                 ],
             ),
         ];

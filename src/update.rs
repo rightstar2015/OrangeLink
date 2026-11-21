@@ -64,13 +64,13 @@ pub const LATEST_JSON_MAX: usize = 64 * 1024;
 /// over [`LATEST_JSON_MAX`].
 pub fn latest_text(bytes: &[u8]) -> Result<&str, String> {
     if bytes.len() > LATEST_JSON_MAX {
-        return Err(format!("latest.json 超過 {} KB", LATEST_JSON_MAX / 1024));
+        return Err(t!("latest.json 超過 {n} KB", n = LATEST_JSON_MAX / 1024));
     }
     if bytes.starts_with(&[0xFF, 0xFE]) || bytes.starts_with(&[0xFE, 0xFF]) || bytes.contains(&0) {
-        return Err("latest.json 是 UTF-16 編碼，必須是 UTF-8（不要用 PowerShell 的 > 產生）".into());
+        return Err(t!("latest.json 是 UTF-16 編碼，必須是 UTF-8（不要用 PowerShell 的 > 產生）").into());
     }
     let bytes = bytes.strip_prefix(b"\xEF\xBB\xBF".as_slice()).unwrap_or(bytes);
-    std::str::from_utf8(bytes).map_err(|_| "latest.json 不是 UTF-8 文字".to_string())
+    std::str::from_utf8(bytes).map_err(|_| t!("latest.json 不是 UTF-8 文字").to_string())
 }
 
 /// The release in `answer` (the body of `latest.json`, or `None` when it could not be
@@ -107,11 +107,7 @@ fn encode(s: &str) -> String {
 
 /// New-issue page with the version filled in. Holds no paths or library data.
 pub fn report_url() -> String {
-    let body = format!(
-        "## 發生了什麼事\n\n\n## 怎麼重現\n1. \n\n## 環境\n- OrangeLink {}\n- {}\n\n## 記錄\n（可在「…」→「複製最近的記錄」後貼在這裡；記錄已隱藏使用者資料夾與 token）\n",
-        env!("CARGO_PKG_VERSION"),
-        std::env::consts::OS
-    );
+    let body = t!("## 發生了什麼事\n\n\n## 怎麼重現\n1. \n\n## 環境\n- OrangeLink {version}\n- {os}\n\n## 記錄\n（可在「…」→「複製最近的記錄」後貼在這裡；記錄已隱藏使用者資料夾與 token）\n", version = env!("CARGO_PKG_VERSION"), os = std::env::consts::OS);
     format!("https://github.com/{REPO}/issues/new?body={}", encode(&body))
 }
 

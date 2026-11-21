@@ -16,10 +16,10 @@ use std::{
     time::Duration,
 };
 
-/// (name, size shown to the user)
-pub const MODELS: [(&str, &str); 3] = [("base", "約 150 MB，較快"), ("small", "約 490 MB，建議"), ("medium", "約 1.5 GB，較準但較慢")];
-/// (whisper code, label)
-pub const LANGUAGES: [(&str, &str); 5] = [("auto", "自動偵測"), ("zh", "中文"), ("ja", "日文"), ("en", "英文"), ("ko", "韓文")];
+/// (name, size shown to the user; a translation key)
+pub const MODELS: [(&str, &str); 3] = [("base", tk!("約 150 MB，較快")), ("small", tk!("約 490 MB，建議")), ("medium", tk!("約 1.5 GB，較準但較慢"))];
+/// (whisper code, label; a translation key)
+pub const LANGUAGES: [(&str, &str); 5] = [("auto", tk!("自動偵測")), ("zh", tk!("中文")), ("ja", tk!("日文")), ("en", tk!("英文")), ("ko", tk!("韓文"))];
 /// Seconds of audio per transcription chunk: Whisper's own window. Shorter chunks cut
 /// sentences apart and invite made-up lines (10 s lost the opening of a real video).
 const QUEUE_SECS: u32 = 30;
@@ -46,10 +46,10 @@ fn model_file(name: &str) -> String {
 /// only the listed ones go into the model's path and FFmpeg's filter string.
 fn check_settings(model: &str, language: &str) -> Result<(), String> {
     if !MODELS.iter().any(|(m, _)| *m == model) {
-        return Err(format!("不支援的語音模型「{model}」，請在字幕視窗重新選擇"));
+        return Err(t!("不支援的語音模型「{model}」，請在字幕視窗重新選擇", model));
     }
     if !LANGUAGES.iter().any(|(l, _)| *l == language) {
-        return Err(format!("不支援的語言「{language}」，請在字幕視窗重新選擇"));
+        return Err(t!("不支援的語言「{language}」，請在字幕視窗重新選擇", language));
     }
     Ok(())
 }
@@ -100,7 +100,7 @@ impl Download {
 /// Downloads a model; curl is ended, and the partial file removed, once `cancel` is set.
 fn download_model(name: &str, cancel: &AtomicBool, got: &AtomicU64, total: &AtomicU64, ctx: &egui::Context) -> Result<(), String> {
     check_settings(name, "auto")?;
-    let dir = models_dir().ok_or("找不到 APPDATA 資料夾")?;
+    let dir = models_dir().ok_or(t!("找不到 APPDATA 資料夾"))?;
     let file = model_file(name);
     let url = format!("https://huggingface.co/ggerganov/whisper.cpp/resolve/main/{file}");
     // The largest model is about 3 GB.
@@ -130,7 +130,7 @@ fn download_model(name: &str, cancel: &AtomicBool, got: &AtomicU64, total: &Atom
             finished.store(true, Ordering::Relaxed);
             out
         });
-        match out.map_err(|e| format!("無法執行 curl：{e}"))? {
+        match out.map_err(|e| t!("無法執行 curl：{e}", e))? {
             None => Err(CANCELLED.to_string()),
             Some(out) if out.status.success() => Ok(()),
             Some(out) => Err(String::from_utf8_lossy(&out.stderr).trim().to_string()),
@@ -150,7 +150,7 @@ fn download_model(name: &str, cancel: &AtomicBool, got: &AtomicU64, total: &Atom
 fn download_verified(dir: &Path, file: &str, listing: impl FnOnce() -> Option<Vec<u8>>, fetch: impl FnOnce(&Path) -> Result<(), String>) -> Result<(), String> {
     let Some(want) = listing().and_then(|l| lfs_hash(&l, file)) else {
         crate::log::error("whisper", format!("讀不到 {file} 公布的 SHA-256，沒有下載"));
-        return Err(format!("無法取得 Hugging Face 公布的 {file} SHA-256，沒有下載，請稍後重試"));
+        return Err(t!("無法取得 Hugging Face 公布的 {file} SHA-256，沒有下載，請稍後重試", file));
     };
     std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     let part = dir.join(format!("{file}.part"));
@@ -161,7 +161,7 @@ fn download_verified(dir: &Path, file: &str, listing: impl FnOnce() -> Option<Ve
     let got = crate::self_update::sha256_file(&part).map_err(|e| e.to_string())?;
     if !got.eq_ignore_ascii_case(&want) {
         let _ = std::fs::remove_file(&part);
-        return Err(format!("下載的 {file} 和 Hugging Face 公布的 SHA-256 不符，已刪除，請重試"));
+        return Err(t!("下載的 {file} 和 Hugging Face 公布的 SHA-256 不符，已刪除，請重試", file));
     }
     std::fs::rename(&part, dir.join(file)).map_err(|e| e.to_string())
 }
@@ -217,7 +217,7 @@ impl Job {
 #[allow(clippy::too_many_arguments)]
 fn run(exe: &Path, input: &Path, out: &Path, model: &str, language: &str, stop: &AtomicBool, tx: &Sender<Event>, ctx: &egui::Context) -> Result<(), String> {
     check_settings(model, language)?;
-    let dir = models_dir().ok_or("找不到 APPDATA 資料夾")?;
+    let dir = models_dir().ok_or(t!("找不到 APPDATA 資料夾"))?;
     // Run inside the model folder: Windows paths would need escaping twice in a filter.
     let temp = format!("job-{}.srt", crate::model::new_id());
     let filter = format!("whisper=model={}:language={language}:queue={QUEUE_SECS}:format=srt:destination={temp}", model_file(model));
@@ -229,8 +229,8 @@ fn run(exe: &Path, input: &Path, out: &Path, model: &str, language: &str, stop: 
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
         .spawn()
-        .map_err(|e| format!("無法啟動 FFmpeg：{e}"))?;
-    let stderr = child.stderr.take().ok_or("無法讀取 FFmpeg 輸出")?;
+        .map_err(|e| t!("無法啟動 FFmpeg：{e}", e))?;
+    let stderr = child.stderr.take().ok_or(t!("無法讀取 FFmpeg 輸出"))?;
     let (progress, ctx2) = (tx.clone(), ctx.clone());
     let reader = std::thread::spawn(move || read_progress(stderr, &progress, &ctx2));
     let status = loop {
@@ -246,7 +246,7 @@ fn run(exe: &Path, input: &Path, out: &Path, model: &str, language: &str, stop: 
     let log = reader.join().unwrap_or_default();
     let temp = dir.join(temp);
     let result = if stop.load(Ordering::Relaxed) {
-        Err("已取消".to_string())
+        Err(CANCELLED.to_string())
     } else if !status.success() {
         crate::log::error("whisper", format!("FFmpeg 結束代碼 {:?}，輸入 {}\n{log}", status.code(), input.display()));
         Err(log)
@@ -272,16 +272,16 @@ fn to_traditional(cues: &mut [Cue]) {
 }
 
 fn finish(temp: &Path, out: &Path, language: &str) -> Result<(), String> {
-    let text = std::fs::read_to_string(temp).map_err(|e| format!("沒有產生字幕：{e}"))?;
+    let text = std::fs::read_to_string(temp).map_err(|e| t!("沒有產生字幕：{e}", e))?;
     let mut cues = parse_cues(&text);
     cues.retain(|c| !MADE_UP_LINES.iter().any(|line| c.text.contains(line)));
     if cues.is_empty() {
-        return Err("沒有辨識到語音".to_string());
+        return Err(t!("沒有辨識到語音").to_string());
     }
     if is_chinese(language, &cues) {
         to_traditional(&mut cues);
     }
-    std::fs::write(out, to_srt(&cues)).map_err(|e| format!("無法寫入字幕：{e}"))
+    std::fs::write(out, to_srt(&cues)).map_err(|e| t!("無法寫入字幕：{e}", e))
 }
 
 /// Reads FFmpeg's stderr, reporting `time=`; returns the last lines for error messages.

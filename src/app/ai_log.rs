@@ -67,15 +67,15 @@ impl App {
             return;
         }
         *asked = Some(self.now);
-        let what = if files { "存取檔案（匯入、擷取畫面、匯出、產生字幕）" } else { "修改資源庫（標籤、評分、資料夾、片段）" };
-        self.toast_with(format!("AI 想要{what}，呼叫了 {tool}"), "本次允許", Action::GrantMcp { files });
+        let what = if files { t!("存取檔案（匯入、擷取畫面、匯出、產生字幕）") } else { t!("修改資源庫（標籤、評分、資料夾、片段）") };
+        self.toast_with(t!("AI 想要{what}，呼叫了 {tool}", what, tool), t!("本次允許"), Action::GrantMcp { files });
     }
 
     pub(super) fn grant_mcp(&mut self, files: bool) {
         self.mcp_grant.write = true;
         self.mcp_grant.files |= files;
-        let what = if files { "修改資源庫與存取檔案" } else { "修改資源庫" };
-        self.toast(format!("在 OrangeLink 關閉前允許 AI {what}，可在設定 → 整合撤銷；請 AI 再試一次"));
+        let what = if files { t!("修改資源庫與存取檔案") } else { t!("修改資源庫") };
+        self.toast(t!("在 OrangeLink 關閉前允許 AI {what}，可在設定 → 整合撤銷；請 AI 再試一次", what));
     }
 
     pub(crate) fn revoke_mcp_grant(&mut self) {
@@ -96,9 +96,9 @@ impl App {
         if self.ai_log.len() > AI_LOG_MAX {
             self.ai_log.remove(0);
         }
-        let msg = format!("AI：{}", summary.lines().next().unwrap_or_default());
+        let msg = t!("AI：{next}", next = summary.lines().next().unwrap_or_default());
         match steps {
-            Some((first, last)) => self.toast_with(msg, "復原", Action::UndoAi { first, last }),
+            Some((first, last)) => self.toast_with(msg, t!("復原"), Action::UndoAi { first, last }),
             None => self.toast(msg),
         }
     }
@@ -115,13 +115,13 @@ impl App {
         // undo below includes them (undo would otherwise add one mid-way).
         self.track_structure();
         match self.ai_undo_state(Some((first, last))) {
-            AiUndo::Unavailable => self.toast("這個修改已經復原過，或已超過可以復原的範圍"),
+            AiUndo::Unavailable => self.toast(t!("這個修改已經復原過，或已超過可以復原的範圍")),
             AiUndo::WithLater(n) if !confirmed => {
                 if self.dialog.is_some() {
-                    return self.toast("請先關閉目前的對話框");
+                    return self.toast(t!("請先關閉目前的對話框"));
                 }
                 self.dialog = Some(Dialog::Confirm {
-                    message: format!("這個 AI 修改之後還有 {n} 個修改。要一起復原嗎？\n之後可以用 Ctrl+Y 重做。"),
+                    message: t!("這個 AI 修改之後還有 {n} 個修改。要一起復原嗎？\n之後可以用 Ctrl+Y 重做。", n),
                     on_yes: Confirmed::UndoAi { first, last },
                 });
             }
@@ -141,24 +141,24 @@ impl App {
         }
         let mut open = true;
         let mut undo = None;
-        egui::Window::new("AI 操作紀錄").open(&mut open).default_width(460.0).show(ctx, |ui| {
+        egui::Window::new(t!("AI 操作紀錄")).open(&mut open).default_width(460.0).show(ctx, |ui| {
             ui.label(
-                egui::RichText::new("AI 助理在這次開啟期間做的修改，最新的在最上面。標籤、評分、資料夾、片段等修改可以復原；匯入、匯出等檔案操作請直接處理檔案。")
+                egui::RichText::new(t!("AI 助理在這次開啟期間做的修改，最新的在最上面。標籤、評分、資料夾、片段等修改可以復原；匯入、匯出等檔案操作請直接處理檔案。"))
                     .small()
                     .weak(),
             );
             if self.mcp_grant.write {
                 ui.horizontal(|ui| {
-                    let what = if self.mcp_grant.files { "修改資源庫與存取檔案" } else { "修改資源庫" };
-                    ui.label(egui::RichText::new(format!("本次開啟期間已允許 AI {what}")).small());
-                    if ui.small_button("撤銷").clicked() {
+                    let what = if self.mcp_grant.files { t!("修改資源庫與存取檔案") } else { t!("修改資源庫") };
+                    ui.label(egui::RichText::new(t!("本次開啟期間已允許 AI {what}", what)).small());
+                    if ui.small_button(t!("撤銷")).clicked() {
                         undo = Some(None);
                     }
                 });
             }
             ui.separator();
             if self.ai_log.is_empty() {
-                ui.label(egui::RichText::new("還沒有 AI 修改").weak());
+                ui.label(egui::RichText::new(t!("還沒有 AI 修改")).weak());
             }
             egui::ScrollArea::vertical().max_height(360.0).show(ui, |ui| {
                 for e in self.ai_log.iter().rev() {
@@ -167,17 +167,17 @@ impl App {
                         ui.add(egui::Label::new(egui::RichText::new(&e.summary).small()).truncate()).on_hover_text(format!("{}\n{}", e.tool, e.summary));
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| match self.ai_undo_state(e.steps) {
                             AiUndo::Now => {
-                                if ui.small_button("復原").clicked() {
+                                if ui.small_button(t!("復原")).clicked() {
                                     undo = Some(e.steps);
                                 }
                             }
                             AiUndo::WithLater(n) => {
-                                if ui.small_button("復原").on_hover_text(format!("之後還有 {n} 個修改，會先詢問")).clicked() {
+                                if ui.small_button(t!("復原")).on_hover_text(t!("之後還有 {n} 個修改，會先詢問", n)).clicked() {
                                     undo = Some(e.steps);
                                 }
                             }
                             AiUndo::Unavailable => {
-                                let why = if e.steps.is_some() { "已復原" } else { "—" };
+                                let why = if e.steps.is_some() { t!("已復原") } else { "—" };
                                 ui.label(egui::RichText::new(why).small().weak());
                             }
                         });

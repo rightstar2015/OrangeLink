@@ -130,7 +130,7 @@ fn speed_text(p: &Progress) -> String {
         parts.push(format!("{}/s", ytdlp::human_mb(s as u64)));
     }
     if let Some(e) = p.eta {
-        parts.push(format!("剩 {}", crate::media::fmt_duration(e)));
+        parts.push(t!("剩 {e}", e = crate::media::fmt_duration(e)));
     }
     parts.join(" · ")
 }
@@ -167,7 +167,7 @@ impl App {
             ctx.request_repaint();
         });
         self.yt.check_rx = Some(rx);
-        self.yt.log("開始工作：檢查工具");
+        self.yt.log(t!("開始工作：檢查工具"));
     }
 
     fn save_ytdlp_prefs(&mut self) {
@@ -186,26 +186,26 @@ impl App {
     fn show_tool_check(&mut self, check: Check) {
         let yt = &mut self.yt;
         match &check.ytdlp {
-            Some(p) => yt.log(format!("yt-dlp：{}（{}）", p.display(), check.version.as_deref().unwrap_or("無法執行"))),
-            None => yt.log("找不到 yt-dlp"),
+            Some(p) => yt.log(t!("yt-dlp：{path}（{version}）", path = p.display(), version = check.version.as_deref().unwrap_or(t!("無法執行")))),
+            None => yt.log(t!("找不到 yt-dlp")),
         }
-        yt.log(format!("最新版本：{}", check.latest.as_deref().unwrap_or("無法檢查（網路？）")));
+        yt.log(t!("最新版本：{version}", version = check.latest.as_deref().unwrap_or(t!("無法檢查（網路？）"))));
         match &self.ffmpeg_dir {
-            Some(d) if check.ffmpeg_ok => yt.log(format!("FFmpeg / FFprobe：{}", d.display())),
-            _ => yt.log("找不到可用的 FFmpeg / FFprobe（mp4 合併與 mp3 轉檔需要）"),
+            Some(d) if check.ffmpeg_ok => yt.log(t!("FFmpeg / FFprobe：{path}", path = d.display())),
+            _ => yt.log(t!("找不到可用的 FFmpeg / FFprobe（mp4 合併與 mp3 轉檔需要）")),
         }
         match &check.deno {
-            Some(d) => yt.log(format!("JavaScript 執行環境（deno）：{}", d.display())),
-            None => yt.log("找不到 deno：YouTube 需要它才能取得完整格式，建議按「安裝 deno」"),
+            Some(d) => yt.log(t!("JavaScript 執行環境（deno）：{path}", path = d.display())),
+            None => yt.log(t!("找不到 deno：YouTube 需要它才能取得完整格式，建議按「安裝 deno」")),
         }
         let msg = if check.ytdlp.is_none() {
-            ("尚未安裝 yt-dlp，請按「安裝 yt-dlp」".to_string(), true)
+            (t!("尚未安裝 yt-dlp，請按「安裝 yt-dlp」").to_string(), true)
         } else if check.update_available() {
-            (format!("yt-dlp 有新版本 {}，建議先更新", check.latest.as_deref().unwrap_or_default()), true)
+            (t!("yt-dlp 有新版本 {version}，建議先更新", version = check.latest.as_deref().unwrap_or_default()), true)
         } else if check.deno.is_none() {
-            ("工具檢查完成；未安裝 deno，YouTube 可能缺少部分格式".to_string(), true)
+            (t!("工具檢查完成；未安裝 deno，YouTube 可能缺少部分格式").to_string(), true)
         } else {
-            ("工具檢查完成。".to_string(), false)
+            (t!("工具檢查完成。").to_string(), false)
         };
         yt.set_status(msg.0, msg.1);
         yt.check = Some(check);
@@ -214,38 +214,38 @@ impl App {
     pub(super) fn poll_ytdlp(&mut self, ctx: &egui::Context) {
         match super::state::take(&mut self.yt.check_rx).finished() {
             Some(Ok(check)) => self.show_tool_check(check),
-            Some(Err(lost)) => self.yt.set_status(format!("工具檢查失敗：{lost}"), true),
+            Some(Err(lost)) => self.yt.set_status(t!("工具檢查失敗：{lost}", lost), true),
             None => {}
         }
         if let Some(result) = super::state::take(&mut self.yt.install_rx).finished() {
             match result.map_err(str::to_string).and_then(|r| r) {
                 Ok(path) => {
-                    self.yt.set_status(format!("yt-dlp 已更新：{}", path.display()), false);
+                    self.yt.set_status(t!("yt-dlp 已更新：{n}", n = path.display()), false);
                     self.start_tool_check();
                 }
-                Err(e) => self.yt.set_status(format!("更新 yt-dlp 失敗：{e}"), true),
+                Err(e) => self.yt.set_status(t!("更新 yt-dlp 失敗：{e}", e), true),
             }
         }
         if let Some(result) = super::state::take(&mut self.yt.probe_rx).finished() {
             let yt = &mut self.yt;
             match result.map_err(str::to_string).and_then(|r| r) {
                 Ok(info) => {
-                    let mut msg = format!("已取得：{}", info.title);
+                    let mut msg = t!("已取得：{title}", title = info.title);
                     if let Some(d) = info.duration {
-                        msg += &format!("（{}）", crate::media::fmt_duration(d));
+                        msg += &t!("（{duration}）", duration = crate::media::fmt_duration(d));
                     }
                     if let Some(n) = info.entries {
-                        msg += &format!("（播放清單 {n} 部）");
+                        msg += &t!("（播放清單 {n} 部）", n);
                     }
                     if info.is_live {
-                        msg += "（直播中）";
+                        msg += t!("（直播中）");
                     }
                     yt.video_id = info.video_formats().first().map(|f| f.id.clone());
                     yt.audio_id = info.audio_formats().first().map(|f| f.id.clone());
                     yt.set_status(msg, false);
                     yt.probe = Some(info);
                 }
-                Err(e) => yt.set_status(format!("取得影片資訊失敗：{e}"), true),
+                Err(e) => yt.set_status(t!("取得影片資訊失敗：{e}", e), true),
             }
         }
         let mut finished = None;
@@ -268,7 +268,7 @@ impl App {
                     Event::Log(_) => {}
                     Event::Progress(p) => run.progress = Some(p),
                     Event::File(p) => {
-                        lines.push(format!("完成檔案：{}", p.display()));
+                        lines.push(t!("完成檔案：{path}", path = p.display()));
                         run.files.push(p);
                     }
                     Event::Done(r) => finished = Some(r),
@@ -299,27 +299,27 @@ impl App {
         let mut extra = Vec::new();
         if run.req.chat || run.req.chat_only {
             for json in ytdlp::new_chat_files(&run.req.out_dir, run.started) {
-                yt.log(format!("聊天室紀錄：{}", json.display()));
+                yt.log(t!("聊天室紀錄：{json}", json = json.display()));
                 if yt.chat_txt {
                     match ytdlp::chat_to_txt(&json) {
                         Ok((txt, n)) => {
-                            yt.log(format!("已轉成文字檔（{n} 則）：{}", txt.display()));
+                            yt.log(t!("已轉成文字檔（{n} 則）：{txt}", n, txt = txt.display()));
                             extra.push(txt);
                         }
-                        Err(e) => yt.log(format!("聊天室轉文字失敗：{e}")),
+                        Err(e) => yt.log(t!("聊天室轉文字失敗：{e}", e)),
                     }
                 }
             }
         }
         match (&result, run.cancelled) {
-            (_, true) => yt.set_status("已取消工作（已下載的部分保留在下載資料夾）", true),
+            (_, true) => yt.set_status(t!("已取消工作（已下載的部分保留在下載資料夾）"), true),
             (Ok(()), _) => {
                 let n = files.len() + extra.len();
-                yt.set_status(format!("下載完成：{n} 個檔案"), false);
+                yt.set_status(t!("下載完成：{n} 個檔案", n), false);
             }
             (Err(e), _) => {
                 crate::log::error("yt-dlp", format!("下載失敗：{e}"));
-                yt.set_status(format!("下載失敗：{e}"), true)
+                yt.set_status(t!("下載失敗：{e}", e), true)
             }
         }
         files.extend(extra);
@@ -403,7 +403,7 @@ impl App {
         if tools.is_none() {
             let yt = &mut self.yt;
             yt.url = urls.into_iter().next().unwrap_or_default();
-            yt.set_status("尚未安裝 yt-dlp，請按「安裝 yt-dlp」後再開始下載", true);
+            yt.set_status(t!("尚未安裝 yt-dlp，請按「安裝 yt-dlp」後再開始下載"), true);
             return;
         }
         for url in urls {
@@ -421,7 +421,7 @@ impl App {
                 deno: deno.clone(),
             };
             if self.yt.busy() {
-                self.yt.log(format!("加入佇列：{}", req.label()));
+                self.yt.log(t!("加入佇列：{label}", label = req.label()));
                 self.yt.queue.push(req);
                 self.yt.run_queue = true;
             } else {
@@ -433,15 +433,15 @@ impl App {
     fn build_request(&self) -> Result<Request, String> {
         let yt = &self.yt;
         if yt.url.trim().is_empty() {
-            return Err("請先輸入影片網址".into());
+            return Err(t!("請先輸入影片網址").into());
         }
         let out_dir = PathBuf::from(yt.out_dir.trim());
         if yt.out_dir.trim().is_empty() {
-            return Err("請選擇下載位置".into());
+            return Err(t!("請選擇下載位置").into());
         }
         let custom = (yt.advanced && !yt.chat_only).then(|| (yt.video_id.clone(), yt.audio_id.clone()));
         if let Some((None, None)) = custom {
-            return Err("進階模式至少要選擇影片或音訊其中一個".into());
+            return Err(t!("進階模式至少要選擇影片或音訊其中一個").into());
         }
         Ok(Request {
             url: yt.url.trim().to_string(),
@@ -461,24 +461,24 @@ impl App {
     fn start_download(&mut self, req: Request) {
         let yt = &mut self.yt;
         let Some(exe) = yt.check.as_ref().and_then(|c| c.ytdlp.clone()) else {
-            yt.set_status("找不到 yt-dlp，請先按「安裝 yt-dlp」", true);
+            yt.set_status(t!("找不到 yt-dlp，請先按「安裝 yt-dlp」"), true);
             return;
         };
         if let Err(e) = std::fs::create_dir_all(&req.out_dir) {
-            yt.set_status(format!("無法建立下載資料夾：{e}"), true);
+            yt.set_status(t!("無法建立下載資料夾：{e}", e), true);
             return;
         }
         let args = ytdlp::build_args(&req);
-        yt.log(format!("開始工作：{}", req.label()));
-        yt.log(format!("指令：yt-dlp {}", args.join(" ")));
+        yt.log(t!("開始工作：{label}", label = req.label()));
+        yt.log(t!("指令：yt-dlp {args}", args = args.join(" ")));
         match Job::spawn(&exe, &args, self.egui_ctx.clone()) {
             Ok(job) => {
-                yt.status = ("下載中…".into(), false);
+                yt.status = (t!("下載中…").into(), false);
                 yt.running = Some(Running { job, req, progress: None, files: Vec::new(), started: SystemTime::now(), cancelled: false });
             }
             Err(e) => {
                 crate::log::error("yt-dlp", format!("無法啟動 yt-dlp：{e}"));
-                yt.set_status(format!("無法啟動 yt-dlp：{e}"), true)
+                yt.set_status(t!("無法啟動 yt-dlp：{e}", e), true)
             }
         }
     }
@@ -486,11 +486,11 @@ impl App {
     fn start_probe(&mut self) {
         let yt = &mut self.yt;
         let Some(exe) = yt.check.as_ref().and_then(|c| c.ytdlp.clone()) else {
-            yt.set_status("找不到 yt-dlp，請先按「安裝 yt-dlp」", true);
+            yt.set_status(t!("找不到 yt-dlp，請先按「安裝 yt-dlp」"), true);
             return;
         };
         if yt.url.trim().is_empty() {
-            yt.set_status("請先輸入影片網址", true);
+            yt.set_status(t!("請先輸入影片網址"), true);
             return;
         }
         let (url, playlist) = (yt.url.clone(), yt.playlist && !yt.advanced);
@@ -502,13 +502,13 @@ impl App {
             ctx.request_repaint();
         });
         yt.probe_rx = Some(rx);
-        yt.status = ("取得影片資訊中…".into(), false);
-        yt.log("開始工作：取得影片資訊");
+        yt.status = (t!("取得影片資訊中…").into(), false);
+        yt.log(t!("開始工作：取得影片資訊"));
     }
 
     fn start_install(&mut self) {
         if self.yt.busy() {
-            self.yt.set_status("下載進行中，請等完成後再更新 yt-dlp", true);
+            self.yt.set_status(t!("下載進行中，請等完成後再更新 yt-dlp"), true);
             return;
         }
         let (tx, rx) = channel();
@@ -518,19 +518,19 @@ impl App {
             ctx.request_repaint();
         });
         self.yt.install_rx = Some(rx);
-        self.yt.status = ("正在下載最新版 yt-dlp…".into(), false);
-        self.yt.log("開始工作：更新 yt-dlp");
+        self.yt.status = (t!("正在下載最新版 yt-dlp…").into(), false);
+        self.yt.log(t!("開始工作：更新 yt-dlp"));
     }
 
     /// The download under way, for the status bar's jobs list.
     pub(super) fn ytdlp_job(&self) -> Option<super::jobs::BgJob> {
         let run = self.yt.running.as_ref()?;
-        let mut detail = run.progress.as_ref().map(speed_text).unwrap_or_else(|| "準備中…".into());
+        let mut detail = run.progress.as_ref().map(speed_text).unwrap_or_else(|| t!("準備中…").into());
         if !self.yt.queue.is_empty() {
-            detail += &format!("（佇列還有 {} 個）", self.yt.queue.len());
+            detail += &t!("（佇列還有 {n} 個）", n = self.yt.queue.len());
         }
         let p = run.progress.as_ref();
-        let mut job = super::jobs::BgJob::new(super::jobs::JobKind::Ytdlp, format!("下載 {}", run.req.label()), detail, p.and_then(|p| p.fraction));
+        let mut job = super::jobs::BgJob::new(super::jobs::JobKind::Ytdlp, t!("下載 {label}", label = run.req.label()), detail, p.and_then(|p| p.fraction));
         job.eta = p.and_then(|p| p.eta);
         job.has_window = true;
         Some(job)
@@ -551,7 +551,7 @@ impl App {
         }
         let mut open = true;
         let mut actions: Vec<YtAction> = Vec::new();
-        egui::Window::new("從網址下載（yt-dlp）")
+        egui::Window::new(t!("從網址下載（yt-dlp）"))
             .open(&mut open)
             .default_size([640.0, 720.0])
             .min_width(520.0)
@@ -576,7 +576,7 @@ impl App {
                 YtAction::Enqueue => match self.build_request() {
                     Ok(req) => {
                         self.save_ytdlp_prefs();
-                        self.yt.log(format!("加入佇列：{}", req.label()));
+                        self.yt.log(t!("加入佇列：{label}", label = req.label()));
                         self.yt.queue.push(req);
                         self.yt.url.clear();
                         self.yt.probe = None;
@@ -598,13 +598,13 @@ impl App {
                     }
                 }
                 YtAction::PickFfmpeg => {
-                    if let Some(dir) = rfd::FileDialog::new().set_title("選擇含有 ffmpeg.exe 的資料夾").pick_folder() {
+                    if let Some(dir) = rfd::FileDialog::new().set_title(t!("選擇含有 ffmpeg.exe 的資料夾")).pick_folder() {
                         self.set_ffmpeg_dir(Some(dir));
                         self.start_tool_check();
                     }
                 }
                 YtAction::Winget(name, id) => match winget_install(name, id) {
-                    Ok(()) => self.yt.set_status(format!("已開啟 {name} 安裝視窗，完成後按「檢查工具」"), false),
+                    Ok(()) => self.yt.set_status(t!("已開啟 {name} 安裝視窗，完成後按「檢查工具」", name), false),
                     Err(e) => self.yt.set_status(e, true),
                 },
                 YtAction::SaveLog => {
@@ -625,46 +625,42 @@ impl App {
         ui.horizontal_wrapped(|ui| {
             if yt.check_rx.is_some() {
                 ui.spinner();
-                ui.label("檢查工具中…");
+                ui.label(t!("檢查工具中…"));
             } else if let Some(c) = &yt.check {
-                let ff = if c.ffmpeg_ok { "已驗證" } else { "未找到" };
-                let js = if c.deno.is_some() { "已安裝" } else { "未安裝" };
-                ui.label(format!(
-                    "yt-dlp：{} | 最新：{} | FFmpeg / FFprobe：{ff} | deno：{js}",
-                    c.version.as_deref().unwrap_or("未安裝"),
-                    c.latest.as_deref().unwrap_or("無法檢查"),
-                ));
+                let ff = if c.ffmpeg_ok { t!("已驗證") } else { t!("未找到") };
+                let js = if c.deno.is_some() { t!("已安裝") } else { t!("未安裝") };
+                ui.label(t!("yt-dlp：{version} | 最新：{latest} | FFmpeg / FFprobe：{ff} | deno：{js}", version = c.version.as_deref().unwrap_or(t!("未安裝")), latest = c.latest.as_deref().unwrap_or(t!("無法檢查")), ff, js));
                 if c.ytdlp.is_none() {
-                    if ui.button(RichText::new("安裝 yt-dlp").color(crate::ui::warning())).clicked() {
+                    if ui.button(RichText::new(t!("安裝 yt-dlp")).color(crate::ui::warning())).clicked() {
                         actions.push(YtAction::Install);
                     }
-                } else if c.update_available() && ui.button(RichText::new("⬆ 更新到最新版").color(crate::ui::warning())).clicked() {
+                } else if c.update_available() && ui.button(RichText::new(t!("⬆ 更新到最新版")).color(crate::ui::warning())).clicked() {
                     actions.push(YtAction::Install);
                 }
             }
         });
         ui.add_space(4.0);
 
-        ui.label("影片網址（支援 yt-dlp 可下載的網站）：");
+        ui.label(t!("影片網址（支援 yt-dlp 可下載的網站）："));
         ui.add_enabled(
             !busy,
             TextEdit::singleline(&mut yt.url).hint_text("https://www.youtube.com/watch?v=...").desired_width(f32::INFINITY),
         );
-        ui.add_enabled(!yt.advanced, egui::Checkbox::new(&mut yt.playlist, "下載播放清單（簡單模式；未勾選時只下載單支影片）"));
+        ui.add_enabled(!yt.advanced, egui::Checkbox::new(&mut yt.playlist, t!("下載播放清單（簡單模式；未勾選時只下載單支影片）")));
 
         ui.horizontal(|ui| {
-            ui.label("下載位置：");
+            ui.label(t!("下載位置："));
             let w = ui.available_width() - 100.0;
             ui.add(TextEdit::singleline(&mut yt.out_dir).desired_width(w.max(120.0)));
-            if ui.button("選擇資料夾").clicked() {
+            if ui.button(t!("選擇資料夾")).clicked() {
                 actions.push(YtAction::PickDir);
             }
         });
         ui.horizontal(|ui| {
-            ui.label("檔案名稱：");
+            ui.label(t!("檔案名稱："));
             ui.add(
                 TextEdit::singleline(&mut yt.name)
-                    .hint_text("可留空（使用影片標題）；播放清單會自動加上編號")
+                    .hint_text(t!("可留空（使用影片標題）；播放清單會自動加上編號"))
                     .desired_width(f32::INFINITY),
             );
         });
@@ -672,31 +668,31 @@ impl App {
         ui.add_space(4.0);
         egui::Frame::group(ui.style()).show(ui, |ui| {
             ui.set_width(ui.available_width());
-            ui.label(RichText::new("下載範圍").color(crate::ui::info()));
+            ui.label(RichText::new(t!("下載範圍")).color(crate::ui::info()));
             ui.horizontal(|ui| {
-                ui.radio_value(&mut yt.ranged, false, "全片下載");
-                ui.radio_value(&mut yt.ranged, true, "指定時間下載");
+                ui.radio_value(&mut yt.ranged, false, t!("全片下載"));
+                ui.radio_value(&mut yt.ranged, true, t!("指定時間下載"));
             });
             ui.add_enabled_ui(yt.ranged, |ui| {
                 ui.horizontal(|ui| {
-                    ui.label("開始：");
+                    ui.label(t!("開始："));
                     ui.add(TextEdit::singleline(&mut yt.start).hint_text("00:00:00").desired_width(120.0));
-                    ui.label("結束：");
-                    ui.add(TextEdit::singleline(&mut yt.end).hint_text("留空則到影片結尾").desired_width(140.0));
+                    ui.label(t!("結束："));
+                    ui.add(TextEdit::singleline(&mut yt.end).hint_text(t!("留空則到影片結尾")).desired_width(140.0));
                 });
             });
         });
 
         ui.add_space(4.0);
         ui.horizontal(|ui| {
-            ui.radio_value(&mut yt.advanced, false, "簡單模式");
-            ui.radio_value(&mut yt.advanced, true, "進階模式");
+            ui.radio_value(&mut yt.advanced, false, t!("簡單模式"));
+            ui.radio_value(&mut yt.advanced, true, t!("進階模式"));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let probing = yt.probe_rx.is_some();
                 if probing {
                     ui.spinner();
                 }
-                if ui.add_enabled(!probing, egui::Button::new("取得影片資訊 / 格式")).clicked() {
+                if ui.add_enabled(!probing, egui::Button::new(t!("取得影片資訊 / 格式"))).clicked() {
                     actions.push(YtAction::Probe);
                 }
             });
@@ -705,10 +701,10 @@ impl App {
         if yt.advanced {
             egui::Frame::group(ui.style()).show(ui, |ui| {
                 ui.set_width(ui.available_width());
-                ui.label(RichText::new("進階格式").color(crate::ui::info()));
+                ui.label(RichText::new(t!("進階格式")).color(crate::ui::info()));
                 match &yt.probe {
                     None => {
-                        ui.label(RichText::new("請先按「取得影片資訊 / 格式」列出可下載的格式").weak());
+                        ui.label(RichText::new(t!("請先按「取得影片資訊 / 格式」列出可下載的格式")).weak());
                     }
                     Some(info) => {
                         let pick = |ui: &mut Ui, label: &str, id: &str, list: Vec<&ytdlp::FormatInfo>, none: &str, sel: &mut Option<String>| {
@@ -727,10 +723,10 @@ impl App {
                                 });
                             });
                         };
-                        pick(ui, "影片：", "yt-video", info.video_formats(), "不下載影片", &mut yt.video_id);
-                        pick(ui, "音訊：", "yt-audio", info.audio_formats(), "不下載音訊", &mut yt.audio_id);
+                        pick(ui, t!("影片："), "yt-video", info.video_formats(), t!("不下載影片"), &mut yt.video_id);
+                        pick(ui, t!("音訊："), "yt-audio", info.audio_formats(), t!("不下載音訊"), &mut yt.audio_id);
                         ui.label(
-                            RichText::new("同時選影片和音訊時會自動合併（mp4，無法合併時用 mkv）。avc1 相容性最好，VP9 / AV1 部分剪輯軟體無法讀取。")
+                            RichText::new(t!("同時選影片和音訊時會自動合併（mp4，無法合併時用 mkv）。avc1 相容性最好，VP9 / AV1 部分剪輯軟體無法讀取。"))
                                 .small()
                                 .weak(),
                         );
@@ -739,7 +735,7 @@ impl App {
             });
         } else {
             ui.horizontal(|ui| {
-                ui.label("下載格式：");
+                ui.label(t!("下載格式："));
                 egui::ComboBox::from_id_salt("yt-format").width(80.0).selected_text(yt.format.label()).show_ui(ui, |ui| {
                     for f in OutFormat::ALL {
                         ui.selectable_value(&mut yt.format, f, f.label());
@@ -749,11 +745,11 @@ impl App {
             });
             let size = match &yt.probe {
                 Some(info) => match info.estimate(yt.format) {
-                    Some(b) if !yt.ranged => format!("預估大小：約 {}", ytdlp::human_mb(b)),
-                    Some(_) => "指定時間下載：大小依範圍而定".to_string(),
-                    None => "無法估計大小".to_string(),
+                    Some(b) if !yt.ranged => t!("預估大小：約 {size}", size = ytdlp::human_mb(b)),
+                    Some(_) => t!("指定時間下載：大小依範圍而定").to_string(),
+                    None => t!("無法估計大小").to_string(),
                 },
-                None => "大小待取得影片資訊".to_string(),
+                None => t!("大小待取得影片資訊").to_string(),
             };
             ui.label(RichText::new(size).small().weak());
         }
@@ -761,12 +757,12 @@ impl App {
         ui.add_space(4.0);
         egui::Frame::group(ui.style()).show(ui, |ui| {
             ui.set_width(ui.available_width());
-            ui.label(RichText::new("直播聊天室（YouTube 直播 / 首播）").color(crate::ui::info()));
-            ui.checkbox(&mut yt.chat, "下載直播聊天室紀錄");
-            ui.add_enabled(yt.chat, egui::Checkbox::new(&mut yt.chat_only, "只下載聊天室（不下載影片）"));
-            ui.add_enabled(yt.chat, egui::Checkbox::new(&mut yt.chat_txt, "另存易讀文字檔（.txt，含時間、名稱、Super Chat 金額）"));
+            ui.label(RichText::new(t!("直播聊天室（YouTube 直播 / 首播）")).color(crate::ui::info()));
+            ui.checkbox(&mut yt.chat, t!("下載直播聊天室紀錄"));
+            ui.add_enabled(yt.chat, egui::Checkbox::new(&mut yt.chat_only, t!("只下載聊天室（不下載影片）")));
+            ui.add_enabled(yt.chat, egui::Checkbox::new(&mut yt.chat_txt, t!("另存易讀文字檔（.txt，含時間、名稱、Super Chat 金額）")));
             ui.label(
-                RichText::new("原始紀錄存為 .live_chat.json。直播進行中請使用「只下載聊天室」，會持續記錄到直播結束；中途按取消也會保留已錄到的留言。")
+                RichText::new(t!("原始紀錄存為 .live_chat.json。直播進行中請使用「只下載聊天室」，會持續記錄到直播結束；中途按取消也會保留已錄到的留言。"))
                     .small()
                     .weak(),
             );
@@ -774,10 +770,10 @@ impl App {
 
         ui.add_space(4.0);
         ui.horizontal_wrapped(|ui| {
-            ui.checkbox(&mut yt.import, "完成後匯入資源庫：");
+            ui.checkbox(&mut yt.import, t!("完成後匯入資源庫："));
             ui.add_enabled_ui(yt.import, |ui| {
-                ui.radio_value(&mut yt.link, true, "保留在下載位置");
-                ui.radio_value(&mut yt.link, false, "複製進資源庫");
+                ui.radio_value(&mut yt.link, true, t!("保留在下載位置"));
+                ui.radio_value(&mut yt.link, false, t!("複製進資源庫"));
             });
         });
 
@@ -788,7 +784,7 @@ impl App {
         }
         if let Some(run) = &yt.running {
             let fraction = run.progress.as_ref().and_then(|p| p.fraction).unwrap_or(0.0);
-            let text = run.progress.as_ref().map(speed_text).unwrap_or_else(|| "準備中…".into());
+            let text = run.progress.as_ref().map(speed_text).unwrap_or_else(|| t!("準備中…").into());
             ui.add(egui::ProgressBar::new(fraction).text(text).animate(run.progress.is_none()));
         }
         ui.columns(3, |cols| {
@@ -796,19 +792,19 @@ impl App {
                 ui.add_enabled(enabled, egui::Button::new(RichText::new(text).color(Color32::WHITE).strong()).fill(fill).min_size([ui.available_width(), 34.0].into()))
                     .clicked()
             };
-            if big(&mut cols[0], "下載影片", crate::ui::SOLID_GOOD, !busy) {
+            if big(&mut cols[0], t!("下載影片"), crate::ui::SOLID_GOOD, !busy) {
                 actions.push(YtAction::Download);
             }
-            if big(&mut cols[1], "加入佇列", crate::ui::SOLID_INFO, true) {
+            if big(&mut cols[1], t!("加入佇列"), crate::ui::SOLID_INFO, true) {
                 actions.push(YtAction::Enqueue);
             }
-            if big(&mut cols[2], "取消工作", crate::ui::SOLID_DANGER, busy) {
+            if big(&mut cols[2], t!("取消工作"), crate::ui::SOLID_DANGER, busy) {
                 actions.push(YtAction::Cancel);
             }
         });
 
         ui.add_space(4.0);
-        ui.label(format!("下載佇列：{} 項", yt.queue.len()));
+        ui.label(t!("下載佇列：{n} 項", n = yt.queue.len()));
         if !yt.queue.is_empty() {
             egui::Frame::none().fill(ui.visuals().extreme_bg_color).inner_margin(4.0).show(ui, |ui| {
                 ui.set_width(ui.available_width());
@@ -820,10 +816,10 @@ impl App {
             });
         }
         ui.horizontal(|ui| {
-            if ui.add_enabled(!yt.queue.is_empty() && !busy, egui::Button::new("開始佇列")).clicked() {
+            if ui.add_enabled(!yt.queue.is_empty() && !busy, egui::Button::new(t!("開始佇列"))).clicked() {
                 actions.push(YtAction::RunQueue);
             }
-            if ui.add_enabled(yt.queue_sel.is_some(), egui::Button::new("移除選取項目")).clicked() {
+            if ui.add_enabled(yt.queue_sel.is_some(), egui::Button::new(t!("移除選取項目"))).clicked() {
                 if let Some(i) = yt.queue_sel.take().filter(|i| *i < yt.queue.len()) {
                     yt.queue.remove(i);
                 }
@@ -836,31 +832,31 @@ impl App {
                 ui.add_enabled(enabled, egui::Button::new(text).min_size([ui.available_width(), 28.0].into())).clicked()
             };
             let installing = yt.install_rx.is_some();
-            let label = if yt.check.as_ref().is_some_and(|c| c.ytdlp.is_none()) { "安裝 yt-dlp" } else { "更新 yt-dlp" };
+            let label = if yt.check.as_ref().is_some_and(|c| c.ytdlp.is_none()) { t!("安裝 yt-dlp") } else { t!("更新 yt-dlp") };
             if wide(&mut cols[0], label, !installing && !busy) {
                 actions.push(YtAction::Install);
             }
             ui_install_buttons(&mut cols[1], actions);
-            if wide(&mut cols[2], "檢查工具", yt.check_rx.is_none()) {
+            if wide(&mut cols[2], t!("檢查工具"), yt.check_rx.is_none()) {
                 actions.push(YtAction::Check);
             }
         });
         ui.horizontal(|ui| {
-            ui.label("FFmpeg 資料夾：");
-            let shown = ffmpeg_dir.as_ref().map(|d| d.display().to_string()).unwrap_or_else(|| "未找到（自動尋找系統 PATH 與常見位置）".into());
+            ui.label(t!("FFmpeg 資料夾："));
+            let shown = ffmpeg_dir.as_ref().map(|d| d.display().to_string()).unwrap_or_else(|| t!("未找到（自動尋找系統 PATH 與常見位置）").into());
             ui.label(RichText::new(shown).small());
-            if ui.small_button("選擇").clicked() {
+            if ui.small_button(t!("選擇")).clicked() {
                 actions.push(YtAction::PickFfmpeg);
             }
         });
         ui.horizontal(|ui| {
             let last = yt.last_files.first().cloned();
-            if ui.add_enabled(last.is_some(), egui::Button::new("開啟完成檔案")).clicked() {
+            if ui.add_enabled(last.is_some(), egui::Button::new(t!("開啟完成檔案"))).clicked() {
                 if let Some(f) = last {
                     let _ = open::that_detached(f);
                 }
             }
-            if ui.button("開啟下載資料夾").clicked() {
+            if ui.button(t!("開啟下載資料夾")).clicked() {
                 let dir = PathBuf::from(yt.out_dir.trim());
                 let _ = std::fs::create_dir_all(&dir);
                 let _ = open::that_detached(dir);
@@ -869,12 +865,12 @@ impl App {
 
         ui.add_space(4.0);
         ui.horizontal(|ui| {
-            ui.checkbox(&mut yt.show_log, "顯示工作紀錄");
+            ui.checkbox(&mut yt.show_log, t!("顯示工作紀錄"));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.button("儲存紀錄").clicked() {
+                if ui.button(t!("儲存紀錄")).clicked() {
                     actions.push(YtAction::SaveLog);
                 }
-                if ui.button("複製紀錄").clicked() {
+                if ui.button(t!("複製紀錄")).clicked() {
                     ui.ctx().copy_text(yt.log.join("\n"));
                 }
             });
@@ -890,7 +886,7 @@ impl App {
             });
         }
         if let Some(dir) = ytdlp::tools_dir() {
-            ui.label(RichText::new(format!("工具儲存位置：{}", dir.display())).small().weak());
+            ui.label(RichText::new(t!("工具儲存位置：{dir}", dir = dir.display())).small().weak());
         }
     }
 }
@@ -912,21 +908,21 @@ enum YtAction {
 
 /// Installs a package with winget in a console of its own, where its prompts show.
 pub(super) fn winget_install(name: &str, id: &str) -> Result<(), String> {
-    let title = format!("安裝 {name}");
+    let title = t!("安裝 {name}", name);
     crate::process::visible("cmd")
         .args(["/c", "start", &title, "cmd", "/k", &format!("winget install --id {id} -e")])
         .spawn()
         .map(|_| ())
-        .map_err(|e| format!("無法執行 winget：{e}"))
+        .map_err(|e| t!("無法執行 winget：{e}", e))
 }
 
 fn ui_install_buttons(ui: &mut Ui, actions: &mut Vec<YtAction>) {
     ui.horizontal(|ui| {
         let w = (ui.available_width() - ui.spacing().item_spacing.x) / 2.0;
-        if ui.add(egui::Button::new("安裝 FFmpeg").min_size([w, 28.0].into())).on_hover_text("以 winget 安裝 Gyan.FFmpeg").clicked() {
+        if ui.add(egui::Button::new(t!("安裝 FFmpeg")).min_size([w, 28.0].into())).on_hover_text(t!("以 winget 安裝 Gyan.FFmpeg")).clicked() {
             actions.push(YtAction::Winget("FFmpeg", "Gyan.FFmpeg"));
         }
-        if ui.add(egui::Button::new("安裝 deno").min_size([w, 28.0].into())).on_hover_text("以 winget 安裝 DenoLand.Deno（YouTube 需要的 JavaScript 執行環境）").clicked() {
+        if ui.add(egui::Button::new(t!("安裝 deno")).min_size([w, 28.0].into())).on_hover_text(t!("以 winget 安裝 DenoLand.Deno（YouTube 需要的 JavaScript 執行環境）")).clicked() {
             actions.push(YtAction::Winget("deno", "DenoLand.Deno"));
         }
     });

@@ -124,7 +124,7 @@ pub fn save_clipboard_image(dir: &Path) -> Option<PathBuf> {
     let img = arboard::Clipboard::new().ok()?.get_image().ok()?;
     let buf = image::RgbaImage::from_raw(img.width as u32, img.height as u32, img.bytes.into_owned())?;
     std::fs::create_dir_all(dir).ok()?;
-    save_png_new(dir, &format!("貼上_{}", chrono::Local::now().format("%Y%m%d_%H%M%S")), &buf)
+    save_png_new(dir, &t!("貼上_{time}", time = chrono::Local::now().format("%Y%m%d_%H%M%S")), &buf)
 }
 
 /// Writes `img` as `<stem>.png` in `dir`, or `<stem> (2).png` and so on when that

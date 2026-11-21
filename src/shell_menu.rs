@@ -13,7 +13,7 @@ use std::path::PathBuf;
 #[cfg(windows)]
 pub fn show(paths: &[PathBuf], dark: bool) -> Result<(), String> {
     if paths.is_empty() {
-        return Err("沒有檔案".into());
+        return Err(t!("沒有檔案").into());
     }
     // SAFETY: called from the UI thread (egui's), with paths that are not empty.
     unsafe { platform::show(paths, dark) }.map_err(|e| e.message())
@@ -21,7 +21,7 @@ pub fn show(paths: &[PathBuf], dark: bool) -> Result<(), String> {
 
 #[cfg(not(windows))]
 pub fn show(_paths: &[PathBuf], _dark: bool) -> Result<(), String> {
-    Err("只有 Windows 有這個選單".into())
+    Err(t!("只有 Windows 有這個選單").into())
 }
 
 #[cfg(windows)]

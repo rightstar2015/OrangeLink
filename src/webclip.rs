@@ -99,7 +99,7 @@ impl WebServer {
                 let Some(req) = admit(req, &t, &who) else { continue };
                 if in_flight.fetch_add(1, Ordering::SeqCst) >= MAX_IN_FLIGHT {
                     in_flight.fetch_sub(1, Ordering::SeqCst);
-                    fail_close(req, 503, "OrangeLink 正在處理其他檔案，請稍後再試。");
+                    fail_close(req, 503, t!("OrangeLink 正在處理其他檔案，請稍後再試。"));
                     continue;
                 }
                 // Own thread per request: a large upload must not block the others.
@@ -216,11 +216,11 @@ fn admit(req: Request, token: &str, callers: &Mutex<Callers>) -> Option<Request>
         return None;
     }
     if !header_value(&req, "X-OrangeLink-Token").is_some_and(|t| crate::mcp::same_token(&t, token)) {
-        fail_close(req, 401, "配對碼不正確");
+        fail_close(req, 401, t!("配對碼不正確"));
         return None;
     }
     if !crate::lock(callers).admit(&origin) {
-        fail_close(req, 403, "OrangeLink 只允許另一個擴充功能連線；可在 OrangeLink 設定 → 瀏覽器擴充功能 更改。");
+        fail_close(req, 403, t!("OrangeLink 只允許另一個擴充功能連線；可在 OrangeLink 設定 → 瀏覽器擴充功能 更改。"));
         return None;
     }
     Some(req)
@@ -243,7 +243,7 @@ fn handle(mut req: Request, folders: &Mutex<FolderList>, max_bytes: u64, tx: &Se
         (Method::Post, "/ytdlp") => {
             let url = query_param(&query, "url").unwrap_or_default();
             if !is_web_url(&url) {
-                return fail(req, 400, "網址不正確");
+                return fail(req, 400, t!("網址不正確"));
             }
             WebMsg::Ytdlp { url }
         }
@@ -254,13 +254,13 @@ fn handle(mut req: Request, folders: &Mutex<FolderList>, max_bytes: u64, tx: &Se
             let name = file_name(&name, &mime);
             if is_executable(&name) {
                 drain_capped(&mut req);
-                return fail_close(req, 415, &format!("已封鎖可執行檔「{name}」，避免誤開造成危險。"));
+                return fail_close(req, 415, &t!("已封鎖可執行檔「{name}」，避免誤開造成危險。", name));
             }
             let folder = query_param(&query, "folder").filter(|f| !f.is_empty());
             // The menu can be a moment behind, e.g. right after switching library.
             if folder.as_ref().is_some_and(|f| !crate::lock(folders).iter().any(|(id, ..)| id == f)) {
                 drain_capped(&mut req);
-                return fail_close(req, 409, "這個資料夾已不存在，選單已更新，請重新選擇。");
+                return fail_close(req, 409, t!("這個資料夾已不存在，選單已更新，請重新選擇。"));
             }
             match save_upload(&mut req, &name, max_bytes) {
                 Ok(path) => {
@@ -273,7 +273,7 @@ fn handle(mut req: Request, folders: &Mutex<FolderList>, max_bytes: u64, tx: &Se
         _ => return fail(req, 404, "not found"),
     };
     if tx.send(msg).is_err() {
-        return fail(req, 503, "OrangeLink 正在關閉");
+        return fail(req, 503, t!("OrangeLink 正在關閉"));
     }
     ctx.request_repaint();
     reply(req, 200, json!({ "ok": true }));
@@ -282,27 +282,27 @@ fn handle(mut req: Request, folders: &Mutex<FolderList>, max_bytes: u64, tx: &Se
 /// Streams the request body into a fresh inbox folder; a cut-off or oversized upload
 /// leaves nothing. Errors carry the HTTP status to reply with.
 fn save_upload(req: &mut Request, name: &str, max_bytes: u64) -> Result<PathBuf, (u16, String)> {
-    let too_large = || (413, format!("檔案超過 {:.1} GB 的上限，可在 OrangeLink 設定調整。", max_bytes as f64 / GB as f64));
+    let too_large = || (413, t!("檔案超過 {gb} GB 的上限，可在 OrangeLink 設定調整。", gb = format!("{:.1}", max_bytes as f64 / GB as f64)));
     let expected = req.body_length();
     if expected.is_some_and(|n| n as u64 > max_bytes) {
         drain_capped(req);
         return Err(too_large());
     }
     let dir = inbox_dir().join(crate::model::new_id());
-    fs::create_dir_all(&dir).map_err(|e| (500, format!("無法建立暫存資料夾：{e}")))?;
+    fs::create_dir_all(&dir).map_err(|e| (500, t!("無法建立暫存資料夾：{e}", e)))?;
     let path = dir.join(name);
     let result = (|| {
-        let mut out = fs::File::create(&path).map_err(|e| (500, format!("無法寫入暫存檔：{e}")))?;
+        let mut out = fs::File::create(&path).map_err(|e| (500, t!("無法寫入暫存檔：{e}", e)))?;
         // One byte past the limit is enough to know it is too large.
-        let copied = std::io::copy(&mut req.as_reader().take(max_bytes.saturating_add(1)), &mut out).map_err(|e| (500, format!("接收檔案失敗：{e}")))?;
+        let copied = std::io::copy(&mut req.as_reader().take(max_bytes.saturating_add(1)), &mut out).map_err(|e| (500, t!("接收檔案失敗：{e}", e)))?;
         if copied > max_bytes {
             return Err(too_large());
         }
         if copied == 0 {
-            return Err((500, "收到的檔案是空的".to_string()));
+            return Err((500, t!("收到的檔案是空的").to_string()));
         }
         if expected.is_some_and(|n| n as u64 != copied) {
-            return Err((500, "檔案傳輸中斷".to_string()));
+            return Err((500, t!("檔案傳輸中斷").to_string()));
         }
         Ok(())
     })();

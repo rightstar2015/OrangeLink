@@ -19,7 +19,7 @@ impl App {
                         self.viewer_start = Some((m.clone(), t));
                         self.open_viewer_at(m);
                     }
-                    None => self.toast("找不到和這個字幕同名的影片或音訊"),
+                    None => self.toast(t!("找不到和這個字幕同名的影片或音訊")),
                 }
             }
             Action::CloseViewer => self.close_viewer(true),
@@ -45,13 +45,13 @@ impl App {
                 let ids = self.selected_ids();
                 self.edit_items(&ids, |it| it.deleted = true);
                 self.selected.clear();
-                self.toast_undo(format!("已將 {} 個項目移到垃圾桶", ids.len()));
+                self.toast_undo(t!("已將 {n} 個項目移到垃圾桶", n = ids.len()));
             }
             Action::RestoreSelected => {
                 let ids = self.selected_ids();
                 self.edit_items(&ids, |it| it.deleted = false);
                 self.selected.clear();
-                self.toast(format!("已還原 {} 個項目", ids.len()));
+                self.toast(t!("已還原 {n} 個項目", n = ids.len()));
             }
             Action::ConfirmDeleteForever => {
                 let ids = self.selected_ids();
@@ -66,7 +66,7 @@ impl App {
                 let n = self.lib.as_ref().map(|l| l.items.values().filter(|i| i.deleted).count()).unwrap_or(0);
                 if n > 0 {
                     self.dialog = Some(Dialog::Confirm {
-                        message: format!("清空垃圾桶？{n} 個項目將被永久刪除，無法復原。"),
+                        message: t!("清空垃圾桶？{n} 個項目將被永久刪除，無法復原。", n),
                         on_yes: Confirmed::EmptyTrash,
                     });
                 }
@@ -78,12 +78,12 @@ impl App {
                         it.folders.push(folder.clone());
                     }
                 });
-                self.toast_undo(format!("已將 {} 個項目加入「{name}」", ids.len()));
+                self.toast_undo(t!("已將 {n} 個項目加入「{name}」", n = ids.len(), name));
             }
             Action::RemoveFromFolder(ids, folder) => {
                 let name = self.lib.as_ref().and_then(|l| l.folder_name(&folder)).unwrap_or_default().to_string();
                 self.edit_items(&ids, |it| it.folders.retain(|f| *f != folder));
-                self.toast_undo(format!("已將 {} 個項目移出「{name}」", ids.len()));
+                self.toast_undo(t!("已將 {n} 個項目移出「{name}」", n = ids.len(), name));
             }
             Action::AddTag(ids, tag) => {
                 let tag = tag.trim().to_string();
@@ -96,7 +96,7 @@ impl App {
                     }
                 });
                 if ids.len() > 1 {
-                    self.toast_undo(format!("已為 {} 個項目加上標籤「{tag}」", ids.len()));
+                    self.toast_undo(t!("已為 {n} 個項目加上標籤「{tag}」", n = ids.len(), tag));
                 }
             }
             Action::RemoveTag(ids, tag) => {
@@ -105,8 +105,8 @@ impl App {
             Action::SetRating(ids, rating) => {
                 self.edit_items(&ids, |it| it.rating = rating);
                 if ids.len() > 1 {
-                    let what = if rating == 0 { "清除了評分".to_string() } else { format!("評為 {}", "★".repeat(rating as usize)) };
-                    self.toast_undo(format!("已將 {} 個項目{what}", ids.len()));
+                    let what = if rating == 0 { t!("清除了評分").to_string() } else { t!("評為 {stars}", stars = "★".repeat(rating as usize)) };
+                    self.toast_undo(t!("已將 {n} 個項目{what}", n = ids.len(), what));
                 }
             }
             Action::ToastButton(id) => {
@@ -125,12 +125,12 @@ impl App {
                 if self.edits.undo.last().is_some_and(|s| s.seq == seq) {
                     self.restore_items(false);
                 } else {
-                    self.toast("之後又有其他修改；請用 Ctrl+Z 逐步復原");
+                    self.toast(t!("之後又有其他修改；請用 Ctrl+Z 逐步復原"));
                 }
             }
             Action::OpenPath(path) => {
                 if let Err(e) = open::that_detached(&path) {
-                    self.toast(format!("無法開啟：{e}"));
+                    self.toast(t!("無法開啟：{e}", e));
                 }
             }
             Action::RevealPath(path) => show_in_explorer(&path),
@@ -138,7 +138,7 @@ impl App {
                 self.mark_used(std::slice::from_ref(&id));
                 if let Some(path) = self.item_path(&id) {
                     if let Err(e) = open::that_detached(&path) {
-                        self.toast(format!("無法開啟：{e}"));
+                        self.toast(t!("無法開啟：{e}", e));
                     }
                 }
             }
@@ -147,10 +147,10 @@ impl App {
             Action::ShellMenu(ids) => {
                 let paths: Vec<PathBuf> = ids.iter().filter_map(|id| self.item_path(id)).filter(|p| p.is_file()).collect();
                 if paths.is_empty() {
-                    self.toast("找不到原始檔案");
+                    self.toast(t!("找不到原始檔案"));
                 } else if let Err(e) = crate::shell_menu::show(&paths, ctx.style().visuals.dark_mode) {
                     crate::log::error("shell_menu", &e);
-                    self.toast(format!("無法開啟 Windows 選單：{e}"));
+                    self.toast(t!("無法開啟 Windows 選單：{e}", e));
                 } else if let Some(lib) = &mut self.lib {
                     // Delete or rename in that menu moves files away from the library.
                     lib.refresh_missing();
@@ -165,7 +165,7 @@ impl App {
                 let paths: Vec<String> = ids.iter().filter_map(|id| self.item_path(id)).map(|p| p.display().to_string()).collect();
                 if !paths.is_empty() {
                     ctx.copy_text(paths.join("\r\n"));
-                    self.toast(if paths.len() > 1 { format!("已複製 {} 個檔案路徑", paths.len()) } else { "已複製檔案路徑".to_string() });
+                    self.toast(if paths.len() > 1 { t!("已複製 {n} 個檔案路徑", n = paths.len()) } else { t!("已複製檔案路徑").to_string() });
                 }
             }
             Action::StartRename(id, in_inspector) => {
@@ -193,21 +193,21 @@ impl App {
             Action::ExportSelected => self.export_selected(),
             Action::ImportFiles => {
                 if let Some(files) = rfd::FileDialog::new()
-                    .set_title("匯入圖片")
-                    .add_filter("圖片", imaging::SUPPORTED_EXTS)
+                    .set_title(t!("匯入圖片"))
+                    .add_filter(t!("圖片"), imaging::SUPPORTED_EXTS)
                     .pick_files()
                 {
                     self.apply(ctx, Action::ImportPaths(files));
                 }
             }
             Action::ImportFolder => {
-                if let Some(dir) = rfd::FileDialog::new().set_title("匯入資料夾").pick_folder() {
+                if let Some(dir) = rfd::FileDialog::new().set_title(t!("匯入資料夾")).pick_folder() {
                     self.apply(ctx, Action::ImportPaths(vec![dir]));
                 }
             }
             Action::ImportPaths(paths) => {
                 if self.import_running() {
-                    self.toast(if self.import_is_watch_scan() { "正在掃描監看資料夾，請稍候再試" } else { "匯入進行中，請稍候" });
+                    self.toast(if self.import_is_watch_scan() { t!("正在掃描監看資料夾，請稍候再試") } else { t!("匯入進行中，請稍候") });
                     return;
                 }
                 // A large drop (or a folder, until counted) gets the preview first.
@@ -247,7 +247,7 @@ impl App {
                     lib.refresh_missing();
                     let n = lib.missing.len();
                     self.thumbs.failed.clear();
-                    self.toast(if n == 0 { "所有檔案都在".to_string() } else { format!("有 {n} 個項目找不到原始檔案") });
+                    self.toast(if n == 0 { t!("所有檔案都在").to_string() } else { t!("有 {n} 個項目找不到原始檔案", n) });
                 }
             }
             Action::OpenSettings => self.show_settings = true,
@@ -263,14 +263,14 @@ impl App {
                 self.show_settings = true;
             }
             Action::InstallFfmpeg => match super::ytdlp_ui::winget_install("FFmpeg", "Gyan.FFmpeg") {
-                Ok(()) => self.toast("已開啟 FFmpeg 安裝視窗；裝好後重新開啟 OrangeLink，或到設定 →「工具」指定資料夾"),
+                Ok(()) => self.toast(t!("已開啟 FFmpeg 安裝視窗；裝好後重新開啟 OrangeLink，或到設定 →「工具」指定資料夾")),
                 Err(e) => self.toast_error(e),
             },
             Action::CopyFiles => {
                 let paths = self.selected_paths();
                 if crate::clipboard::copy_files(&paths) {
                     self.mark_used(&self.selected_ids());
-                    self.toast(format!("已複製 {} 個檔案，可在檔案總管或其他程式貼上", paths.len()));
+                    self.toast(t!("已複製 {n} 個檔案，可在檔案總管或其他程式貼上", n = paths.len()));
                 }
             }
             Action::Paste => {
@@ -282,7 +282,7 @@ impl App {
                     let inbox = lib.root.join("pasted");
                     match crate::clipboard::save_clipboard_image(&inbox) {
                         Some(path) => self.apply(ctx, Action::StartImport { paths: vec![path], link: false }),
-                        None => self.toast("剪貼簿裡沒有檔案或圖片"),
+                        None => self.toast(t!("剪貼簿裡沒有檔案或圖片")),
                     }
                 }
             }
@@ -294,29 +294,29 @@ impl App {
                 };
                 self.mark_used(&ids);
                 if let Err(e) = crate::process::visible(&program.path).args(&paths).spawn() {
-                    self.toast(format!("無法啟動 {}：{e}", program.name));
+                    self.toast(t!("無法啟動 {program}：{e}", program = program.name, e));
                 }
             }
             Action::RelinkItem(id) => {
-                let Some(file) = rfd::FileDialog::new().set_title("選擇這個項目的新位置").pick_file() else { return };
+                let Some(file) = rfd::FileDialog::new().set_title(t!("選擇這個項目的新位置")).pick_file() else { return };
                 if let Some(lib) = &mut self.lib {
                     lib.relink(&id, file);
                     self.thumbs.tex.remove(&id);
                     self.thumbs.failed.remove(&id);
-                    self.toast("已重新連結");
+                    self.toast(t!("已重新連結"));
                 }
             }
             Action::RelinkInFolder => {
                 let missing = self.lib.as_ref().map(|l| l.missing.len()).unwrap_or(0);
                 if missing == 0 {
-                    self.toast("沒有遺失的檔案");
+                    self.toast(t!("沒有遺失的檔案"));
                     return;
                 }
-                let Some(dir) = rfd::FileDialog::new().set_title("在哪個資料夾尋找遺失的檔案？").pick_folder() else { return };
+                let Some(dir) = rfd::FileDialog::new().set_title(t!("在哪個資料夾尋找遺失的檔案？")).pick_folder() else { return };
                 if let Some(lib) = &mut self.lib {
                     let fixed = lib.relink_in(&dir);
                     self.thumbs.failed.clear();
-                    self.toast(format!("已重新連結 {fixed} / {missing} 個遺失的項目"));
+                    self.toast(t!("已重新連結 {fixed} / {missing} 個遺失的項目", fixed, missing));
                 }
             }
             Action::WatchFoldersDialog => {
@@ -328,7 +328,7 @@ impl App {
             Action::SaveSmartFolder => self.apply(ctx, Action::NewSmartIn { parent: None, group: false }),
             Action::NewSmartIn { parent, group } => {
                 if !group && self.current_filter().is_empty() {
-                    self.toast("先設定搜尋或篩選條件，再儲存為智慧資料夾");
+                    self.toast(t!("先設定搜尋或篩選條件，再儲存為智慧資料夾"));
                 } else {
                     self.dialog = Some(Dialog::SmartFolderName { rename: None, name: String::new(), parent, group });
                 }
@@ -345,17 +345,17 @@ impl App {
             Action::MoveSmart(id, parent) => {
                 if let Some(lib) = &mut self.lib {
                     if !lib.move_smart_folder(&id, parent) {
-                        self.toast("不能把群組移到它自己裡面");
+                        self.toast(t!("不能把群組移到它自己裡面"));
                     }
                 }
             }
             Action::UpdateSmartFilter(id) => {
                 let filter = self.current_filter();
                 if filter.is_empty() {
-                    self.toast("目前沒有任何篩選條件");
+                    self.toast(t!("目前沒有任何篩選條件"));
                 } else if let Some(lib) = &mut self.lib {
                     lib.update_smart_filter(&id, filter);
-                    self.toast("已更新智慧資料夾的條件");
+                    self.toast(t!("已更新智慧資料夾的條件"));
                 }
             }
             Action::LinkItems(ids) => {
@@ -370,7 +370,7 @@ impl App {
                         }
                     }
                 });
-                self.toast(format!("已將 {n} 個素材互相關聯"));
+                self.toast(t!("已將 {n} 個素材互相關聯", n));
             }
             Action::UnlinkItems(a, b) => {
                 self.edit_items(&[a.clone(), b.clone()], |it| it.links.retain(|l| *l != a && *l != b));
@@ -393,7 +393,7 @@ impl App {
             Action::RestoreDefaultSmart => {
                 if let Some(lib) = &mut self.lib {
                     lib.seed_default_smart_folders();
-                    self.toast("已加入預設的智慧資料夾（已經有的群組不會重複加入）");
+                    self.toast(t!("已加入預設的智慧資料夾（已經有的群組不會重複加入）"));
                 }
             }
             Action::NewTagGroup(tag) => {
@@ -459,12 +459,12 @@ impl App {
                 let max = it.duration.unwrap_or(f64::MAX);
                 let (start, end) = (a.min(b).clamp(0.0, max), a.max(b).clamp(0.0, max));
                 if end - start < 0.05 {
-                    self.toast("片段太短：請先設定入點 (I) 和出點 (O)");
+                    self.toast(t!("片段太短：請先設定入點 (I) 和出點 (O)"));
                     return;
                 }
                 let clip = crate::model::Clip {
                     id: crate::model::new_id(),
-                    name: name.unwrap_or_else(|| format!("片段 {}", it.clips.len() + 1)),
+                    name: name.unwrap_or_else(|| t!("片段 {n}", n = it.clips.len() + 1)),
                     start,
                     end,
                     crop_x: self.crop_frame,
@@ -508,21 +508,21 @@ impl App {
                 // Search terms split on spaces, so match the first word of the value.
                 let word = value.split_whitespace().next().unwrap_or_default();
                 let filter = SavedFilter { search: format!("{key}:{word}"), ..Default::default() };
-                let label = if word.is_empty() { format!("{name}：已填寫") } else { format!("{name}：{value}") };
+                let label = if word.is_empty() { t!("{name}：已填寫", name) } else { t!("{name}：{value}", name, value) };
                 let id = lib.add_smart_folder(&label, filter, None, false);
                 self.view = View::Smart(id);
-                self.toast(format!("已建立智慧資料夾「{label}」"));
+                self.toast(t!("已建立智慧資料夾「{label}」", label));
             }
             Action::DeleteClips(id, cids) => {
                 self.edit_items(std::slice::from_ref(&id), |it| it.clips.retain(|c| !cids.contains(&c.id)));
                 self.clip_ui.sel.retain(|c| !cids.contains(c));
-                self.toast_undo(format!("已刪除 {} 個片段", cids.len()));
+                self.toast_undo(t!("已刪除 {n} 個片段", n = cids.len()));
             }
             Action::DeleteCandidates(id) => {
                 let n = self.lib.as_ref().and_then(|l| l.items.get(&id)).map_or(0, |it| it.clips.iter().filter(|c| super::highlights::is_candidate(&c.name)).count());
                 if n > 0 {
                     self.edit_items(std::slice::from_ref(&id), |it| it.clips.retain(|c| !super::highlights::is_candidate(&c.name)));
-                    self.toast_undo(format!("已刪除 {n} 個未保留的候選"));
+                    self.toast_undo(t!("已刪除 {n} 個未保留的候選", n));
                 }
             }
             Action::KeepClip(id, cid) => self.edit_items(&[id], |it| {
@@ -573,10 +573,10 @@ impl App {
                 } else {
                     self.clips.queue.extend(cids.map(|c| (id.clone(), c, preset.clone())));
                 }
-                self.toast(format!("{n} 個片段排入輸出，進度在狀態列的背景工作裡"));
+                self.toast(t!("{n} 個片段排入輸出，進度在狀態列的背景工作裡", n));
             }
             Action::PickSubtitle(id) => {
-                let Some(path) = rfd::FileDialog::new().add_filter("字幕", &["srt", "vtt"]).pick_file() else { return };
+                let Some(path) = rfd::FileDialog::new().add_filter(t!("字幕"), &["srt", "vtt"]).pick_file() else { return };
                 self.edit_items(std::slice::from_ref(&id), |it| it.subtitle = Some(path.clone()));
                 self.load_subtitles(&id);
                 self.viewer_tab = ViewerTab::Subtitles;
@@ -586,7 +586,7 @@ impl App {
             Action::ConfirmDeleteField(name) => {
                 let used = self.lib.as_ref().map_or(0, |l| l.items.values().filter(|i| i.fields.contains_key(&name)).count());
                 self.dialog = Some(Dialog::Confirm {
-                    message: format!("刪除欄位「{name}」？{used} 個項目上的這個欄位內容會一併清除。"),
+                    message: t!("刪除欄位「{name}」？{used} 個項目上的這個欄位內容會一併清除。", name, used),
                     on_yes: Confirmed::DeleteField(name),
                 });
             }
@@ -627,7 +627,7 @@ impl App {
                         lib.touch(&id);
                     }
                 }
-                self.toast(format!("正在重新產生 {} 個縮圖", ids.len()));
+                self.toast(t!("正在重新產生 {n} 個縮圖", n = ids.len()));
             }
             Action::DeleteSmartFolder(id) => {
                 if let Some(lib) = &mut self.lib {
@@ -650,7 +650,7 @@ impl App {
             Action::MoveFolder(id, parent) => {
                 if let Some(lib) = &mut self.lib {
                     if !lib.move_folder(&id, parent) {
-                        self.toast("不能把資料夾移到它自己的子資料夾裡");
+                        self.toast(t!("不能把資料夾移到它自己的子資料夾裡"));
                     }
                 }
             }
@@ -687,7 +687,7 @@ impl App {
             Action::ConfirmDeleteFolder(id) => {
                 let name = self.lib.as_ref().and_then(|l| l.folder_name(&id)).unwrap_or_default().to_string();
                 self.dialog = Some(Dialog::Confirm {
-                    message: format!("刪除資料夾「{name}」及其子資料夾？裡面的圖片仍會保留在資源庫中。"),
+                    message: t!("刪除資料夾「{name}」及其子資料夾？裡面的圖片仍會保留在資源庫中。", name),
                     on_yes: Confirmed::DeleteFolder(id),
                 });
             }
@@ -696,21 +696,21 @@ impl App {
             }
             Action::ConfirmDeleteTag(tag) => {
                 self.dialog = Some(Dialog::Confirm {
-                    message: format!("從所有項目移除標籤「{tag}」？"),
+                    message: t!("從所有項目移除標籤「{tag}」？", tag),
                     on_yes: Confirmed::DeleteTag(tag),
                 });
             }
             Action::OpenLibraryDialog => {
-                if let Some(dir) = rfd::FileDialog::new().set_title("開啟資源庫").pick_folder() {
+                if let Some(dir) = rfd::FileDialog::new().set_title(t!("開啟資源庫")).pick_folder() {
                     if Library::is_library(&dir) {
                         self.open_library(dir);
                     } else {
-                        self.toast("這個資料夾不是 OrangeLink 資源庫（找不到 library.json）");
+                        self.toast(t!("這個資料夾不是 OrangeLink 資源庫（找不到 library.json）"));
                     }
                 }
             }
             Action::CreateLibraryDialog => {
-                let Some(dir) = rfd::FileDialog::new().set_title("選擇存放新資源庫的位置").pick_folder() else {
+                let Some(dir) = rfd::FileDialog::new().set_title(t!("選擇存放新資源庫的位置")).pick_folder() else {
                     return;
                 };
                 if Library::is_library(&dir) {
@@ -719,20 +719,20 @@ impl App {
                 }
                 // Use the chosen folder if empty; otherwise create a subfolder in it.
                 let empty = std::fs::read_dir(&dir).map(|mut d| d.next().is_none()).unwrap_or(false);
-                let root = if empty { dir } else { unique_path(&dir.join("OrangeLink 資源庫")) };
+                let root = if empty { dir } else { unique_path(&dir.join(t!("OrangeLink 資源庫"))) };
                 match Library::create(&root) {
                     Ok(_) => {
                         self.open_library(root.clone());
-                        self.toast(format!("已建立資源庫：{}", root.display()));
+                        self.toast(t!("已建立資源庫：{root}", root = root.display()));
                     }
-                    Err(e) => self.toast(format!("建立資源庫失敗：{e:#}")),
+                    Err(e) => self.toast(t!("建立資源庫失敗：{e}", e = format!("{:#}", e))),
                 }
             }
             Action::OpenLibrary(path) => {
                 if Library::is_library(&path) {
                     self.open_library(path);
                 } else {
-                    self.toast(format!("找不到資源庫：{}", path.display()));
+                    self.toast(t!("找不到資源庫：{n}", n = path.display()));
                     self.config.recent.retain(|p| *p != path);
                 }
             }

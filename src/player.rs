@@ -260,7 +260,7 @@ impl FfmpegPlayer {
                         }
                     }
                     Err(e) => {
-                        let _ = err_tx.send(format!("無法啟動 ffmpeg：{e}"));
+                        let _ = err_tx.send(t!("無法啟動 ffmpeg：{e}", e));
                         return;
                     }
                 }
@@ -461,7 +461,7 @@ impl Player {
         match self.backend {
             Backend::Ffmpeg(_) => "FFmpeg",
             #[cfg(windows)]
-            Backend::Mf(_) if self.frame_size.is_some() => "Media Foundation（硬體解碼）",
+            Backend::Mf(_) if self.frame_size.is_some() => t!("Media Foundation（硬體解碼）"),
             #[cfg(windows)]
             Backend::Mf(_) => "Media Foundation",
         }

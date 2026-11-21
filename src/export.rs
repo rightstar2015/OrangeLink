@@ -220,7 +220,7 @@ fn command(ffmpeg_dir: &Path) -> Command {
 /// Encodes the clip; stops FFmpeg and removes the partial file when `cancel` is set.
 pub fn run(ffmpeg_dir: &Path, choice: VideoEncoder, job: &Export, out: &Path, cancel: &AtomicBool) -> Result<&'static str, String> {
     let order = if job.encodes_video() { encoder_order(choice, ffmpeg_encoders(ffmpeg_dir), NVENC_FAILED.load(Ordering::Relaxed)) } else { vec![job.other_codec()] };
-    let mut last = String::from("ffmpeg 失敗");
+    let mut last = String::from(t!("ffmpeg 失敗"));
     for (n, encoder) in order.iter().enumerate() {
         let mut cmd = command(ffmpeg_dir);
         cmd.args(job.args(encoder, out));
@@ -236,7 +236,7 @@ pub fn run(ffmpeg_dir: &Path, choice: VideoEncoder, job: &Export, out: &Path, ca
             Ok(Some(o)) => {
                 let err = String::from_utf8_lossy(&o.stderr).to_string();
                 crate::log::command_failed("clip", &cmd, format!("結束代碼 {:?}\n{err}", o.status.code()));
-                last = err.lines().last().unwrap_or("ffmpeg 失敗").to_string();
+                last = err.lines().last().unwrap_or(t!("ffmpeg 失敗")).to_string();
                 if encoder.ends_with("_nvenc") && choice == VideoEncoder::Auto {
                     NVENC_FAILED.store(true, Ordering::Relaxed);
                 }

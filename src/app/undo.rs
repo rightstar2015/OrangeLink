@@ -66,23 +66,23 @@ impl App {
 
     fn step_summary(step: &UndoStep) -> String {
         match (step.meta.is_some(), step.items.len()) {
-            (true, 0) => "資料夾／分類結構".to_string(),
-            (true, n) => format!("資料夾／分類結構與 {n} 個項目"),
-            (false, n) => format!("{n} 個項目"),
+            (true, 0) => t!("資料夾／分類結構").to_string(),
+            (true, n) => t!("資料夾／分類結構與 {n} 個項目", n),
+            (false, n) => t!("{n} 個項目", n),
         }
     }
 
     pub fn undo_tip(&self) -> String {
         match self.edits.undo.last() {
-            Some(s) => format!("復原：{}（Ctrl+Z）", Self::step_summary(s)),
-            None => "復原（Ctrl+Z）".to_string(),
+            Some(s) => t!("復原：{s}（Ctrl+Z）", s = Self::step_summary(s)),
+            None => t!("復原（Ctrl+Z）").to_string(),
         }
     }
 
     pub fn redo_tip(&self) -> String {
         match self.edits.redo.last() {
-            Some(s) => format!("重做：{}（Ctrl+Y）", Self::step_summary(s)),
-            None => "重做（Ctrl+Y）".to_string(),
+            Some(s) => t!("重做：{s}（Ctrl+Y）", s = Self::step_summary(s)),
+            None => t!("重做（Ctrl+Y）").to_string(),
         }
     }
 
@@ -121,7 +121,7 @@ impl App {
         self.track_structure();
         let step = if redo { self.edits.redo.pop() } else { self.edits.undo.pop() };
         let Some(step) = step else {
-            self.toast(if redo { "沒有可以重做的操作" } else { "沒有可以復原的操作" });
+            self.toast(if redo { t!("沒有可以重做的操作") } else { t!("沒有可以復原的操作") });
             return;
         };
         let Some(lib) = &mut self.lib else { return };
@@ -162,10 +162,10 @@ impl App {
             self.edits.redo.push(back);
         }
         let what = match (structural, n) {
-            (true, 0) => "資料夾／分類結構".to_string(),
-            (true, n) => format!("資料夾／分類結構與 {n} 個項目"),
-            (false, n) => format!("{n} 個項目"),
+            (true, 0) => t!("資料夾／分類結構").to_string(),
+            (true, n) => t!("資料夾／分類結構與 {n} 個項目", n),
+            (false, n) => t!("{n} 個項目", n),
         };
-        self.toast(format!("{}（{what}）", if redo { "已重做" } else { "已復原" }));
+        self.toast(t!("{redo}（{what}）", redo = if redo { t!("已重做") } else { t!("已復原") }, what));
     }
 }

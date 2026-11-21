@@ -130,7 +130,7 @@ impl App {
             .inner_margin(egui::Margin::symmetric(10.0, 6.0))
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    if ui.button("← 返回").on_hover_text("回到素材庫（Esc）").clicked() {
+                    if ui.button(t!("← 返回")).on_hover_text(t!("回到素材庫（Esc）")).clicked() {
                         self.act(Action::CloseViewer);
                     }
                     // Reserve right-side room so long filenames truncate cleanly instead of overlapping buttons.
@@ -155,25 +155,25 @@ impl App {
                     }
                     if let Some((page, total, error, _)) = &pdf {
                         ui.separator();
-                        if ui.add_enabled(*page > 0, egui::Button::new("▲")).on_hover_text("上一頁 (← / PageUp)").clicked() {
+                        if ui.add_enabled(*page > 0, egui::Button::new("▲")).on_hover_text(t!("上一頁 (← / PageUp)")).clicked() {
                             self.act(Action::PdfPage(page - 1));
                         }
                         match total {
-                            Some(t) => ui.label(format!("第 {} / {t} 頁", page + 1)),
-                            None => ui.label("讀取頁數…"),
+                            Some(t) => ui.label(t!("第 {page} / {t} 頁", page = page + 1, t)),
+                            None => ui.label(t!("讀取頁數…")),
                         };
-                        if ui.add_enabled(total.is_some_and(|t| page + 1 < t), egui::Button::new("▼")).on_hover_text("下一頁 (→ / PageDown)").clicked() {
+                        if ui.add_enabled(total.is_some_and(|t| page + 1 < t), egui::Button::new("▼")).on_hover_text(t!("下一頁 (→ / PageDown)")).clicked() {
                             self.act(Action::PdfPage(page + 1));
                         }
                         if let Some(e) = error {
-                            ui.label(RichText::new(format!("無法讀取 PDF：{e}")).color(danger()));
+                            ui.label(RichText::new(t!("無法讀取 PDF：{e}", e)).color(danger()));
                         }
                     }
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         let (next_tip, prev_tip) = if has_player {
-                            ("下一個 (Ctrl+→ / PageDown)", "上一個 (Ctrl+← / PageUp)")
+                            (t!("下一個 (Ctrl+→ / PageDown)"), t!("上一個 (Ctrl+← / PageUp)"))
                         } else {
-                            ("下一張 (→)", "上一張 (←)")
+                            (t!("下一張 (→)"), t!("上一張 (←)"))
                         };
                         if ui.button("›").on_hover_text(next_tip).clicked() {
                             self.act(Action::ViewerStep(1));
@@ -182,8 +182,8 @@ impl App {
                             self.act(Action::ViewerStep(-1));
                         }
                         let tags_btn = ui
-                            .selectable_label(self.viewer_tags_open, "🏷 整理")
-                            .on_hover_text("為目前素材評分與編輯標籤");
+                            .selectable_label(self.viewer_tags_open, t!("🏷 整理"))
+                            .on_hover_text(t!("為目前素材評分與編輯標籤"));
                         if tags_btn.clicked() {
                             self.viewer_tags_open = !self.viewer_tags_open;
                         }
@@ -191,16 +191,16 @@ impl App {
                         ui.separator();
 
                         if has_player {
-                            let xml_btn = egui::Button::new(RichText::new("匯出 Premiere XML").color(Color32::WHITE))
+                            let xml_btn = egui::Button::new(RichText::new(t!("匯出 Premiere XML")).color(Color32::WHITE))
                                 .fill(tokens().selection_bg);
-                            if ui.add(xml_btn).on_hover_text("將目前素材與片段匯出為 Premiere Pro XML").clicked() {
+                            if ui.add(xml_btn).on_hover_text(t!("將目前素材與片段匯出為 Premiere Pro XML")).clicked() {
                                 self.act(Action::ExportPremiereXmlFor(vec![id.clone()]));
                             }
                             if has_frames && is_landscape {
                                 let on = self.crop_frame.is_some();
                                 if ui
                                     .selectable_label(on, "9:16 (V)")
-                                    .on_hover_text("顯示直式 Shorts 裁切框（V），可左右拖曳；拖曳支援 Ctrl+Z 復原")
+                                    .on_hover_text(t!("顯示直式 Shorts 裁切框（V），可左右拖曳；拖曳支援 Ctrl+Z 復原"))
                                     .clicked()
                                 {
                                     self.crop_frame = if on { None } else { Some(0.5) };
@@ -209,18 +209,18 @@ impl App {
                             if ui
                                 .add_enabled(self.can_undo(), egui::Button::new("↩"))
                                 .on_hover_text(self.undo_tip())
-                                .on_disabled_hover_text("沒有可以復原的操作（Ctrl+Z）")
+                                .on_disabled_hover_text(t!("沒有可以復原的操作（Ctrl+Z）"))
                                 .clicked()
                             {
                                 self.act(Action::Undo);
                             }
                         } else {
-                            let slideshow_label = if self.slideshow.is_some() { "⏸ 停止播放" } else { "▶ 幻燈片" };
-                            if ui.button(slideshow_label).on_hover_text(format!("每 {:.0} 秒換下一張", self.config.slideshow_secs)).clicked() {
+                            let slideshow_label = if self.slideshow.is_some() { t!("⏸ 停止播放") } else { t!("▶ 幻燈片") };
+                            if ui.button(slideshow_label).on_hover_text(t!("每 {slideshow_secs} 秒換下一張", slideshow_secs = format!("{:.0}", self.config.slideshow_secs))).clicked() {
                                 self.act(Action::ToggleSlideshow);
                             }
                             ui.separator();
-                            if ui.button("適合視窗").clicked() {
+                            if ui.button(t!("適合視窗")).clicked() {
                                 zoom = 1.0;
                                 pan = egui::Vec2::ZERO;
                             }
@@ -231,19 +231,19 @@ impl App {
                             if ui
                                 .add_enabled(self.can_undo(), egui::Button::new("↩"))
                                 .on_hover_text(self.undo_tip())
-                                .on_disabled_hover_text("沒有可以復原的操作（Ctrl+Z）")
+                                .on_disabled_hover_text(t!("沒有可以復原的操作（Ctrl+Z）"))
                                 .clicked()
                             {
                                 self.act(Action::Undo);
                             }
                             if !decodable {
-                                let label = if kind == MediaKind::Image { "以預設程式開啟" } else { "▶ 以預設程式開啟" };
+                                let label = if kind == MediaKind::Image { t!("以預設程式開啟") } else { t!("▶ 以預設程式開啟") };
                                 if ui.button(label).clicked() {
                                     self.act(Action::OpenExternal(id.clone()));
                                 }
                             } else if full.is_none() {
                                 if self.full.is_failed(&id) {
-                                    ui.label(RichText::new("無法載入原圖").color(danger()));
+                                    ui.label(RichText::new(t!("無法載入原圖")).color(danger()));
                                 } else {
                                     ui.spinner();
                                 }
@@ -332,9 +332,9 @@ impl App {
                 let area = rect.shrink2(vec2((rect.width() - 760.0).max(40.0) / 2.0, 20.0));
                 let mut child = ui.new_child(egui::UiBuilder::new().max_rect(area));
                 let cut = text_len >= 60 * 1024;
-                let note = if cut { "點一句在同名的影片中從那裡播放（只列出檔案開頭的部分）" } else { "點一句在同名的影片中從那裡播放" };
+                let note = if cut { t!("點一句在同名的影片中從那裡播放（只列出檔案開頭的部分）") } else { t!("點一句在同名的影片中從那裡播放") };
                 let total_cues = self.text_cues_cache.as_ref().map_or(0, |(_, c)| c.len());
-                child.label(RichText::new(format!("{total_cues} 句　·　{note}")).small().color(tokens().text_muted));
+                child.label(RichText::new(t!("{total_cues} 句　·　{note}", total_cues, note)).small().color(tokens().text_muted));
                 child.add_space(4.0);
                 let mut open_at: Option<f64> = None;
                 let row_h = 26.0;
@@ -343,7 +343,7 @@ impl App {
                         for c in &cues[range] {
                             let line = format!("{}   {}", fmt_duration(c.start), c.text.replace('\n', " "));
                             let text = RichText::new(line).size(14.5).color(tokens().text);
-                            if ui.add_sized([ui.available_width(), row_h], egui::SelectableLabel::new(false, text)).on_hover_text("在影片中播放這句").clicked() {
+                            if ui.add_sized([ui.available_width(), row_h], egui::SelectableLabel::new(false, text)).on_hover_text(t!("在影片中播放這句")).clicked() {
                                 open_at = Some(c.start);
                             }
                         }
@@ -374,13 +374,13 @@ impl App {
                 painter.text(
                     rect.center() + vec2(0.0, 72.0),
                     Align2::CENTER_TOP,
-                    format!("{}  ·  沒有預覽，可用右上角按鈕以預設程式開啟", ext.to_uppercase()),
+                    t!("{to_uppercase}  ·  沒有預覽，可用右上角按鈕以預設程式開啟", to_uppercase = ext.to_uppercase()),
                     FontId::proportional(14.0),
                     tokens().text_muted,
                 );
             }
             None => {
-                painter.text(rect.center(), Align2::CENTER_CENTER, "載入中…", FontId::proportional(16.0), tokens().text_muted);
+                painter.text(rect.center(), Align2::CENTER_CENTER, t!("載入中…"), FontId::proportional(16.0), tokens().text_muted);
             }
         }
         if has_player && is_landscape && tex.is_some() {
@@ -451,16 +451,16 @@ impl App {
                             let star_text = RichText::new(if filled { "★" } else { "☆" })
                                 .size(20.0)
                                 .color(if filled { star() } else { ui.visuals().weak_text_color() });
-                            if ui.add(egui::Label::new(star_text).sense(Sense::click())).on_hover_text(format!("{i} 星（數字鍵 {i}）")).clicked() {
+                            if ui.add(egui::Label::new(star_text).sense(Sense::click())).on_hover_text(t!("{i} 星（數字鍵 {i}）", i)).clicked() {
                                 self.act(Action::SetRating(ids.clone(), if rating == i { 0 } else { i }));
                             }
                         }
                     });
                     ui.add_space(6.0);
-                    ui.label(RichText::new("標籤").small().weak());
+                    ui.label(RichText::new(t!("標籤")).small().weak());
                     ui.horizontal_wrapped(|ui| {
                         if tags.is_empty() {
-                            ui.label(RichText::new("無").small().weak());
+                            ui.label(RichText::new(t!("無")).small().weak());
                         }
                         for t in &tags {
                             if chip(ui, t) {
@@ -468,7 +468,7 @@ impl App {
                             }
                         }
                     });
-                    for t in inspector::tag_box(ui, &mut self.tag_input, &mut self.tag_pick, &stats.tag_counts, &tags, "輸入標籤後按 Enter", false) {
+                    for t in inspector::tag_box(ui, &mut self.tag_input, &mut self.tag_pick, &stats.tag_counts, &tags, t!("輸入標籤後按 Enter"), false) {
                         self.act(Action::AddTag(ids.clone(), t));
                     }
                 });
@@ -610,7 +610,7 @@ impl App {
                     } else {
                         ui.painter().rect_filled(block, 2.0, if body.hovered() { color.gamma_multiply(1.2) } else { color });
                     }
-                    let body = body.on_hover_text(format!("{}（{} – {}）\n點一下選取並跳到開頭；拖曳左右邊緣調整入點／出點", c.name, fmt_precise(c.start), fmt_precise(c.end)));
+                    let body = body.on_hover_text(t!("{name}（{start} – {end}）\n點一下選取並跳到開頭；拖曳左右邊緣調整入點／出點", name = c.name, start = fmt_precise(c.start), end = fmt_precise(c.end)));
                     if body.clicked() {
                         picked = Some(c.id.clone());
                         p.seek(c.start);
@@ -655,36 +655,36 @@ impl App {
                     let label = if p.is_playing() { "⏸" } else { "▶" };
                     let play_btn = egui::Button::new(RichText::new(label).size(15.0).color(Color32::WHITE))
                         .fill(tokens().selection_bg);
-                    if ui.add_sized([36.0, 26.0], play_btn).on_hover_text("播放／暫停（空白鍵；K 暫停並回到 1×）\nL 播放，再按 2×、4×；J 倒播，再按加快\n← → 跳 5 秒、Shift+← → 跳 1 秒、, . 逐格、Home / End 開頭 / 結尾").clicked() {
+                    if ui.add_sized([36.0, 26.0], play_btn).on_hover_text(t!("播放／暫停（空白鍵；K 暫停並回到 1×）\nL 播放，再按 2×、4×；J 倒播，再按加快\n← → 跳 5 秒、Shift+← → 跳 1 秒、, . 逐格、Home / End 開頭 / 結尾")).clicked() {
                         p.toggle();
                     }
                     let rate = p.rate();
                     if rate != 1.0 {
                         let text = if rate < 0.0 { format!("◀◀ {}×", -rate) } else { format!("{rate}×") };
-                        ui.label(RichText::new(text).strong().color(accent())).on_hover_text("播放速度；按 K 回到正常速度");
+                        ui.label(RichText::new(text).strong().color(accent())).on_hover_text(t!("播放速度；按 K 回到正常速度"));
                     }
                     ui.label(RichText::new(format!("{} / {}", fmt_precise(pos), fmt_duration(p.duration))).monospace().color(tokens().text))
-                        .on_hover_text(format!("播放引擎：{}（可在設定 →「預覽與播放」更改）", p.engine_name()));
+                        .on_hover_text(t!("播放引擎：{engine_name}（可在設定 →「預覽與播放」更改）", engine_name = p.engine_name()));
                     ui.separator();
-                    if ui.button("入點 (I)").on_hover_text("把目前位置設為片段開頭（快速鍵 I）").clicked() {
+                    if ui.button(t!("入點 (I)")).on_hover_text(t!("把目前位置設為片段開頭（快速鍵 I）")).clicked() {
                         self.mark.0 = Some(pos);
                     }
-                    if ui.button("出點 (O)").on_hover_text("把目前位置設為片段結尾（快速鍵 O）").clicked() {
+                    if ui.button(t!("出點 (O)")).on_hover_text(t!("把目前位置設為片段結尾（快速鍵 O）")).clicked() {
                         self.mark.1 = Some(pos);
                     }
                     if mark.0.is_some() || mark.1.is_some() {
                         let (start, end) = crate::app::clip_from_marks(mark, pos, p.duration);
-                        let add_btn = egui::Button::new(RichText::new("＋ 加入片段 (Enter)").color(accent()))
+                        let add_btn = egui::Button::new(RichText::new(t!("＋ 加入片段 (Enter)")).color(accent()))
                             .fill(tokens().accent_soft)
                             .stroke(Stroke::new(1.0_f32, accent().gamma_multiply(0.6)));
-                        if ui.add(add_btn).on_hover_text("加入片段（快速鍵 Enter）").clicked() {
+                        if ui.add(add_btn).on_hover_text(t!("加入片段（快速鍵 Enter）")).clicked() {
                             self.acts.borrow_mut().push(Action::AddClip(p.id.clone(), start, end, None));
                         }
-                        if ui.small_button("✖").on_hover_text("清除入點／出點").clicked() {
+                        if ui.small_button("✖").on_hover_text(t!("清除入點／出點")).clicked() {
                             self.mark = (None, None);
                         }
                     }
-                    if p.has_frames() && ui.button("📷").on_hover_text("擷取目前畫面成圖片").clicked() {
+                    if p.has_frames() && ui.button("📷").on_hover_text(t!("擷取目前畫面成圖片")).clicked() {
                         self.acts.borrow_mut().push(Action::CaptureFrame(p.id.clone(), pos));
                     }
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -733,13 +733,13 @@ impl App {
         ui.add_space(4.0);
         ui.columns(3, |cols| {
             cols[0].vertical_centered_justified(|ui| {
-                ui.selectable_value(&mut self.viewer_tab, ViewerTab::Clips, format!("✂ 片段 ({clip_count})"));
+                ui.selectable_value(&mut self.viewer_tab, ViewerTab::Clips, t!("✂ 片段 ({clip_count})", clip_count));
             });
             cols[1].vertical_centered_justified(|ui| {
-                ui.selectable_value(&mut self.viewer_tab, ViewerTab::Subtitles, format!("💬 字幕 ({cue_count})"));
+                ui.selectable_value(&mut self.viewer_tab, ViewerTab::Subtitles, t!("💬 字幕 ({cue_count})", cue_count));
             });
             cols[2].vertical_centered_justified(|ui| {
-                ui.selectable_value(&mut self.viewer_tab, ViewerTab::Highlights, "⚡ 精華");
+                ui.selectable_value(&mut self.viewer_tab, ViewerTab::Highlights, t!("⚡ 精華"));
             });
         });
         ui.separator();
@@ -759,7 +759,7 @@ impl App {
                 .rounding(ROUNDING)
                 .inner_margin(egui::Margin::symmetric(8.0, 4.0))
                 .show(ui, |ui| {
-                    ui.label(RichText::new(format!("入點 {}   →   出點 {}", show(self.mark.0), show(self.mark.1))).small().color(accent()));
+                    ui.label(RichText::new(t!("入點 {mark_in}   →   出點 {mark_out}", mark_in = show(self.mark.0), mark_out = show(self.mark.1))).small().color(accent()));
                 });
             ui.add_space(4.0);
         }
@@ -773,17 +773,17 @@ impl App {
         let mut clips = it.clips.clone();
 
         ui.horizontal(|ui| {
-            ui.checkbox(&mut self.clip_loop, "循環播放").on_hover_text("按片段的 ▶ 播放時，到出點就回到入點重播");
+            ui.checkbox(&mut self.clip_loop, t!("循環播放")).on_hover_text(t!("按片段的 ▶ 播放時，到出點就回到入點重播"));
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 let label = match self.config.clip_sort {
-                    ClipSort::Start => "依時間",
-                    ClipSort::Name => "依名稱",
-                    ClipSort::Score => "依分數",
+                    ClipSort::Start => t!("依時間"),
+                    ClipSort::Name => t!("依名稱"),
+                    ClipSort::Score => t!("依分數"),
                 };
                 egui::ComboBox::from_id_salt("clip-sort").width(86.0).selected_text(RichText::new(label).small()).show_ui(ui, |ui| {
-                    ui.selectable_value(&mut self.config.clip_sort, ClipSort::Start, "依開始時間");
-                    ui.selectable_value(&mut self.config.clip_sort, ClipSort::Name, "依名稱");
-                    ui.selectable_value(&mut self.config.clip_sort, ClipSort::Score, "依精華分數").on_hover_text("自動找到的候選依聊天和音量的突出程度排列，最突出的在前");
+                    ui.selectable_value(&mut self.config.clip_sort, ClipSort::Start, t!("依開始時間"));
+                    ui.selectable_value(&mut self.config.clip_sort, ClipSort::Name, t!("依名稱"));
+                    ui.selectable_value(&mut self.config.clip_sort, ClipSort::Score, t!("依精華分數")).on_hover_text(t!("自動找到的候選依聊天和音量的突出程度排列，最突出的在前"));
                 });
             });
         });
@@ -797,9 +797,9 @@ impl App {
                 .inner_margin(12.0)
                 .show(ui, |ui| {
                     ui.set_width(ui.available_width());
-                    ui.label(RichText::new("尚無片段").strong());
+                    ui.label(RichText::new(t!("尚無片段")).strong());
                     ui.add_space(4.0);
-                    ui.label(RichText::new("播放時按 I 設入點、O 設出點，再按 Enter 加入片段；或到「⚡ 精華」分頁自動偵測直播高峰。").small().weak());
+                    ui.label(RichText::new(t!("播放時按 I 設入點、O 設出點，再按 Enter 加入片段；或到「⚡ 精華」分頁自動偵測直播高峰。")).small().weak());
                 });
             return;
         }
@@ -812,28 +812,28 @@ impl App {
         let candidates = clips.iter().filter(|c| is_candidate(&c.name)).count();
         let mods = ui.input(|i| i.modifiers);
 
-        if candidates > 0 && ui.small_button(format!("刪除所有未保留的候選（{candidates}）")).clicked() {
+        if candidates > 0 && ui.small_button(t!("刪除所有未保留的候選（{candidates}）", candidates)).clicked() {
             pending.push(Action::DeleteCandidates(id.to_string()));
         }
         // Always there, so selecting does not move the list under the pointer.
         let sel: Vec<String> = clips.iter().filter(|c| self.clip_ui.sel.contains(&c.id)).map(|c| c.id.clone()).collect();
         let any = !sel.is_empty();
         ui.horizontal_wrapped(|ui| {
-            let label = if any { RichText::new(format!("已選取 {}", sel.len())).small().color(accent()) } else { RichText::new("Ctrl／Shift＋點選多選").small().weak() };
+            let label = if any { RichText::new(t!("已選取 {n}", n = sel.len())).small().color(accent()) } else { RichText::new(t!("Ctrl／Shift＋點選多選")).small().weak() };
             ui.label(label);
             ui.add_enabled_ui(any, |ui| {
-                ui.menu_button(RichText::new("輸出 ▼").small(), |ui| {
+                ui.menu_button(RichText::new(t!("輸出 ▼")).small(), |ui| {
                     if let Some(p) = preset_menu(ui, &presets, video) {
                         pending.push(Action::ExportClips(id.to_string(), sel.clone(), p));
                     }
                 })
                 .response
-                .on_hover_text("用輸出預設組寫成檔案；預設組在設定 →「直播精華」");
+                .on_hover_text(t!("用輸出預設組寫成檔案；預設組在設定 →「直播精華」"));
             });
-            if ui.add_enabled(any, egui::Button::new(RichText::new("刪除").small())).on_hover_text("Delete").clicked() {
+            if ui.add_enabled(any, egui::Button::new(RichText::new(t!("刪除")).small())).on_hover_text("Delete").clicked() {
                 pending.push(Action::DeleteClips(id.to_string(), sel.clone()));
             }
-            if any && ui.small_button("取消").clicked() {
+            if any && ui.small_button(t!("取消")).clicked() {
                 self.clip_ui.sel.clear();
             }
         });
@@ -873,7 +873,7 @@ impl App {
                 }
                 ui.allocate_new_ui(egui::UiBuilder::new().max_rect(rect.shrink2(vec2(8.0, 5.0))), |ui| {
                     ui.horizontal(|ui| {
-                        if ui.small_button("▶").on_hover_text("播放這個片段，到出點停止").clicked() {
+                        if ui.small_button("▶").on_hover_text(t!("播放這個片段，到出點停止")).clicked() {
                             play = Some((c.start, c.end));
                         }
                         let len = RichText::new(fmt_duration(c.end - c.start)).small().monospace().color(accent());
@@ -894,38 +894,38 @@ impl App {
                         } else {
                             let text = if candidate { RichText::new(&c.name).italics().weak() } else { RichText::new(&c.name).strong() };
                             let r = ui.allocate_ui_with_layout(vec2(w, 18.0), Layout::left_to_right(Align::Center), |ui| ui.add(egui::Label::new(text).truncate().sense(Sense::click()))).inner;
-                            if r.on_hover_text("點一下重新命名；Ctrl／Shift＋點一下多選").clicked() {
+                            if r.on_hover_text(t!("點一下重新命名；Ctrl／Shift＋點一下多選")).clicked() {
                                 click = Some((n, true));
                             }
                         }
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                             ui.menu_button("…", |ui| {
-                                ui.menu_button("輸出", |ui| {
+                                ui.menu_button(t!("輸出"), |ui| {
                                     if landscape && c.crop_x.is_none() {
-                                        ui.label(RichText::new("還沒設定 9:16 框，直式會裁切畫面中央").small().weak());
+                                        ui.label(RichText::new(t!("還沒設定 9:16 框，直式會裁切畫面中央")).small().weak());
                                     }
                                     if let Some(p) = preset_menu(ui, &presets, video) {
                                         pending.push(Action::ExportClip(id.to_string(), c.id.clone(), p));
                                     }
                                 });
-                                if ui.button("重新命名").clicked() {
+                                if ui.button(t!("重新命名")).clicked() {
                                     self.clip_ui.renaming = Some(InlineEdit::new(c.id.clone(), c.name.clone(), false));
                                     ui.close_menu();
                                 }
-                                if ui.button("刪除片段").clicked() {
+                                if ui.button(t!("刪除片段")).clicked() {
                                     pending.push(Action::DeleteClips(id.to_string(), vec![c.id.clone()]));
                                     ui.close_menu();
                                 }
                             });
-                            ui.label(len).on_hover_text("片段長度");
+                            ui.label(len).on_hover_text(t!("片段長度"));
                         });
                     });
                     ui.horizontal(|ui| {
                         let range = format!("{} → {}", fmt_precise(c.start), fmt_precise(c.end));
                         let r = ui.add(egui::Label::new(RichText::new(range).small().monospace().weak()).sense(Sense::click()));
                         let tip = match &c.note {
-                            Some(note) => format!("跳到片段開頭\n\n為什麼選這段：{note}{}", c.score.map_or(String::new(), |s| format!("\n分數 {s:.1}"))),
-                            None => "跳到片段開頭".to_string(),
+                            Some(note) => t!("跳到片段開頭\n\n為什麼選這段：{note}{s}", note, s = c.score.map_or(String::new(), |s| t!("\n分數 {s}", s = format!("{:.1}", s)))),
+                            None => t!("跳到片段開頭").to_string(),
                         };
                         if c.note.is_some() {
                             ui.label(RichText::new("ⓘ").small().weak()).on_hover_text(&tip);
@@ -935,10 +935,10 @@ impl App {
                         }
                         if candidate {
                             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                if ui.small_button("刪除").on_hover_text("刪除這個候選").clicked() {
+                                if ui.small_button(t!("刪除")).on_hover_text(t!("刪除這個候選")).clicked() {
                                     pending.push(Action::DeleteClips(id.to_string(), vec![c.id.clone()]));
                                 }
-                                if ui.small_button("保留").on_hover_text("改成一般片段").clicked() {
+                                if ui.small_button(t!("保留")).on_hover_text(t!("改成一般片段")).clicked() {
                                     pending.push(Action::KeepClip(id.to_string(), c.id.clone()));
                                 }
                             });
@@ -979,7 +979,7 @@ impl App {
         if self.clip_exporting() {
             ui.horizontal(|ui| {
                 ui.spinner();
-                ui.label(RichText::new("正在輸出片段…").small());
+                ui.label(RichText::new(t!("正在輸出片段…")).small());
             });
         }
         for a in pending {
@@ -1003,17 +1003,17 @@ impl App {
                     .inner_margin(12.0)
                     .show(ui, |ui| {
                         ui.set_width(ui.available_width());
-                        ui.label(RichText::new("找不到同名的字幕檔（.srt / .vtt）").strong());
+                        ui.label(RichText::new(t!("找不到同名的字幕檔（.srt / .vtt）")).strong());
                         ui.add_space(4.0);
-                        ui.label(RichText::new("可以直接用本機 Whisper 產生繁體中文字幕，或手動選擇既有的字幕檔。").small().weak());
+                        ui.label(RichText::new(t!("可以直接用本機 Whisper 產生繁體中文字幕，或手動選擇既有的字幕檔。")).small().weak());
                         ui.add_space(8.0);
                         ui.horizontal_wrapped(|ui| {
-                            let whisper_btn = egui::Button::new(RichText::new("🎤 用 Whisper 產生字幕…").color(Color32::WHITE))
+                            let whisper_btn = egui::Button::new(RichText::new(t!("🎤 用 Whisper 產生字幕…")).color(Color32::WHITE))
                                 .fill(tokens().selection_bg);
                             if ui.add(whisper_btn).clicked() {
                                 pending.push(Action::OpenWhisper(vec![id.to_string()]));
                             }
-                            if ui.button("選擇字幕檔…").clicked() {
+                            if ui.button(t!("選擇字幕檔…")).clicked() {
                                 pending.push(Action::PickSubtitle(id.to_string()));
                             }
                         });
@@ -1024,21 +1024,21 @@ impl App {
                     let name = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
                     ui.add(egui::Label::new(RichText::new(format!("📄 {name}")).small()).truncate()).on_hover_text(path.display().to_string());
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if ui.small_button("更換…").clicked() {
+                        if ui.small_button(t!("更換…")).clicked() {
                             pending.push(Action::PickSubtitle(id.to_string()));
                         }
                     });
                 });
-                ui.checkbox(&mut self.sub_overlay, "在畫面上顯示字幕");
-                ui.add(TextEdit::singleline(&mut subs.search).hint_text("🔍 搜尋台詞…").desired_width(f32::INFINITY));
+                ui.checkbox(&mut self.sub_overlay, t!("在畫面上顯示字幕"));
+                ui.add(TextEdit::singleline(&mut subs.search).hint_text(t!("🔍 搜尋台詞…")).desired_width(f32::INFINITY));
                 if subs.cues.is_empty() {
-                    ui.label(RichText::new("字幕檔中沒有可讀取的內容").weak());
+                    ui.label(RichText::new(t!("字幕檔中沒有可讀取的內容")).weak());
                 }
                 let current = subs.at(pos);
                 let follow = playing && current.is_some() && current != subs.last_cue && subs.search.is_empty();
                 subs.last_cue = current;
                 let filtered = subs.matching();
-                ui.label(RichText::new("點一句跳到該時間；右鍵可從這句建立片段").small().weak());
+                ui.label(RichText::new(t!("點一句跳到該時間；右鍵可從這句建立片段")).small().weak());
                 let row_h = 26.0;
                 let mut scroll = ScrollArea::vertical().id_salt("cues").auto_shrink([false, false]);
                 let scroll_target = subs.scroll_target(if follow { current } else { None });
@@ -1085,7 +1085,7 @@ impl App {
                             seek = Some(c.start);
                         }
                         r.on_hover_text(format!("{ts}  {}", c.text)).context_menu(|ui| {
-                            if ui.button("從這句建立片段").clicked() {
+                            if ui.button(t!("從這句建立片段")).clicked() {
                                 clip = Some((c.start, c.end, single_line.chars().take(40).collect::<String>()));
                                 ui.close_menu();
                             }
@@ -1154,7 +1154,7 @@ fn activity_strip(ui: &mut Ui, cache: &SignalPlotCache, dur: f64, pos: f64, mark
     }
     let x = inner.left() + (pos / dur).clamp(0.0, 1.0) as f32 * inner_w;
     painter.line_segment([pos2(x, rect.top()), pos2(x, rect.bottom())], Stroke::new(1.5_f32, Color32::WHITE));
-    let resp = resp.on_hover_text("橘色：聊天熱度　藍色：音量（點一下跳到該時間）");
+    let resp = resp.on_hover_text(t!("橘色：聊天熱度　藍色：音量（點一下跳到該時間）"));
     resp.clicked().then(|| resp.interact_pointer_pos()).flatten().map(|p| ((p.x - inner.left()) / inner_w).clamp(0.0, 1.0) as f64 * dur)
 }
 
@@ -1172,19 +1172,19 @@ fn preset_menu(ui: &mut Ui, presets: &[crate::config::ExportPreset], video: bool
             what.push("-14 LUFS".into());
         }
         if p.subtitles && video && matches!(p.shape, ExportShape::Original | ExportShape::Vertical) {
-            what.push("燒入字幕".into());
+            what.push(t!("燒入字幕").into());
         }
         if !video && p.shape == ExportShape::Vertical {
             continue;
         }
         what.push(match &p.folder {
-            Some(f) => format!("存到 {}", f.display()),
-            None => "存到資源庫的 captures".into(),
+            Some(f) => t!("存到 {f}", f = f.display()),
+            None => t!("存到資源庫的 captures").into(),
         });
         if p.import {
-            what.push("加入資源庫".into());
+            what.push(t!("加入資源庫").into());
         }
-        if ui.button(&p.name).on_hover_text(what.join("・")).clicked() {
+        if ui.button(&p.name).on_hover_text(what.join(t!("・"))).clicked() {
             picked = Some(i);
             ui.close_menu();
         }

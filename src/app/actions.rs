@@ -477,16 +477,28 @@ impl App {
             }
             Action::SetField(ids, name, value) => {
                 let value = value.trim().to_string();
-                if let Some(lib) = &mut self.lib {
-                    lib.add_field(&name);
-                }
-                self.edit_items(&ids, |it| {
-                    if value.is_empty() {
-                        it.fields.remove(&name);
-                    } else {
-                        it.fields.insert(name.clone(), value.clone());
+                // A new field and its values are one undo step: a single Ctrl+Z
+                // takes both back, values first, never the field before its values.
+                self.track_structure();
+                let Some(lib) = &mut self.lib else { return };
+                let meta_before = lib.meta.clone();
+                let before: Vec<Item> = ids.iter().filter_map(|id| lib.items.get(id).cloned()).collect();
+                lib.add_field(&name);
+                for id in &ids {
+                    if let Some(it) = lib.items.get_mut(id) {
+                        if value.is_empty() {
+                            it.fields.remove(&name);
+                        } else {
+                            it.fields.insert(name.clone(), value.clone());
+                        }
+                        lib.touch(id);
                     }
-                });
+                }
+                let meta = (!meta_before.same_structure(&lib.meta)).then_some(meta_before);
+                self.edits.meta_seen = Some((lib.meta_rev, lib.meta.clone()));
+                if !before.is_empty() || meta.is_some() {
+                    self.push_undo(super::undo::UndoStep { seq: 0, time: self.now, items: before, meta });
+                }
             }
             Action::FieldSmartFolder(name, value) => {
                 let Some(lib) = &mut self.lib else { return };

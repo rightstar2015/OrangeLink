@@ -4202,6 +4202,68 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    fn undo_test_app(name: &str) -> (App, std::path::PathBuf) {
+        let root = std::env::temp_dir().join(format!("orangelink-{name}-{}", crate::model::new_id()));
+        let mut lib = Library::create(&root).unwrap();
+        let it: Item = serde_json::from_value(serde_json::json!({
+            "id": "a", "name": "a", "file_name": "a.png", "ext": "png",
+            "kind": "image", "size": 1, "width": 10, "height": 10,
+            "added_at": 0, "modified_at": 0
+        }))
+        .unwrap();
+        lib.insert_item(it);
+        let mut app = App::with_config(&egui::Context::default(), Config::default());
+        app.lib = Some(lib);
+        app.track_structure();
+        (app, root)
+    }
+
+    #[test]
+    fn a_new_field_and_its_value_are_undone_with_one_ctrl_z() {
+        let (mut app, root) = undo_test_app("fieldundo");
+        let ctx = egui::Context::default();
+        app.apply(&ctx, Action::SetField(vec!["a".into()], "作者".into(), "我".into()));
+        app.track_structure();
+        let lib = app.lib.as_ref().unwrap();
+        assert_eq!(lib.items["a"].fields.get("作者").map(String::as_str), Some("我"));
+        assert!(lib.meta.fields.iter().any(|f| f == "作者"));
+
+        app.restore_items(false);
+        let lib = app.lib.as_ref().unwrap();
+        assert!(lib.items["a"].fields.is_empty(), "the value outlived the undo");
+        assert!(!lib.meta.fields.iter().any(|f| f == "作者"), "the field outlived the undo");
+        assert!(!app.can_undo(), "setting a field took more than one step");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn undo_in_the_same_frame_as_a_structure_edit_undoes_that_edit() {
+        let (mut app, root) = undo_test_app("frameundo");
+        app.edit_items(&["a".to_string()], |it| it.name = "b".into());
+        // A field added this frame, not yet seen by the end-of-frame tracking.
+        app.lib.as_mut().unwrap().add_field("x");
+        app.restore_items(false);
+        let lib = app.lib.as_ref().unwrap();
+        assert!(!lib.meta.fields.iter().any(|f| f == "x"), "the newest edit was not the one undone");
+        assert_eq!(lib.items["a"].name, "b");
+        app.track_structure();
+        assert!(app.can_redo(), "the end of the frame cleared the redo");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn an_item_sent_back_to_the_trash_by_undo_is_no_longer_selected() {
+        let (mut app, root) = undo_test_app("trashundo");
+        let mut trashed = app.lib.as_ref().unwrap().items["a"].clone();
+        trashed.deleted = true;
+        app.record_undo(vec![trashed], false);
+        app.selected.insert("a".into());
+        app.restore_items(false);
+        assert!(app.lib.as_ref().unwrap().items["a"].deleted);
+        assert!(app.selected.is_empty(), "a hidden trashed item stayed selected");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     #[test]
     fn floating_window_blocks_shortcuts_and_closes_topmost_first() {
         let mut app = App::with_config(&egui::Context::default(), Config::default());

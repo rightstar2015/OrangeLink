@@ -1,4 +1,5 @@
 mod cell;
+mod compare;
 mod grid;
 mod hits;
 mod inspector;
@@ -12,6 +13,8 @@ mod toolbar;
 
 pub(crate) use theme::*;
 
+pub use compare::Compare;
+pub(crate) use compare::comparable;
 pub use preview::{SignalPlotCache, TimeView};
 pub use sidebar::SidebarStats;
 pub use smooth_scroll::Glide;

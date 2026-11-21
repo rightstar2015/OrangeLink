@@ -974,6 +974,10 @@ impl App {
                     }
                 });
             }
+            if self.lib.as_ref().is_some_and(|l| crate::ui::comparable(l, &targets)) && ui.button(t!("並排比較")).on_hover_text(t!("2～4 張圖片並排，一起縮放與移動")).clicked() {
+                self.act(Action::Compare(targets.clone()));
+                ui.close_menu();
+            }
             if ui.button(t!("重新產生縮圖")).clicked() {
                 self.act(Action::RegenerateThumbnails(targets.clone()));
                 ui.close_menu();

@@ -43,6 +43,8 @@ impl Wanted {
 pub enum Kind {
     Thumb,
     Full,
+    /// A picture for the side-by-side comparison.
+    Compare,
 }
 
 struct Request {
@@ -97,6 +99,7 @@ pub struct Loader {
     fast_tx: Sender<Request>,
     slow_tx: Sender<Request>,
     full_tx: Sender<Request>,
+    compare_tx: Sender<Request>,
     wanted: Arc<Wanted>,
     pub rx: Receiver<Loaded>,
 }
@@ -131,6 +134,7 @@ impl Loader {
         let slow_tx = spawn_pool(SLOW_WORKERS, &out_tx, &wanted, ctx);
 
         let (full_tx, full_rx) = channel::<Request>();
+        let (out_tx2, ctx2) = (out_tx.clone(), ctx.clone());
         let ctx = ctx.clone();
         thread::spawn(move || {
             while let Ok(mut req) = full_rx.recv() {
@@ -153,7 +157,24 @@ impl Loader {
             }
         });
 
-        Self { fast_tx, slow_tx, full_tx, wanted, rx }
+        // Side-by-side pictures: each one asked for is decoded, in turn.
+        let (compare_tx, compare_rx) = channel::<Request>();
+        let (out, ctx2) = (out_tx2, ctx2);
+        thread::spawn(move || {
+            while let Ok(req) = compare_rx.recv() {
+                let image = decode_file(&req.source).ok().map(|img| to_color_image(&fit_for_view(img)));
+                if out.send(Loaded { id: req.id, kind: Kind::Compare, skipped: false, image, frames: Vec::new() }).is_err() {
+                    break;
+                }
+                ctx2.request_repaint();
+            }
+        });
+
+        Self { fast_tx, slow_tx, full_tx, compare_tx, wanted, rx }
+    }
+
+    pub fn request_compare(&self, id: String, source: PathBuf) {
+        let _ = self.compare_tx.send(Request { id, thumb: PathBuf::new(), source, media: MediaKind::Image, ffmpeg_dir: None });
     }
 
     pub fn request_thumb(&self, id: String, thumb: PathBuf, source: PathBuf, media: MediaKind, ffmpeg_dir: Option<PathBuf>) {

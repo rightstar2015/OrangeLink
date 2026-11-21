@@ -339,12 +339,20 @@ impl App {
         if !files.is_empty() {
             yt.last_files = files;
         }
-        if yt.run_queue && !yt.queue.is_empty() {
-            let next = yt.queue.remove(0);
-            yt.queue_sel = None;
+        self.start_queued_downloads();
+    }
+
+    /// Starts the next queued download when the queue is running and nothing is.
+    /// One that can't start (its folder can't be made, yt-dlp is gone) says so
+    /// and the next is tried: nothing else would start the rest.
+    fn start_queued_downloads(&mut self) {
+        while self.yt.run_queue && self.yt.running.is_none() && !self.yt.queue.is_empty() {
+            let next = self.yt.queue.remove(0);
+            self.yt.queue_sel = None;
             self.start_download(next);
-        } else {
-            yt.run_queue = false;
+        }
+        if self.yt.running.is_none() {
+            self.yt.run_queue = false;
         }
     }
 
@@ -921,4 +929,33 @@ fn ui_install_buttons(ui: &mut Ui, actions: &mut Vec<YtAction>) {
             actions.push(YtAction::Winget("deno", "DenoLand.Deno"));
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_queued_download_that_cannot_start_does_not_stop_the_queue() {
+        let mut app = App::with_config(&egui::Context::default(), crate::config::Config::default());
+        let req = |url: &str| Request {
+            url: url.into(),
+            playlist: false,
+            out_dir: std::env::temp_dir(),
+            name: String::new(),
+            section: None,
+            format: OutFormat::default(),
+            custom: None,
+            chat: false,
+            chat_only: false,
+            ffmpeg_dir: None,
+            deno: None,
+        };
+        // No yt-dlp found: every start fails.
+        app.yt.queue = vec![req("https://a.example/1"), req("https://a.example/2")];
+        app.yt.run_queue = true;
+        app.start_queued_downloads();
+        assert!(app.yt.queue.is_empty() && !app.yt.run_queue, "the queue was left waiting");
+        assert!(app.yt.status.1, "the failure is shown");
+    }
 }

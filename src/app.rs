@@ -8,6 +8,7 @@ pub use integrity::IntegrityFix;
 mod history;
 pub mod jobs;
 mod mcp_tools;
+mod palette;
 mod pdf_view;
 mod scrub;
 mod undo;
@@ -808,6 +809,8 @@ pub struct App {
     pub tag_search: String,
     /// The sidebar's 篩選資料夾 box.
     pub folder_search: String,
+    /// Ctrl+K's box, while open.
+    pub palette: Option<palette::Palette>,
     /// Custom field values typed in the multi-selection panel, by field name.
     pub field_drafts: HashMap<String, String>,
     pub last_flush: f64,
@@ -1066,6 +1069,7 @@ impl App {
             tag_pick: None,
             tag_search: String::new(),
             folder_search: String::new(),
+            palette: None,
             field_drafts: HashMap::new(),
             last_flush: 0.0,
             acts: RefCell::new(Vec::new()),
@@ -1904,6 +1908,7 @@ impl App {
 
     fn has_floating_window(&self) -> bool {
         self.show_shortcuts
+            || self.palette.is_some()
             || self.show_settings
             || self.show_ai_log
             || self.smart_edit.is_some()
@@ -1913,6 +1918,9 @@ impl App {
     }
 
     fn close_top_floating_window(&mut self) -> bool {
+        if self.palette.take().is_some() {
+            return true;
+        }
         if self.smart_edit.take().is_some() {
             return true;
         }
@@ -1973,6 +1981,9 @@ impl App {
         }
         if ctx.wants_keyboard_input() {
             return;
+        }
+        if self.lib.is_some() && self.viewer.is_none() && !self.has_floating_window() && ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, Key::K)) {
+            return self.open_palette();
         }
         // ? (Shift+/ on most layouts, so read as typed text) or F1: the shortcuts window.
         let help = ctx.input(|i| i.key_pressed(Key::F1) || i.events.iter().any(|e| matches!(e, egui::Event::Text(t) if t == "?" || t == "？")));
@@ -3585,6 +3596,7 @@ impl eframe::App for App {
             self.drag_overlay(ctx);
         }
         self.update_hover_preview(ctx);
+        self.palette_window(ctx);
         self.dialogs(ctx);
         self.settings_window(ctx);
         self.ai_log_window(ctx);

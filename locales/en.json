@@ -1391,5 +1391,14 @@
  "上一個（Shift＋Enter）": "Previous (Shift+Enter)",
  "下一個（Enter）": "Next (Enter)",
  "篩選資料夾": "Filter folders",
- "沒有符合的資料夾": "No matching folders"
+ "沒有符合的資料夾": "No matching folders",
+ "前往": "Go to",
+ "指令": "Command",
+ "標籤篩選": "Tag filter",
+ "把選取的加入「{name}」": "Add the selection to “{name}”",
+ "為選取的加上標籤「{tag}」": "Tag the selection “{tag}”",
+ "前往資料夾、標籤或執行指令…": "Go to a folder or tag, or run a command…",
+ "沒有符合的項目": "Nothing matches",
+ "↑↓ 選擇　Enter 執行　Esc 關閉": "↑↓ choose · Enter run · Esc close",
+ "前往資料夾、智慧資料夾、標籤或執行指令（有選取時也能直接加入資料夾或標籤）": "Go to a folder, smart folder or tag, or run a command (with items selected, also file or tag them)"
 }

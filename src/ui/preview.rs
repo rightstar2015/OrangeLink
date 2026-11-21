@@ -502,15 +502,17 @@ impl App {
         painter.rect_filled(Rect::from_x_y_ranges(frame.right()..=draw.right(), draw.y_range()), 0.0, dim);
         painter.rect_stroke(frame, 0.0, Stroke::new(2.0_f32, accent()));
         let r = ui.interact(frame, ui.id().with("crop-frame"), Sense::drag()).on_hover_cursor(egui::CursorIcon::ResizeHorizontal);
-        if r.drag_started() && active.is_some() {
-            self.crop_drag_before = Some(it.clone());
-        }
         if r.dragged() {
             let moved = (centre + r.drag_delta().x / draw.width()).clamp(half, 1.0 - half);
             self.crop_frame = Some(moved);
             if let Some((cid, _)) = &active {
-                if let Some(lib) = &mut self.lib {
-                    if let Some(c) = lib.items.get_mut(id).and_then(|it| it.clips.iter_mut().find(|c| c.id == *cid)) {
+                if let Some(it) = self.lib.as_mut().and_then(|lib| lib.items.get_mut(id)) {
+                    // Taken when a clip is first changed, not when the drag began:
+                    // a drag started before the playhead reached the clip saves too.
+                    if self.crop_drag_before.is_none() {
+                        self.crop_drag_before = Some(it.clone());
+                    }
+                    if let Some(c) = it.clips.iter_mut().find(|c| c.id == *cid) {
                         c.crop_x = Some(moved);
                     }
                 }

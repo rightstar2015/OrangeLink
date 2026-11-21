@@ -29,13 +29,6 @@ fn latest_json_url() -> String {
     format!("https://github.com/{REPO}/releases/latest/download/latest.json")
 }
 
-/// Where a release's zip is downloaded from: always this repository's release for
-/// `tag`, whatever else `latest.json` might say.
-#[cfg(test)]
-pub fn asset_url(tag: &str, asset: &str) -> String {
-    format!("https://github.com/{REPO}/releases/download/{tag}/{asset}")
-}
-
 /// A release asset's file name: a plain `.zip` name, with no folder, URL, query or `..`.
 pub fn is_asset_name(name: &str) -> bool {
     name.len() <= 128
@@ -378,7 +371,6 @@ mod tests {
             let json = format!(r#"{{"version": "9.0.0", "asset": {}}}"#, serde_json::to_string(bad).unwrap());
             assert_eq!(release_in_latest(&json).unwrap().asset, None, "{bad}");
         }
-        assert_eq!(asset_url("v0.2.0", "OrangeLink.zip"), format!("https://github.com/{REPO}/releases/download/v0.2.0/OrangeLink.zip"));
         assert!(latest_json_url().starts_with("https://github.com/") && releases_url().starts_with("https://github.com/"));
     }
 

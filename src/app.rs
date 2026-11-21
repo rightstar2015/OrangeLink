@@ -578,13 +578,15 @@ pub struct Subtitles {
     pub scroll_to_focus: bool,
     /// The lines matching `search`, and the search they were found for.
     pub matches: Option<(String, std::rc::Rc<Vec<usize>>)>,
+    /// Which of the matching lines ‹ › and Enter are on.
+    pub hit: usize,
     /// Proofreading: the lines picked, the text being edited, 復原.
     pub edit: subtitle_edit::SubEdit,
 }
 
 impl Subtitles {
-    /// The lines (indexes into `cues`) that contain the search, all of them for
-    /// none; looked for again only when the search changes, not every frame.
+    /// The lines (indexes into `cues`) that contain the search, none for an
+    /// empty search; looked for again only when the search changes, not every frame.
     pub fn matching(&mut self) -> std::rc::Rc<Vec<usize>> {
         if let Some((q, found)) = &self.matches {
             if *q == self.search {
@@ -593,13 +595,26 @@ impl Subtitles {
         }
         let q = self.search.trim().to_lowercase();
         let found: Vec<usize> = if q.is_empty() {
-            (0..self.cues.len()).collect()
+            Vec::new()
         } else {
             self.cues.iter().enumerate().filter(|(_, c)| c.text.to_lowercase().contains(&q)).map(|(i, _)| i).collect()
         };
         let found = std::rc::Rc::new(found);
         self.matches = Some((self.search.clone(), found.clone()));
         found
+    }
+
+    /// Goes `by` matching lines on from the current one (0: back to the
+    /// first, after a new search), round the ends; marks it and scrolls there.
+    pub fn step_hit(&mut self, by: i64) -> Option<usize> {
+        let hits = self.matching();
+        if hits.is_empty() {
+            return None;
+        }
+        self.hit = if by == 0 { 0 } else { (self.hit as i64 + by).rem_euclid(hits.len() as i64) as usize };
+        let line = hits[self.hit.min(hits.len() - 1)];
+        self.focus_on(Some(line));
+        Some(line)
     }
 
     /// Marks `i` and scrolls the list to it once.
@@ -2339,7 +2354,7 @@ impl App {
         if let Some(p) = &path {
             self.index_subtitles(id, p);
         }
-        self.subs = is_media.then(|| Subtitles { id: id.to_string(), path, cues, search: String::new(), last_cue: None, focus: None, scroll_to_focus: false, matches: None, edit: Default::default() });
+        self.subs = is_media.then(|| Subtitles { id: id.to_string(), path, cues, search: String::new(), last_cue: None, focus: None, scroll_to_focus: false, matches: None, hit: 0, edit: Default::default() });
     }
 
     /// Encodes a marked clip to `captures/` on a background thread; it is imported when done.
@@ -4221,6 +4236,7 @@ mod tests {
             focus: None,
             scroll_to_focus: false,
             matches: None,
+            hit: 0,
             edit: Default::default(),
         };
         assert_eq!(subs.find("拉我"), Some(1), "the first of equally good lines");
@@ -4613,8 +4629,11 @@ mod tests {
             focus: None,
             scroll_to_focus: false,
             matches: None,
+            hit: 0,
             edit: Default::default(),
         };
+        assert!(subs.matching().is_empty(), "no search: no line is a hit");
+        subs.search = "x".into();
         assert_eq!(*subs.matching(), vec![0, 1, 2]);
         subs.search = "y".into();
         assert!(subs.matching().is_empty());
@@ -4627,6 +4646,32 @@ mod tests {
         assert_eq!(subs.scroll_target(None), None, "the list was held on the found line");
         assert_eq!(subs.focus, Some(2));
         assert_eq!(subs.scroll_target(Some(1)), Some(1), "following playback still scrolls");
+    }
+
+    /// Searching the 字幕 tab hid every other line, so a found line had no
+    /// context; now all lines stay and ‹ › go through the hits.
+    #[test]
+    fn subtitle_search_steps_through_the_hits_among_all_lines() {
+        let cue = |t: f64, text: &str| crate::media::Cue { start: t, end: t + 1.0, text: text.into() };
+        let mut subs = Subtitles {
+            id: "a".into(),
+            path: None,
+            cues: vec![cue(0.0, "老闆好"), cue(5.0, "今天"), cue(9.0, "老闆再見"), cue(12.0, "掰")],
+            search: "老闆".into(),
+            last_cue: None,
+            focus: None,
+            scroll_to_focus: false,
+            matches: None,
+            hit: 0,
+            edit: Default::default(),
+        };
+        assert_eq!(subs.step_hit(0), Some(0));
+        assert_eq!(subs.step_hit(1), Some(2));
+        assert_eq!(subs.step_hit(1), Some(0), "round from the last hit to the first");
+        assert_eq!(subs.step_hit(-1), Some(2), "and back");
+        assert_eq!(subs.focus, Some(2));
+        subs.search = "沒有".into();
+        assert_eq!(subs.step_hit(1), None);
     }
 
     #[test]

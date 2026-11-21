@@ -214,6 +214,18 @@ fn known_length(duration: Option<f64>) -> f64 {
     duration.filter(|d| d.is_finite() && *d >= 0.0).unwrap_or(f64::MAX)
 }
 
+/// A time in seconds the AI gave: from 0 to the media's length, or an error that
+/// says the range (not moved into it: a wrong time is the AI's to fix).
+fn within_length(t: f64, max: f64) -> Result<(), String> {
+    if (0.0..=max).contains(&t) {
+        Ok(())
+    } else if max < f64::MAX {
+        Err(format!("時間 {t} 秒超出範圍：要在 0 到 {max:.3} 秒之間"))
+    } else {
+        Err(format!("時間 {t} 秒超出範圍：不能是負數"))
+    }
+}
+
 /// `rating`: a whole number from 0 to 5 (3.0 counts). A string, a fraction or
 /// anything out of range is refused rather than read as 0 or 5.
 fn rating_arg(v: Option<&Value>) -> Result<u8, String> {
@@ -655,7 +667,10 @@ impl App {
                     return ToolOutput::error("需要 start 與 end（秒）");
                 };
                 let max = known_length(it.duration);
-                let (start, end) = (a.min(b).clamp(0.0, max), a.max(b).clamp(0.0, max));
+                let (start, end) = (a.min(b), a.max(b));
+                if let Err(e) = within_length(start, max).and(within_length(end, max)) {
+                    return ToolOutput::error(e);
+                }
                 if end - start < 0.05 {
                     return ToolOutput::error("片段太短");
                 }
@@ -678,8 +693,12 @@ impl App {
                 if it.kind != MediaKind::Video {
                     return ToolOutput::error("只有影片可以擷取畫面");
                 }
-                let max = known_length(it.duration);
-                let time = args.get("time").and_then(|v| v.as_f64()).unwrap_or(0.0).clamp(0.0, max);
+                let Some(time) = args.get("time").and_then(|v| v.as_f64()) else {
+                    return ToolOutput::error("需要 time（秒，數字）");
+                };
+                if let Err(e) = within_length(time, known_length(it.duration)) {
+                    return ToolOutput::error(e);
+                }
                 let id = it.id.clone();
                 match self.capture_frame(&id, time) {
                     Ok(path) => ToolOutput::text(format!(
@@ -962,6 +981,20 @@ mod tests {
         app.lib = Some(lib);
         app.mcp_call("add_clip", &json!({ "id": "v", "start": 1, "end": 5 }));
         app.mcp_call("capture_frame", &json!({ "id": "v", "time": 1 }));
+
+        // A time missing or out of range is an error, not frame 0 or the end.
+        app.lib.as_mut().unwrap().items.get_mut("v").unwrap().duration = Some(60.0);
+        for (tool, args) in [
+            ("capture_frame", json!({ "id": "v" })),
+            ("capture_frame", json!({ "id": "v", "time": "10" })),
+            ("capture_frame", json!({ "id": "v", "time": 61 })),
+            ("capture_frame", json!({ "id": "v", "time": -1 })),
+            ("add_clip", json!({ "id": "v", "start": 50, "end": 90 })),
+            ("add_clip", json!({ "id": "v", "start": -5, "end": 10 })),
+        ] {
+            let out = app.mcp_call(tool, &args);
+            assert!(out.is_error, "{tool} {args}");
+        }
         drop(app);
         let _ = std::fs::remove_dir_all(&root);
     }

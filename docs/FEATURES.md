@@ -141,7 +141,7 @@ AI 沒有權限卻要修改資源庫或存取檔案時，OrangeLink 會跳出通
 
 提供的工具：`get_status`（OrangeLink 目前的狀態：資源庫是否開啟或開啟中、背景工作與進度、預覽和選取的項目；沒有開啟資源庫時也能用）、`library_info`、`search_items`、`get_item`、`get_thumbnail`、`list_folders`、`list_tags`、`select_items`、`add_tags`、`remove_tags`、`set_rating`、`set_annotation`、`rename_item`、`create_folder`、`rename_folder`、`delete_empty_folder`、`add_to_folder`、`remove_from_folder`、`create_smart_folder`、`import_files`、`get_subtitles`（含時間的台詞，可搜尋）、`add_clip`、`delete_clip`、`capture_frame`、`set_fields`（自訂欄位）、`list_smart_folders`、`get_signals`（聊天與音量的高峰和每 30 秒的曲線，讓 AI 自己判斷精華並命名）、`find_highlight_candidates`（排入整場處理）、`export_clip`（用輸出預設組輸出，含直式）、`generate_subtitles`（排入語音轉字幕）。匯入、輸出、轉字幕這類耗時工作會立即回傳「已加入佇列」，進度在狀態列的背景工作；AI 可以用 `get_status` 查看是否完成。
 
-權限分三層，預設只能搜尋與查看：設定 →「整合」開啟「允許 AI 修改資源庫」後才能加標籤、評分、整理資料夾和片段（不會刪除素材或檔案）；再開啟「允許 AI 存取檔案」才能用 `import_files`、`capture_frame`、`export_clip`、`generate_subtitles`。AI 每次要求匯入都會在 OrangeLink 跳出確認視窗，列出路徑，你按「確定」才開始，因為匯入的文字檔內容可以被 AI 讀回；整個磁碟或使用者資料夾本身不能由 AI 匯入；路徑會先轉成實際的資料夾再檢查（`..`、`\\?\` 等寫法都一樣），確認視窗顯示的也是轉換後的路徑。AI 給的評分必須是 0 到 5 的整數，否則回報錯誤、不改評分；標籤和名稱會去掉控制字元與改變文字方向的隱形字元（例如 U+202E），標籤最長 128 字、名稱最長 255 字，清理後是空白就拒絕。同時進來的請求各自處理，一個耗時的工具呼叫不會擋住其他請求。
+權限分三層，預設只能搜尋與查看：設定 →「整合」開啟「允許 AI 修改資源庫」後才能加標籤、評分、整理資料夾和片段（不會刪除素材或檔案）；再開啟「允許 AI 存取檔案」才能用 `import_files`、`capture_frame`、`export_clip`、`generate_subtitles`。AI 每次要求匯入都會在 OrangeLink 跳出確認視窗，列出路徑，你按「確定」才開始，因為匯入的文字檔內容可以被 AI 讀回；整個磁碟或使用者資料夾本身不能由 AI 匯入；路徑會先轉成實際的資料夾再檢查（`..`、`\\?\` 等寫法都一樣），確認視窗顯示的也是轉換後的路徑。AI 給的評分必須是 0 到 5 的整數，否則回報錯誤、不改評分；片段和擷取畫面的時間必須在 0 到影片長度之間，超出範圍或沒給時回報錯誤，不會自動移到開頭或結尾；標籤和名稱會去掉控制字元與改變文字方向的隱形字元（例如 U+202E），標籤最長 128 字、名稱最長 255 字，清理後是空白就拒絕。同時進來的請求各自處理，一個耗時的工具呼叫不會擋住其他請求。
 
 MCP 啟用時，匯入後狀態列會提示新素材數量，並可複製整理指令貼給 AI 助理（可在設定中關閉）。
 

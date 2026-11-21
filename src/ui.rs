@@ -851,7 +851,8 @@ impl App {
             }
             Dialog::Integrity(found) => {
                 use crate::app::IntegrityFix as Fix;
-                let refs = self.lib.as_ref().map_or(0, |l| l.missing_folder_refs());
+                // Every frame while the dialog is open: read the cached count.
+                let refs = self.with_sidebar_stats(|s| s.missing_folder_refs);
                 let mut fix = None;
                 window("檢查資源庫").show(ctx, |ui| {
                     ui.set_max_width(480.0);

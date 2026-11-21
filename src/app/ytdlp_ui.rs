@@ -92,7 +92,7 @@ impl Default for YtState {
             run_queue: false,
             running: None,
             log: Vec::new(),
-            show_log: true,
+            show_log: false,
             last_files: Vec::new(),
             pending_import: Vec::new(),
             status: (String::new(), false),
@@ -787,18 +787,17 @@ impl App {
             let text = run.progress.as_ref().map(speed_text).unwrap_or_else(|| t!("準備中…").into());
             ui.add(egui::ProgressBar::new(fraction).text(text).animate(run.progress.is_none()));
         }
-        ui.columns(3, |cols| {
-            let big = |ui: &mut Ui, text: &str, fill: Color32, enabled: bool| {
-                ui.add_enabled(enabled, egui::Button::new(RichText::new(text).color(Color32::WHITE).strong()).fill(fill).min_size([ui.available_width(), 34.0].into()))
-                    .clicked()
-            };
-            if big(&mut cols[0], t!("下載影片"), crate::ui::SOLID_GOOD, !busy) {
+        // One main button in the brand colour; the others plain, and 取消工作
+        // only while there is something to cancel.
+        ui.horizontal(|ui| {
+            let main = egui::Button::new(RichText::new(t!("下載影片")).color(Color32::WHITE).strong()).fill(crate::ui::accent()).min_size([160.0, 32.0].into());
+            if ui.add_enabled(!busy, main).clicked() {
                 actions.push(YtAction::Download);
             }
-            if big(&mut cols[1], t!("加入佇列"), crate::ui::SOLID_INFO, true) {
+            if ui.add(egui::Button::new(t!("加入佇列")).min_size([110.0, 32.0].into())).clicked() {
                 actions.push(YtAction::Enqueue);
             }
-            if big(&mut cols[2], t!("取消工作"), crate::ui::SOLID_DANGER, busy) {
+            if busy && ui.add(egui::Button::new(RichText::new(t!("取消工作")).color(crate::ui::danger())).min_size([110.0, 32.0].into())).clicked() {
                 actions.push(YtAction::Cancel);
             }
         });

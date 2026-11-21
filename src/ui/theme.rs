@@ -145,11 +145,6 @@ pub(crate) const STAR_ON_DARK: Color32 = DARK.star;
 pub(crate) const ERROR_ON_DARK: Color32 = DARK.danger;
 /// The backing of pills over thumbnails.
 pub(crate) const PILL_BG: Color32 = Color32::from_black_alpha(170);
-/// Filled buttons with white text (the download window's big buttons): the
-/// same in both themes, deep enough for the white to read.
-pub(crate) const SOLID_GOOD: Color32 = Color32::from_rgb(40, 140, 70);
-pub(crate) const SOLID_INFO: Color32 = Color32::from_rgb(37, 99, 235);
-pub(crate) const SOLID_DANGER: Color32 = Color32::from_rgb(180, 60, 60);
 
 /// The light theme is on this frame (set at the start of each frame).
 static LIGHT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);

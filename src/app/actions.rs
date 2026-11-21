@@ -517,6 +517,10 @@ impl App {
                 }
             }),
             Action::SetClipRange(id, cid, start, end) => {
+                // A drag keeps clips 0.1 s long, which near either end of a short
+                // clip can reach past the video: kept within it.
+                let length = self.lib.as_ref().and_then(|l| l.items.get(&id)).and_then(|it| it.duration).filter(|d| d.is_finite() && *d > 0.0);
+                let (start, end) = (start.max(0.0), length.map_or(end, |d| end.min(d)));
                 let changed = self.lib.as_ref().and_then(|l| l.items.get(&id)).and_then(|it| it.clips.iter().find(|c| c.id == cid)).is_some_and(|c| (c.start, c.end) != (start, end));
                 if changed && end > start {
                     self.edit_items(&[id], |it| {

@@ -4,6 +4,9 @@
 
 ## [Unreleased]
 
+### 新增
+- 擴充套件：加入自己電腦上的擴充資料夾並信任後，可以讓它替影片找精華候選，結果在剪輯工作台照常審核。格式見 [docs/EXTENSIONS.md](docs/EXTENSIONS.md)。
+
 ## [0.2.0]
 
 > **從 0.1.6 到 0.1.9 版升級的使用者請注意**：這些版本只認有簽章的新版，不會收到 0.2.0 的提示，請到 [GitHub Releases](https://github.com/rightstar2015/OrangeLink/releases) 手動下載一次。之後的版本會照常提示。

@@ -245,8 +245,9 @@ pub fn segments(peaks: &[Peak], before: f64, after: f64, merge: f64, end: f64) -
 /// Why `start..end` was picked, e.g. `聊天 ×3.2、音量 +8 dB、關鍵字：草 ×14`.
 pub fn describe(chat: Option<&[f32]>, hits: Option<&Hits>, loud: Option<&[f32]>, start: f64, end: f64) -> Option<String> {
     let range = |len: usize, delay: usize| {
-        let a = (start.max(0.0) as usize + delay).min(len);
-        let b = ((end.max(0.0).ceil() as usize) + delay).min(len);
+        // Saturating: a damaged clip can end at 1e30 s, which casts to usize::MAX.
+        let a = (start.max(0.0) as usize).saturating_add(delay).min(len);
+        let b = (end.max(0.0).ceil() as usize).saturating_add(delay).min(len);
         a..b.max(a)
     };
     let mut parts = Vec::new();
@@ -276,7 +277,7 @@ pub fn describe(chat: Option<&[f32]>, hits: Option<&Hits>, loud: Option<&[f32]>,
         }
     }
     if let Some(h) = hits {
-        let (a, b) = (start.max(0.0) as u32 + CHAT_DELAY as u32, end.max(0.0).ceil() as u32 + CHAT_DELAY as u32);
+        let (a, b) = ((start.max(0.0) as u32).saturating_add(CHAT_DELAY as u32), (end.max(0.0).ceil() as u32).saturating_add(CHAT_DELAY as u32));
         let mut counts = vec![0usize; h.keywords.len()];
         for &(s, k) in &h.at {
             if (a..b).contains(&s) {
@@ -298,6 +299,16 @@ pub fn describe(chat: Option<&[f32]>, hits: Option<&Hits>, loud: Option<&[f32]>,
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_clip_with_a_huge_end_is_described_without_overflowing() {
+        let hits = Hits { at: vec![(5, 0)], keywords: vec!["草".into()] };
+        let chat = [1.0f32; 10];
+        let loud = [-20.0f32; 10];
+        for (start, end) in [(0.0, 1e30), (1e30, 1e30), (f64::MAX, f64::INFINITY)] {
+            let _ = describe(Some(&chat), Some(&hits), Some(&loud), start, end);
+        }
+    }
 
     fn msg(ms: i64, text: &str, special: bool) -> ChatMessage {
         ChatMessage { offset_ms: Some(ms), time: String::new(), author: "a".into(), text: text.into(), paid: None, special }

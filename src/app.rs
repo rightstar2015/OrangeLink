@@ -3606,7 +3606,8 @@ impl App {
             Some(release) => UpdateState::Available { release },
             None => UpdateState::Latest,
         };
-        if let Some(tag) = prompt_tag.filter(|_| self.config.auto_update) {
+        let skipped = self.config.skipped_update.as_deref();
+        if let Some(tag) = prompt_tag.filter(|tag| self.config.auto_update && skipped != Some(tag.as_str())) {
             if self.dialog.is_none() {
                 self.dialog = Some(Dialog::UpdatePrompt { tag });
             } else {
@@ -4606,6 +4607,22 @@ mod tests {
         quiet.poll_update_check();
         assert_eq!(quiet.update.new_version(), Some("v9.9.9"));
         assert!(quiet.dialog.is_none());
+    }
+
+    #[test]
+    fn a_skipped_version_only_shows_the_badge_and_a_newer_one_prompts_again() {
+        let check = |skipped: &str, found: &str| {
+            let config = Config { auto_update: true, skipped_update: Some(skipped.into()), ..Config::default() };
+            let mut app = App::with_config(&egui::Context::default(), config);
+            let (tx, rx) = std::sync::mpsc::channel();
+            tx.send(Some(crate::update::Release { tag: found.into() })).unwrap();
+            app.update = UpdateState::Checking(rx);
+            app.poll_update_check();
+            assert_eq!(app.update.new_version(), Some(found), "the badge still shows");
+            app.dialog.is_some()
+        };
+        assert!(!check("v9.9.9", "v9.9.9"), "the skipped version opens no window");
+        assert!(check("v9.9.9", "v9.9.10"), "a newer one does");
     }
 
     /// Esc in the search box, a tag or note field, or a settings field.

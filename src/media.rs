@@ -470,8 +470,46 @@ pub fn subtitle_lines(text: &str) -> String {
 }
 
 /// Grabs one frame (or embedded cover art, for audio) as a PNG thumbnail.
+/// A frame of one flat colour (a black fade-in, a "starting soon" card) is
+/// passed over for one later on; when every try is flat, the busiest is kept.
 pub fn thumbnail(ffmpeg_dir: &Path, path: &Path, out: &Path, duration: Option<f64>, side: u32) -> bool {
-    let seek = duration.map(|d| (d * 0.1).min(5.0)).unwrap_or(0.0);
+    let mut best: Option<(f32, PathBuf)> = None;
+    let mut tries = Vec::new();
+    for (i, seek) in thumbnail_seeks(duration).into_iter().enumerate() {
+        // `_thumbnail.png.try1.png`: still a name the library keeps for itself.
+        let shot = if i == 0 {
+            out.to_path_buf()
+        } else {
+            let mut name = out.as_os_str().to_owned();
+            name.push(format!(".try{i}.png"));
+            PathBuf::from(name)
+        };
+        if !grab_frame(ffmpeg_dir, path, &shot, seek, side) {
+            // No picture at all (audio without cover art): a later time won't have one either.
+            if i == 0 {
+                return false;
+            }
+            continue;
+        }
+        tries.push(shot.clone());
+        // A frame `image` can't read is kept as it is.
+        let spread = crate::imaging::decode_file(&shot).map_or(f32::MAX, |img| frame_spread(&img));
+        if best.as_ref().is_none_or(|(s, _)| spread > *s) {
+            best = Some((spread, shot));
+        }
+        if spread >= PLAIN_SPREAD {
+            break;
+        }
+    }
+    let Some((_, best)) = best else { return false };
+    let kept = best == out || std::fs::rename(&best, out).is_ok();
+    for t in tries.iter().filter(|t| t.as_path() != out) {
+        let _ = std::fs::remove_file(t);
+    }
+    kept && out.is_file()
+}
+
+fn grab_frame(ffmpeg_dir: &Path, path: &Path, out: &Path, seek: f64, side: u32) -> bool {
     let scale = format!("scale='min({side},iw)':'min({side},ih)':force_original_aspect_ratio=decrease");
     tool(ffmpeg_dir, "ffmpeg")
         .args(["-v", "error", "-y", "-ss", &format!("{seek:.2}"), "-i"])
@@ -482,6 +520,27 @@ pub fn thumbnail(ffmpeg_dir: &Path, path: &Path, out: &Path, duration: Option<f6
         .map(|s| s.success())
         .unwrap_or(false)
         && out.is_file()
+}
+
+/// Where a video's thumbnail is looked for, in order: early on (10%, at most
+/// 5 s in), then a quarter and half way through.
+fn thumbnail_seeks(duration: Option<f64>) -> Vec<f64> {
+    match duration.filter(|d| d.is_finite() && *d > 0.0) {
+        Some(d) => vec![(d * 0.1).min(5.0), d * 0.25, d * 0.5],
+        None => vec![0.0],
+    }
+}
+
+/// How far a frame's brightness varies (standard deviation, 0–255) under which
+/// it counts as one flat colour.
+const PLAIN_SPREAD: f32 = 8.0;
+
+/// The standard deviation of a frame's brightness, on a 32×32 copy.
+fn frame_spread(img: &image::DynamicImage) -> f32 {
+    let small = img.thumbnail(32, 32).to_luma8();
+    let n = small.pixels().len().max(1) as f32;
+    let mean = small.pixels().map(|p| p.0[0] as f32).sum::<f32>() / n;
+    (small.pixels().map(|p| (p.0[0] as f32 - mean).powi(2)).sum::<f32>() / n).sqrt()
 }
 
 pub fn fmt_duration(secs: f64) -> String {
@@ -510,6 +569,49 @@ mod tests {
 
     fn cue(start: f64, end: f64, text: &str) -> Cue {
         Cue { start, end, text: text.into() }
+    }
+
+    /// A stream that opens on a black screen got a black thumbnail: 860
+    /// of them in a grid can't be told apart.
+    #[test]
+    fn flat_frames_are_told_from_pictures() {
+        let black = image::DynamicImage::ImageRgb8(image::RgbImage::from_pixel(64, 36, image::Rgb([0, 0, 0])));
+        let card = image::DynamicImage::ImageRgb8(image::RgbImage::from_fn(64, 36, |x, _| image::Rgb([200, 120, 40 + (x % 3) as u8])));
+        let picture = image::DynamicImage::ImageRgb8(image::RgbImage::from_fn(64, 36, |x, y| image::Rgb([(x * 4) as u8, (y * 7) as u8, 90])));
+        assert!(frame_spread(&black) < PLAIN_SPREAD);
+        assert!(frame_spread(&card) < PLAIN_SPREAD, "a flat card with a little noise");
+        assert!(frame_spread(&picture) >= PLAIN_SPREAD);
+        assert_eq!(thumbnail_seeks(Some(9.0 * 3600.0)), vec![5.0, 8100.0, 16200.0]);
+        assert_eq!(thumbnail_seeks(Some(20.0)), vec![2.0, 5.0, 10.0]);
+        assert_eq!(thumbnail_seeks(None), vec![0.0]);
+        assert_eq!(thumbnail_seeks(Some(f64::NAN)), vec![0.0]);
+    }
+
+    #[test]
+    fn a_video_thumbnail_passes_over_a_black_opening() {
+        let Some(ff) = ffmpeg_for_test("a_video_thumbnail_passes_over_a_black_opening") else { return };
+        let dir = std::env::temp_dir().join(format!("orangelink-thumb-{}", crate::model::new_id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let video = dir.join("v.mp4");
+        // 4 s of black, then 16 s of test pattern: 10% (2 s) is black, 25% (5 s) isn't.
+        let ok = crate::process::hidden(ff.join("ffmpeg"))
+            .args(["-v", "error", "-y", "-f", "lavfi", "-i", "color=black:size=320x180:rate=10:duration=4", "-f", "lavfi", "-i", "testsrc2=size=320x180:rate=10:duration=16"])
+            .args(["-filter_complex", "[0:v][1:v]concat=n=2:v=1[v]", "-map", "[v]", "-pix_fmt", "yuv420p"])
+            .arg(&video)
+            .status()
+            .unwrap()
+            .success();
+        assert!(ok);
+        let out = dir.join("thumb.png");
+        assert!(thumbnail(&ff, &video, &out, Some(20.0), 256));
+        let img = crate::imaging::decode_file(&out).unwrap();
+        assert!(frame_spread(&img) >= PLAIN_SPREAD, "the thumbnail is the pattern, not the black");
+        let left: Vec<_> = std::fs::read_dir(&dir).unwrap().filter_map(|e| e.ok()).map(|e| e.file_name()).collect();
+        assert_eq!(left.len(), 2, "the other tries are removed: {left:?}");
+        let silent = dir.join("a.wav");
+        assert!(crate::process::hidden(ff.join("ffmpeg")).args(["-v", "error", "-y", "-f", "lavfi", "-i", "anullsrc=d=2"]).arg(&silent).status().unwrap().success());
+        assert!(!thumbnail(&ff, &silent, &dir.join("a.png"), Some(2.0), 256), "audio without a cover has no frame");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

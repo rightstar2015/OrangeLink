@@ -89,12 +89,19 @@ impl App {
         }
     }
 
+    /// Room under the last row for the bar of a multiple selection, so it
+    /// doesn't cover the last items.
+    pub(crate) fn action_bar_room(&self) -> f32 {
+        if self.selected.len() >= 2 && self.viewer.is_none() { 64.0 } else { 0.0 }
+    }
+
     /// Floating pill bar at the bottom-center of the grid when multiple items are selected.
     fn multi_action_bar(&mut self, ctx: &egui::Context, panel_rect: Rect) {
         let n = self.selected.len();
         let sum = self.multi_summary();
         let ids = &sum.ids;
         let in_trash = self.view == View::Trash;
+        let folders = self.with_sidebar_stats(|s| s.folder_flat.clone());
         let t = tokens();
         let pos = pos2(panel_rect.center().x, panel_rect.bottom() - 16.0);
         egui::Area::new(egui::Id::new("multi-action-bar"))
@@ -128,6 +135,21 @@ impl App {
                             });
                             if ui.button(t!("🏷 標籤")).on_hover_text(t!("聚焦右側標籤輸入框")).clicked() {
                                 self.act(Action::FocusTagInput);
+                            }
+                            if !in_trash {
+                                ui.menu_button(t!("📁 資料夾"), |ui| {
+                                    if folders.is_empty() {
+                                        ui.label(RichText::new(t!("尚無資料夾")).weak());
+                                    }
+                                    ScrollArea::vertical().max_height(360.0).show(ui, |ui| {
+                                        for (fid, name, depth) in &folders {
+                                            if ui.button(format!("{}📁 {name}", "    ".repeat(*depth))).clicked() {
+                                                self.act(Action::AddToFolder(ids.clone(), fid.clone()));
+                                                ui.close_menu();
+                                            }
+                                        }
+                                    });
+                                });
                             }
                             if ui.button(t!("F2 改名")).on_hover_text(t!("批次重新命名")).clicked() {
                                 self.act(Action::BatchRename(ids.clone()));
@@ -170,7 +192,7 @@ impl App {
                 Row::Items { .. } => cell_h + gap,
             };
         }
-        let total_h = y;
+        let total_h = y + self.action_bar_room();
 
         let mut scroll = ScrollArea::vertical().id_salt("grid").auto_shrink([false, false]).drag_to_scroll(false);
         if let Some(offset) = self.glide(ui, total_h) {
@@ -585,7 +607,7 @@ impl App {
                 l
             }
         };
-        let (rows, tops, total_h) = (&layout.rows, &layout.tops, layout.total_h);
+        let (rows, tops, total_h) = (&layout.rows, &layout.tops, layout.total_h + self.action_bar_room());
         let row_h = |(_, h, header): &JustifiedRow| if header.is_some() { GROUP_HEADER_H } else { h + label_h + gap };
 
         let mut scroll = ScrollArea::vertical().id_salt("justified").auto_shrink([false, false]).drag_to_scroll(false);
@@ -766,6 +788,7 @@ impl App {
             ui.spacing_mut().item_spacing.y = 0.0;
             let out = scroll.show_rows(ui, row_h, rows.len(), |ui, range| {
                 self.cell_origin.set(ui.max_rect().min - vec2(0.0, range.start as f32 * row_h));
+                let last = range.end == rows.len();
                 for r in range {
                     let idx = match rows[r] {
                         Row::Items { first, .. } => first,
@@ -845,6 +868,9 @@ impl App {
                         self.item_name(ui, name_cell, it, 13.0, color);
                     }
                     self.item_interactions(ui, &resp, it);
+                }
+                if last {
+                    ui.add_space(self.action_bar_room());
                 }
             });
             self.grid_scroll = out.state.offset.y;
@@ -1050,6 +1076,18 @@ fn menu_item(ui: &mut Ui, label: impl Into<egui::WidgetText>, shortcut: &str) ->
 #[cfg(test)]
 mod tests {
     use eframe::egui;
+
+    /// The bar of a multiple selection floated over the last row: those
+    /// items could be neither seen nor clicked.
+    #[test]
+    fn the_grid_leaves_room_under_the_last_row_for_the_selection_bar() {
+        let mut app = crate::app::App::with_config(&egui::Context::default(), crate::config::Config::default());
+        assert_eq!(app.action_bar_room(), 0.0);
+        app.selected.insert("a".into());
+        assert_eq!(app.action_bar_room(), 0.0, "one item: no bar");
+        app.selected.insert("b".into());
+        assert!(app.action_bar_room() >= 50.0);
+    }
 
     #[test]
     fn the_proportional_view_lays_out_rows_once_until_something_changes() {

@@ -40,7 +40,7 @@ impl<T> Reply<T> {
         match self {
             Reply::Pending => None,
             Reply::Done(v) => Some(Ok(v)),
-            Reply::Lost => Some(Err(LOST)),
+            Reply::Lost => Some(Err(crate::i18n::tr(LOST))),
         }
     }
 }
@@ -69,7 +69,7 @@ pub fn ended<T>(rx: &Receiver<T>) -> bool {
 }
 
 /// Said when a worker thread ended without answering. The panic itself is in the log.
-pub const LOST: &str = "背景工作意外結束（詳見記錄）";
+pub const LOST: &str = tk!("背景工作意外結束（詳見記錄）");
 
 /// A local service the settings switch on and off: the MCP server, the browser
 /// extension receiver, the global shortcut.

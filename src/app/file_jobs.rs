@@ -79,7 +79,7 @@ enum FrameError {
 impl std::fmt::Display for FrameError {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
-            FrameError::Nothing => f.write_str("FFmpeg 在這個時間點找不到畫面"),
+            FrameError::Nothing => f.write_str(t!("FFmpeg 在這個時間點找不到畫面")),
             FrameError::Failed(e) => f.write_str(e),
         }
     }
@@ -130,7 +130,7 @@ fn run_frame(ffmpeg: &Path, before: &[&str], input: &Path, after: &[&str], out: 
         _ => {
             let _ = std::fs::remove_file(out);
             if status.is_none() {
-                return Err(FrameError::Failed(if cancel.load(Ordering::Relaxed) { "已取消".into() } else { format!("FFmpeg 超過 {} 秒沒有完成", FRAME_TIMEOUT.as_secs()) }));
+                return Err(FrameError::Failed(if cancel.load(Ordering::Relaxed) { t!("已取消").into() } else { t!("FFmpeg 超過 {n} 秒沒有完成", n = FRAME_TIMEOUT.as_secs()) }));
             }
             match err.lines().rev().find(|l| !l.trim().is_empty()) {
                 Some(line) => Err(FrameError::Failed(line.trim().to_string())),
@@ -148,10 +148,10 @@ impl App {
             return;
         }
         if self.files.copy.is_some() {
-            self.toast("正在匯出，請等目前的匯出完成");
+            self.toast(t!("正在匯出，請等目前的匯出完成"));
             return;
         }
-        let Some(dest) = rfd::FileDialog::new().set_title("匯出到資料夾").pick_folder() else { return };
+        let Some(dest) = rfd::FileDialog::new().set_title(t!("匯出到資料夾")).pick_folder() else { return };
         let Some(lib) = &self.lib else { return };
         // Names are chosen here, so two items of the same name get two files.
         let mut taken = HashSet::new();
@@ -188,22 +188,22 @@ impl App {
         }
         let job = self.files.copy.take().expect("checked");
         let skipped = job.total - job.ok - job.failed;
-        let mut msg = format!("已匯出 {} 個檔案", job.ok);
+        let mut msg = t!("已匯出 {job} 個檔案", job = job.ok);
         if skipped > 0 {
-            msg += &format!("，取消了 {skipped} 個");
+            msg += &t!("，取消了 {skipped} 個", skipped);
         }
         if job.failed > 0 {
-            msg += &format!("，{} 個失敗", job.failed);
+            msg += &t!("，{failed} 個失敗", failed = job.failed);
             self.toast_error(msg);
         } else {
-            self.toast_with(msg, "開啟資料夾", Action::OpenPath(job.dest));
+            self.toast_with(msg, t!("開啟資料夾"), Action::OpenPath(job.dest));
         }
     }
 
     pub(super) fn file_copy_job(&self) -> Option<jobs::BgJob> {
         let job = self.files.copy.as_ref()?;
         let done = job.ok + job.failed;
-        Some(jobs::BgJob::new(jobs::JobKind::FileCopy, "匯出檔案", format!("{done}/{}", job.total), Some(done as f32 / job.total.max(1) as f32)))
+        Some(jobs::BgJob::new(jobs::JobKind::FileCopy, t!("匯出檔案"), format!("{done}/{}", job.total), Some(done as f32 / job.total.max(1) as f32)))
     }
 
     /// Starts saving the video frame at `pos` as a PNG in `captures/`; it is
@@ -211,15 +211,15 @@ impl App {
     pub(crate) fn capture_frame(&mut self, id: &str, pos: f64) -> Result<PathBuf, String> {
         let result = self.start_capture(id, pos);
         if let Err(e) = &result {
-            self.toast(format!("擷取畫面失敗：{e}"));
+            self.toast(t!("擷取畫面失敗：{e}", e));
         }
         result
     }
 
     fn start_capture(&mut self, id: &str, pos: f64) -> Result<PathBuf, String> {
-        let lib = self.lib.as_ref().ok_or("沒有開啟資源庫")?;
-        let ff = self.ffmpeg_dir.clone().ok_or("找不到 FFmpeg")?;
-        let it = lib.items.get(id).ok_or("找不到項目")?;
+        let lib = self.lib.as_ref().ok_or(t!("沒有開啟資源庫"))?;
+        let ff = self.ffmpeg_dir.clone().ok_or(t!("找不到 FFmpeg"))?;
+        let it = lib.items.get(id).ok_or(t!("找不到項目"))?;
         let dir = lib.root.join("captures");
         std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
         let stamp = crate::media::fmt_duration(pos).replace(':', "-");
@@ -259,15 +259,15 @@ impl App {
                     if let Some(key) = importer::path_key(&cap.out) {
                         self.links.link_to.insert(key, LinkTo::Item(cap.id.clone()));
                     }
-                    let msg = format!("已擷取畫面 {}，匯入中", crate::media::fmt_duration(cap.pos));
-                    self.toast_with(msg, "在檔案總管中顯示", Action::RevealPath(cap.out.clone()));
+                    let msg = t!("已擷取畫面 {pos}，匯入中", pos = crate::media::fmt_duration(cap.pos));
+                    self.toast_with(msg, t!("在檔案總管中顯示"), Action::RevealPath(cap.out.clone()));
                     self.start_import(ctx, vec![cap.out], false, None, Vec::new(), false);
                 }
                 // Cancelled from the jobs list: not a failure.
-                Err(_) if cap.cancel.load(Ordering::Relaxed) => self.toast("已取消擷取畫面"),
+                Err(_) if cap.cancel.load(Ordering::Relaxed) => self.toast(t!("已取消擷取畫面")),
                 Err(e) => {
                     crate::log::error("capture", format!("{} 的 {}：{e}", cap.out.display(), crate::media::fmt_precise(cap.pos)));
-                    self.toast(format!("擷取畫面失敗：{e}"));
+                    self.toast(t!("擷取畫面失敗：{e}", e));
                 }
             }
         }
@@ -275,7 +275,7 @@ impl App {
 
     pub(super) fn capture_job(&self) -> Option<jobs::BgJob> {
         let n = self.files.captures.len();
-        (n > 0).then(|| jobs::BgJob::new(jobs::JobKind::Capture, "擷取畫面", if n > 1 { format!("{n} 張") } else { "FFmpeg 處理中".to_string() }, None))
+        (n > 0).then(|| jobs::BgJob::new(jobs::JobKind::Capture, t!("擷取畫面"), if n > 1 { t!("{n} 張", n) } else { t!("FFmpeg 處理中").to_string() }, None))
     }
 
     pub(super) fn cancel_file_jobs(&mut self, kind: jobs::JobKind) {

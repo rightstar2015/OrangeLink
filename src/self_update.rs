@@ -51,13 +51,13 @@ pub fn clean_up() {
 pub fn apply(target: &Path, relaunch: bool) -> Result<(), String> {
     let me = std::env::current_exe().map_err(|e| e.to_string())?;
     if is_dev_build(target) {
-        return Err("不會替換開發版".into());
+        return Err(t!("不會替換開發版").into());
     }
     // A running exe cannot be opened for writing: wait until the old one exits.
     let start = Instant::now();
     while std::fs::OpenOptions::new().write(true).open(target).is_err() {
         if start.elapsed() > WAIT_FOR_EXIT {
-            return Err("舊版 OrangeLink 沒有結束".into());
+            return Err(t!("舊版 OrangeLink 沒有結束").into());
         }
         std::thread::sleep(Duration::from_millis(200));
     }
@@ -73,11 +73,11 @@ pub fn apply(target: &Path, relaunch: bool) -> Result<(), String> {
 fn replace(new: &Path, target: &Path) -> Result<(), String> {
     let old = old_path(target);
     let _ = std::fs::remove_file(&old);
-    std::fs::rename(target, &old).map_err(|e| format!("無法移開舊版：{e}"))?;
+    std::fs::rename(target, &old).map_err(|e| t!("無法移開舊版：{e}", e))?;
     if let Err(e) = std::fs::copy(new, target) {
         let _ = std::fs::remove_file(target);
         let _ = std::fs::rename(&old, target);
-        return Err(format!("無法放上新版：{e}"));
+        return Err(t!("無法放上新版：{e}", e));
     }
     Ok(())
 }
@@ -112,7 +112,7 @@ fn system_tool_in(system_root: Option<&std::ffi::OsStr>, name: &str) -> Result<P
     system_root
         .map(|root| PathBuf::from(root).join("System32").join(format!("{name}.exe")))
         .filter(|p| p.is_file())
-        .ok_or_else(|| format!("找不到 Windows 內建的 {name}.exe（System32）"))
+        .ok_or_else(|| t!("找不到 Windows 內建的 {name}.exe（System32）", name))
 }
 
 /// curl arguments that keep a download, and every redirect, on HTTPS.

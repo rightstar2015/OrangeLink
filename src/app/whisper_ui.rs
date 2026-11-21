@@ -38,7 +38,7 @@ impl App {
         let Some(lib) = &self.lib else { return };
         let media: Vec<String> = ids.into_iter().filter(|id| lib.items.get(id).is_some_and(|i| matches!(i.kind, MediaKind::Video | MediaKind::Audio))).collect();
         if media.is_empty() {
-            return self.toast("只有影片和音訊可以產生字幕");
+            return self.toast(t!("只有影片和音訊可以產生字幕"));
         }
         let w = &mut self.whisper;
         w.open = true;
@@ -75,9 +75,9 @@ impl App {
         if let Some(result) = self.whisper.download.as_ref().and_then(|d| super::state::poll(&d.rx).finished()) {
             self.whisper.download = None;
             self.whisper.status = match result.map_err(str::to_string).and_then(|r| r) {
-                Ok(()) => ("模型下載完成".into(), false),
-                Err(e) if e == whisper::CANCELLED => ("已取消下載模型".into(), false),
-                Err(e) => (format!("模型下載失敗：{e}"), true),
+                Ok(()) => (t!("模型下載完成").into(), false),
+                Err(e) if e == whisper::CANCELLED => (t!("已取消下載模型").into(), false),
+                Err(e) => (t!("模型下載失敗：{e}", e), true),
             };
         }
         let mut finished = None;
@@ -125,15 +125,15 @@ impl App {
                 let more = !self.whisper.queue.is_empty();
                 if !more {
                     let n = self.whisper.done;
-                    self.toast(format!("字幕產生完成：{n} 個素材"));
-                    self.whisper.status = (format!("完成 {n} 個素材，預覽時可在右側點台詞跳轉"), false);
+                    self.toast(t!("字幕產生完成：{n} 個素材", n));
+                    self.whisper.status = (t!("完成 {n} 個素材，預覽時可在右側點台詞跳轉", n), false);
                 }
             }
             Err(e) => {
                 if e != "已取消" {
-                    self.toast(format!("「{}」字幕產生失敗", run.name));
+                    self.toast(t!("「{run}」字幕產生失敗", run = run.name));
                 }
-                self.whisper.status = (format!("「{}」：{e}", run.name), true);
+                self.whisper.status = (t!("「{run}」：{e}", run = run.name, e), true);
             }
         }
     }
@@ -170,8 +170,8 @@ impl App {
     pub(super) fn whisper_job(&self) -> Option<super::jobs::BgJob> {
         let run = self.whisper.running.as_ref()?;
         let left = self.whisper.queue.len();
-        let detail = if left > 0 { format!("{:.0}%（還有 {left} 個）", Self::fraction(run) * 100.0) } else { format!("{:.0}%", Self::fraction(run) * 100.0) };
-        let mut job = super::jobs::BgJob::new(super::jobs::JobKind::Whisper, format!("產生字幕：{}", run.name), detail, Some(Self::fraction(run)));
+        let detail = if left > 0 { t!("{run}%（還有 {left} 個）", run = format!("{:.0}", Self::fraction(run) * 100.0), left) } else { format!("{:.0}%", Self::fraction(run) * 100.0) };
+        let mut job = super::jobs::BgJob::new(super::jobs::JobKind::Whisper, t!("產生字幕：{run}", run = run.name), detail, Some(Self::fraction(run)));
         job.has_window = true;
         Some(job)
     }
@@ -185,7 +185,7 @@ impl App {
             0 => format!("{:.0} MB", mb(got)),
             total => format!("{:.0} / {:.0} MB", mb(got), mb(total)),
         };
-        let mut job = super::jobs::BgJob::new(super::jobs::JobKind::ModelDownload, format!("下載語音模型：{}", self.config.whisper_model), detail, d.progress());
+        let mut job = super::jobs::BgJob::new(super::jobs::JobKind::ModelDownload, t!("下載語音模型：{whisper_model}", whisper_model = self.config.whisper_model), detail, d.progress());
         job.has_window = true;
         Some(job)
     }
@@ -240,24 +240,24 @@ impl App {
         let (mut start, mut download, mut recheck) = (false, false, false);
         let c = &mut self.config;
         let w = &mut self.whisper;
-        egui::Window::new("產生字幕（語音轉文字）").open(&mut open).resizable(false).collapsible(false).default_width(460.0).show(ctx, |ui| {
-            ui.label(format!("等待處理：{} 個素材", w.queue.len()));
+        egui::Window::new(t!("產生字幕（語音轉文字）")).open(&mut open).resizable(false).collapsible(false).default_width(460.0).show(ctx, |ui| {
+            ui.label(t!("等待處理：{n} 個素材", n = w.queue.len()));
             ui.horizontal(|ui| {
-                ui.label("語言：");
-                let shown = LANGUAGES.iter().find(|l| l.0 == c.whisper_language).map_or("自動偵測", |l| l.1);
+                ui.label(t!("語言："));
+                let shown = LANGUAGES.iter().find(|l| l.0 == c.whisper_language).map_or(t!("自動偵測"), |l| crate::i18n::tr(l.1));
                 egui::ComboBox::from_id_salt("whisper-lang").selected_text(shown).show_ui(ui, |ui| {
                     for (code, label) in LANGUAGES {
-                        ui.selectable_value(&mut c.whisper_language, code.to_string(), label);
+                        ui.selectable_value(&mut c.whisper_language, code.to_string(), crate::i18n::tr(label));
                     }
                 });
             });
             ui.horizontal(|ui| {
-                ui.label("模型：");
-                let shown = MODELS.iter().find(|m| m.0 == c.whisper_model).map_or(c.whisper_model.clone(), |m| format!("{}（{}）", m.0, m.1));
+                ui.label(t!("模型："));
+                let shown = MODELS.iter().find(|m| m.0 == c.whisper_model).map_or(c.whisper_model.clone(), |m| t!("{model}（{about}）", model = m.0, about = crate::i18n::tr(m.1)));
                 egui::ComboBox::from_id_salt("whisper-model").width(260.0).selected_text(shown).show_ui(ui, |ui| {
                     for (name, size) in MODELS {
                         let have = if whisper::has_model(name) { " ✔" } else { "" };
-                        ui.selectable_value(&mut c.whisper_model, name.to_string(), format!("{name}（{size}）{have}"));
+                        ui.selectable_value(&mut c.whisper_model, name.to_string(), t!("{name}（{size}）{have}", name, size = crate::i18n::tr(size), have));
                     }
                 });
             });
@@ -266,20 +266,20 @@ impl App {
                 None => {
                     ui.horizontal(|ui| {
                         ui.spinner();
-                        ui.label("檢查 FFmpeg…");
+                        ui.label(t!("檢查 FFmpeg…"));
                     });
                 }
                 Some(false) => {
-                    ui.label(RichText::new("目前的 FFmpeg 不支援語音轉文字。需要 FFmpeg 8 以上的完整版（可在「從網址下載」視窗安裝或更新 FFmpeg）。").color(crate::ui::warning()));
-                    if ui.button("重新檢查").clicked() {
+                    ui.label(RichText::new(t!("目前的 FFmpeg 不支援語音轉文字。需要 FFmpeg 8 以上的完整版（可在「從網址下載」視窗安裝或更新 FFmpeg）。")).color(crate::ui::warning()));
+                    if ui.button(t!("重新檢查")).clicked() {
                         recheck = true;
                     }
                 }
                 Some(true) if !have_model => {
-                    ui.label(RichText::new("第一次使用這個模型需要下載，來源為 Hugging Face（whisper.cpp）。").small());
+                    ui.label(RichText::new(t!("第一次使用這個模型需要下載，來源為 Hugging Face（whisper.cpp）。")).small());
                     ui.horizontal(|ui| match &w.download {
                         None => {
-                            if ui.button("下載模型").clicked() {
+                            if ui.button(t!("下載模型")).clicked() {
                                 download = true;
                             }
                         }
@@ -288,10 +288,10 @@ impl App {
                                 Some(p) => ui.add(egui::ProgressBar::new(p).show_percentage().desired_width(160.0)),
                                 None => ui.spinner(),
                             };
-                            if ui.button("取消下載").clicked() {
+                            if ui.button(t!("取消下載")).clicked() {
                                 d.cancel.store(true, std::sync::atomic::Ordering::Relaxed);
                             }
-                            ui.label(RichText::new("可以先關閉這個視窗").small().weak());
+                            ui.label(RichText::new(t!("可以先關閉這個視窗")).small().weak());
                         }
                     });
                 }
@@ -299,16 +299,16 @@ impl App {
             }
             if let Some(run) = &w.running {
                 ui.separator();
-                ui.label(format!("處理中：{}", run.name));
+                ui.label(t!("處理中：{run}", run = run.name));
                 ui.add(egui::ProgressBar::new(Self::fraction(run)).show_percentage());
             }
             ui.separator();
             ui.horizontal(|ui| {
                 let can = w.filter_ok == Some(true) && have_model && w.running.is_none() && !w.queue.is_empty();
-                if ui.add_enabled(can, egui::Button::new("開始")).clicked() {
+                if ui.add_enabled(can, egui::Button::new(t!("開始"))).clicked() {
                     start = true;
                 }
-                if ui.add_enabled(w.running.is_some() || !w.queue.is_empty(), egui::Button::new("取消")).clicked() {
+                if ui.add_enabled(w.running.is_some() || !w.queue.is_empty(), egui::Button::new(t!("取消"))).clicked() {
                     w.queue.clear();
                     if let Some(run) = &w.running {
                         run.job.cancel();
@@ -319,7 +319,7 @@ impl App {
             if !status.is_empty() {
                 ui.label(RichText::new(status).color(if *error { crate::ui::warning() } else { crate::ui::good() }));
             }
-            ui.label(RichText::new("在本機轉錄，影音不會上傳。中文會自動轉成繁體（台灣用語），台詞可以直接搜尋；建議產生後再校對。").small().weak());
+            ui.label(RichText::new(t!("在本機轉錄，影音不會上傳。中文會自動轉成繁體（台灣用語），台詞可以直接搜尋；建議產生後再校對。")).small().weak());
         });
         self.whisper.open = open;
         if recheck {

@@ -20,9 +20,9 @@ pub const DEFAULT: &str = "Ctrl+Alt+Shift+O";
 /// Ctrl/Alt/Shift/Win, keys are letters, digits, F1..F24, Space and so on.
 pub fn parse(spec: &str) -> Result<HotKey, String> {
     let spec = spec.trim().replace("Win+", "Super+").replace("win+", "super+");
-    let key = HotKey::from_str(&spec).map_err(|e| format!("看不懂快捷鍵「{spec}」：{e}"))?;
+    let key = HotKey::from_str(&spec).map_err(|e| t!("看不懂快捷鍵「{spec}」：{e}", spec, e))?;
     if key.mods.is_empty() {
-        return Err("快捷鍵要包含 Ctrl、Alt、Shift 或 Win，否則一般打字也會觸發".into());
+        return Err(t!("快捷鍵要包含 Ctrl、Alt、Shift 或 Win，否則一般打字也會觸發").into());
     }
     Ok(key)
 }
@@ -40,8 +40,8 @@ impl Hotkey {
     /// `wake` runs when it is pressed, even while the window is minimized.
     pub fn register(spec: &str, wake: impl Fn() + Send + Sync + 'static) -> Result<Self, String> {
         let key = parse(spec)?;
-        let manager = GlobalHotKeyManager::new().map_err(|e| format!("無法使用全域快捷鍵：{e}"))?;
-        manager.register(key).map_err(|_| format!("「{}」已被其他程式使用，請換一組", spec.trim()))?;
+        let manager = GlobalHotKeyManager::new().map_err(|e| t!("無法使用全域快捷鍵：{e}", e))?;
+        manager.register(key).map_err(|_| t!("「{spec}」已被其他程式使用，請換一組", spec = spec.trim()))?;
         let fired = Arc::new(AtomicBool::new(false));
         let (flag, id) = (fired.clone(), key.id());
         GlobalHotKeyEvent::set_event_handler(Some(move |e: GlobalHotKeyEvent| {

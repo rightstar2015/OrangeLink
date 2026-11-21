@@ -162,14 +162,14 @@ impl SortKey {
 
     pub fn label(self) -> &'static str {
         match self {
-            SortKey::Added => "加入時間",
-            SortKey::Modified => "修改時間",
-            SortKey::Name => "名稱",
-            SortKey::FileSize => "檔案大小",
-            SortKey::Dimensions => "尺寸",
-            SortKey::Rating => "評分",
-            SortKey::LastUsed => "最近使用",
-            SortKey::UseCount => "使用次數",
+            SortKey::Added => t!("加入時間"),
+            SortKey::Modified => t!("修改時間"),
+            SortKey::Name => t!("名稱"),
+            SortKey::FileSize => t!("檔案大小"),
+            SortKey::Dimensions => t!("尺寸"),
+            SortKey::Rating => t!("評分"),
+            SortKey::LastUsed => t!("最近使用"),
+            SortKey::UseCount => t!("使用次數"),
         }
     }
 }
@@ -652,10 +652,11 @@ pub struct Toast {
     pub action: Option<(String, Action)>,
 }
 
-/// A message that reports something going wrong.
+/// A message that reports something going wrong. The words are translated to
+/// what the messages of each language use ("fail", "could not", "できません"…).
 pub fn looks_like_error(msg: &str) -> bool {
-    let first = msg.lines().next().unwrap_or_default();
-    ["失敗", "錯誤", "無法", "找不到"].iter().any(|w| first.contains(w))
+    let first = msg.lines().next().unwrap_or_default().to_lowercase();
+    [t!("失敗"), t!("錯誤"), t!("無法"), t!("找不到")].iter().any(|w| first.contains(&w.to_lowercase()))
 }
 
 /// Seconds a toast stays, doubled for errors and toasts with a button.
@@ -972,12 +973,12 @@ impl App {
             }
             Launch::Import(paths) => match app.open_last_library() {
                 Some(lib) => app.pending_import = Some((lib, paths)),
-                None => app.toast_error("沒有開啟過的資源庫可以匯入：請先建立或開啟資源庫，再匯入這些檔案"),
+                None => app.toast_error(t!("沒有開啟過的資源庫可以匯入：請先建立或開啟資源庫，再匯入這些檔案")),
             },
             Launch::AskCreate(path, imports) => {
                 app.open_last_library();
                 app.dialog = Some(Dialog::Confirm {
-                    message: format!("要在「{}」建立新的資源庫嗎？\n（這個位置還不存在或是空資料夾；按「取消」不會建立任何東西）", path.display()),
+                    message: t!("要在「{n}」建立新的資源庫嗎？\n（這個位置還不存在或是空資料夾；按「取消」不會建立任何東西）", n = path.display()),
                     on_yes: Confirmed::CreateLibrary(path, imports),
                 });
             }
@@ -1149,7 +1150,7 @@ impl App {
     /// A message with 復原 for the change just made.
     pub fn toast_undo(&mut self, msg: impl Into<String>) {
         match self.edits.undo.last().map(|s| s.seq) {
-            Some(seq) => self.toast_with(msg, "復原", Action::UndoStep(seq)),
+            Some(seq) => self.toast_with(msg, t!("復原"), Action::UndoStep(seq)),
             None => self.toast(msg),
         }
     }
@@ -1248,15 +1249,15 @@ impl App {
         if let Some(lib) = &mut self.lib {
             if let Err(e) = lib.flush() {
                 crate::log::error("save", format!("切換資源庫前儲存失敗：{e:#}"));
-                parts.push(format!("目前資源庫有修改沒能儲存：\n{e:#}\n切換後沒存到的修改會遺失；留下來的話程式會繼續自動重試儲存。"));
+                parts.push(t!("目前資源庫有修改沒能儲存：\n{e}\n切換後沒存到的修改會遺失；留下來的話程式會繼續自動重試儲存。", e = format!("{:#}", e)));
             } else {
                 lib.backup_if_changed(std::time::Duration::ZERO);
             }
             if self.lib_loading.is_none() {
                 let jobs = self.library_jobs();
                 if !jobs.is_empty() {
-                    let list: String = jobs.iter().map(|j| format!("\n・{j}")).collect();
-                    parts.push(format!("這個資源庫還有工作在進行：{list}\n切換會取消這些工作，結果不會寫進另一個資源庫。"));
+                    let list: String = jobs.iter().map(|j| t!("\n・{job}", job = j)).collect();
+                    parts.push(t!("這個資源庫還有工作在進行：{list}\n切換會取消這些工作，結果不會寫進另一個資源庫。", list));
                 }
             }
         }
@@ -1264,7 +1265,7 @@ impl App {
             return self.switch_library(path);
         }
         self.dialog = Some(Dialog::Confirm {
-            message: format!("{}\n\n按「確定」仍要開啟另一個資源庫，按「取消」留在目前的資源庫。", parts.join("\n\n")),
+            message: t!("{n}\n\n按「確定」仍要開啟另一個資源庫，按「取消」留在目前的資源庫。", n = parts.join("\n\n")),
             on_yes: Confirmed::SwitchLibrary(path),
         });
     }
@@ -1274,12 +1275,12 @@ impl App {
     fn library_jobs(&self) -> Vec<String> {
         let mut jobs = Vec::new();
         if self.import.is_some() {
-            jobs.push("匯入".to_string());
+            jobs.push(t!("匯入").to_string());
         }
         if let Some(job) = self.ytdlp_job() {
             jobs.push(job.name);
         } else if !self.yt.pending_import.is_empty() {
-            jobs.push("匯入 yt-dlp 下載的檔案".to_string());
+            jobs.push(t!("匯入 yt-dlp 下載的檔案").to_string());
         }
         if let Some(job) = self.whisper_job() {
             jobs.push(job.name);
@@ -1289,20 +1290,20 @@ impl App {
         }
         if let Some(job) = self.stream_job() {
             let left = self.stream.queue.len();
-            jobs.push(if left > 0 { format!("{}（還有 {left} 個）", job.name) } else { job.name });
+            jobs.push(if left > 0 { t!("{job}（還有 {left} 個）", job = job.name, left) } else { job.name });
         }
         if self.clips.rx.is_some() {
             let left = self.clips.queue.len();
-            jobs.push(if left > 0 { format!("輸出片段（還有 {left} 個等待中）") } else { "輸出片段".to_string() });
+            jobs.push(if left > 0 { t!("輸出片段（還有 {left} 個等待中）", left) } else { t!("輸出片段").to_string() });
         }
         if !self.files.captures.is_empty() {
-            jobs.push("擷取畫面".to_string());
+            jobs.push(t!("擷取畫面").to_string());
         }
         if self.integrity.is_some() {
-            jobs.push("檢查資源庫".to_string());
+            jobs.push(t!("檢查資源庫").to_string());
         }
         if self.dupes.similar_rx.is_some() || self.dupes.exact_rx.is_some() {
-            jobs.push("找出重複／相似".to_string());
+            jobs.push(t!("找出重複／相似").to_string());
         }
         jobs
     }
@@ -1402,7 +1403,7 @@ impl App {
             Reply::Pending => return,
             Reply::Done(result) => result,
             // Opening panicked: say so instead of showing 正在開啟 forever.
-            Reply::Lost => Err(anyhow::anyhow!(state::LOST)),
+            Reply::Lost => Err(anyhow::anyhow!(crate::i18n::tr(state::LOST))),
         };
         let Some((path, _)) = self.lib_loading.take() else { return };
         match result {
@@ -1444,7 +1445,7 @@ impl App {
                 self.config.save();
                 let unreadable = self.lib.as_ref().map_or(0, |l| l.unreadable.len());
                 if unreadable > 0 {
-                    self.toast(format!("有 {unreadable} 個素材讀取失敗，可在狀態列查看或從備份還原"));
+                    self.toast(t!("有 {unreadable} 個素材讀取失敗，可在狀態列查看或從備份還原", unreadable));
                 }
                 if let Some(note) = self.lib.as_mut().and_then(|l| l.recovered.take()) {
                     self.toast_error(note);
@@ -1456,7 +1457,7 @@ impl App {
             }
             Err(e) => {
                 crate::log::error("library", format!("無法開啟資源庫 {}：{e:#}", path.display()));
-                self.toast(format!("無法開啟資源庫：{e:#}"));
+                self.toast(t!("無法開啟資源庫：{e}", e = format!("{:#}", e)));
             }
         }
     }
@@ -1603,7 +1604,7 @@ impl App {
                 let run: Vec<String> = ids[at..(at + len).min(ids.len())].iter().filter(|id| shown(id)).cloned().collect();
                 at += len;
                 if run.len() > 1 {
-                    runs.push(crate::grouping::Group { label: format!("第 {} 組", runs.len() + 1).into(), start: out.len(), len: run.len() });
+                    runs.push(crate::grouping::Group { label: t!("第 {n} 組", n = runs.len() + 1).into(), start: out.len(), len: run.len() });
                     out.extend(run);
                 }
             }
@@ -1801,7 +1802,7 @@ impl App {
             crate::log::error("import", state::LOST);
             if let Some(run) = self.import.as_mut() {
                 run.failed += 1;
-                run.errors.push(state::LOST.to_string());
+                run.errors.push(crate::i18n::tr(state::LOST).to_string());
             }
             finished = true;
         }
@@ -1814,23 +1815,23 @@ impl App {
             }
             if run.silent {
                 if ok > 0 {
-                    self.toast(format!("監看資料夾：新增 {ok} 個項目"));
+                    self.toast(t!("監看資料夾：新增 {ok} 個項目", ok));
                 }
             } else {
                 let cancelled = run.cancel.load(Ordering::Relaxed);
-                let mut msg = format!("{}：{ok} 個新項目", if cancelled { "匯入已取消" } else { "匯入完成" });
+                let mut msg = t!("{cancelled}：{ok} 個新項目", cancelled = if cancelled { t!("匯入已取消") } else { t!("匯入完成") }, ok);
                 if dup > 0 {
-                    msg += &format!("，略過 {dup} 個重複");
+                    msg += &t!("，略過 {dup} 個重複", dup);
                 }
                 if fail > 0 {
-                    msg += &format!("，{fail} 個失敗");
+                    msg += &t!("，{fail} 個失敗", fail);
                     if let Some(first) = run.errors.first() {
                         msg += &format!("\n{first}");
                     }
                 }
                 if ok > 0 {
                     let ids = run.new;
-                    self.toast_with(msg, "查看", Action::SetView(View::Ids { label: "剛匯入的項目".into(), ids, groups: Vec::new(), source: IdsSource::Plain }));
+                    self.toast_with(msg, t!("查看"), Action::SetView(View::Ids { label: t!("剛匯入的項目").into(), ids, groups: Vec::new(), source: IdsSource::Plain }));
                 } else {
                     self.toast(msg);
                 }
@@ -2133,7 +2134,7 @@ impl App {
             p.pause();
             let f = p.frame_secs();
             p.seek_by(if prev_frame { -f } else { f });
-            jumped = Some(if prev_frame { "−1 格".into() } else { "+1 格".into() });
+            jumped = Some(if prev_frame { t!("−1 格").into() } else { t!("+1 格").into() });
         }
         // J / K / L as in editing programs: backwards and forwards, faster each press.
         let speed = |r: f64| if r < 0.0 { format!("◀◀ {}×", -r) } else { format!("▶ {r}×") };
@@ -2142,7 +2143,7 @@ impl App {
                 Some(r) => jumped = Some(speed(r)),
                 None => {
                     p.seek_by(-5.0);
-                    jumped = Some("−5s（FFmpeg 播放引擎不能倒播）".into());
+                    jumped = Some(t!("−5s（FFmpeg 播放引擎不能倒播）").into());
                 }
             }
         }
@@ -2153,7 +2154,7 @@ impl App {
             let was_playing = p.is_playing() && p.rate() > 0.0;
             let r = p.faster();
             if was_playing && !p.can_change_rate() {
-                jumped = Some("FFmpeg 播放引擎不能變速（設定 →「預覽與播放」可改用 Media Foundation）".into());
+                jumped = Some(t!("FFmpeg 播放引擎不能變速（設定 →「預覽與播放」可改用 Media Foundation）").into());
             } else if r != 1.0 || was_playing {
                 jumped = Some(speed(r));
             }
@@ -2163,11 +2164,11 @@ impl App {
         }
         if plain && k(Key::Home) {
             p.seek(0.0);
-            jumped = Some("開頭".into());
+            jumped = Some(t!("開頭").into());
         }
         if plain && k(Key::End) {
             p.seek((p.duration - p.frame_secs()).max(0.0));
-            jumped = Some("結尾".into());
+            jumped = Some(t!("結尾").into());
         }
         let pos = p.position();
         let (id, duration, landscape) = (p.id.clone(), p.duration, p.has_frames() && p.is_landscape());
@@ -2272,19 +2273,19 @@ impl App {
     fn export_clip(&mut self, id: &str, cid: &str, preset: crate::config::ExportPreset) {
         if self.clips.rx.is_some() {
             self.clips.queue.push_back((id.to_string(), cid.to_string(), preset));
-            self.toast(format!("已加入輸出佇列（{} 個等待中）", self.clips.queue.len()));
+            self.toast(t!("已加入輸出佇列（{n} 個等待中）", n = self.clips.queue.len()));
             return;
         }
         let (Some(lib), Some(ff)) = (&self.lib, self.ffmpeg_dir.clone()) else {
-            self.toast("需要 FFmpeg 才能輸出片段");
+            self.toast(t!("需要 FFmpeg 才能輸出片段"));
             return;
         };
         let Some((it, c)) = lib.items.get(id).and_then(|it| Some((it, it.clips.iter().find(|c| c.id == cid)?))) else {
-            return self.toast("要輸出的片段已經被刪除");
+            return self.toast(t!("要輸出的片段已經被刪除"));
         };
         let dir = preset.folder.clone().unwrap_or_else(|| lib.root.join("captures"));
         if let Err(e) = std::fs::create_dir_all(&dir) {
-            return self.toast(format!("無法建立輸出資料夾 {}：{e}", dir.display()));
+            return self.toast(t!("無法建立輸出資料夾 {dir}：{e}", dir = dir.display(), e));
         }
         let video = it.kind == MediaKind::Video;
         let vertical = preset.shape == crate::config::ExportShape::Vertical;
@@ -2302,11 +2303,11 @@ impl App {
                     let file = std::env::temp_dir().join(format!("orangelink-sub-{}.ass", crate::model::new_id()));
                     match std::fs::write(&file, text) {
                         Ok(()) => subtitles = Some(file),
-                        Err(e) => return self.toast(format!("無法寫入暫存字幕檔：{e}")),
+                        Err(e) => return self.toast(t!("無法寫入暫存字幕檔：{e}", e)),
                     }
                 }
-                None if cues.is_empty() => note = "（找不到字幕，輸出不含字幕的版本；可以先「產生字幕」）",
-                None => note = "（這段沒有字幕）",
+                None if cues.is_empty() => note = t!("（找不到字幕，輸出不含字幕的版本；可以先「產生字幕」）"),
+                None => note = t!("（這段沒有字幕）"),
             }
         }
         let job = crate::export::Export {
@@ -2339,7 +2340,7 @@ impl App {
             ctx.request_repaint();
         });
         self.clips.rx = Some(rx);
-        self.toast(format!("正在輸出片段「{name}」…{note}"));
+        self.toast(t!("正在輸出片段「{name}」…{note}", name, note));
     }
 
     fn poll_clip_export(&mut self, ctx: &egui::Context) {
@@ -2348,7 +2349,7 @@ impl App {
             Reply::Pending => return,
             Reply::Done(result) => result,
             // The next clip in the queue still goes.
-            Reply::Lost => Err(state::LOST.to_string()),
+            Reply::Lost => Err(crate::i18n::tr(state::LOST).to_string()),
         };
         self.clips.rx = None;
         match result {
@@ -2359,14 +2360,14 @@ impl App {
                     if let (Some(src), Some(key)) = (self.links.clips.remove(&path), importer::path_key(&path)) {
                         self.links.link_to.insert(key, LinkTo::Item(src));
                     }
-                    self.toast_with("片段輸出完成，匯入中", "在檔案總管中顯示", Action::RevealPath(path.clone()));
+                    self.toast_with(t!("片段輸出完成，匯入中"), t!("在檔案總管中顯示"), Action::RevealPath(path.clone()));
                     self.start_import(ctx, vec![path], false, None, Vec::new(), false);
                 } else {
-                    self.toast_with("片段輸出完成", "在檔案總管中顯示", Action::RevealPath(path));
+                    self.toast_with(t!("片段輸出完成"), t!("在檔案總管中顯示"), Action::RevealPath(path));
                 }
             }
-            Err(e) if e == crate::export::CANCELLED => self.toast("已取消輸出片段"),
-            Err(e) => self.toast_error(format!("輸出片段失敗：{e}")),
+            Err(e) if e == crate::export::CANCELLED => self.toast(t!("已取消輸出片段")),
+            Err(e) => self.toast_error(t!("輸出片段失敗：{e}", e)),
         }
         // A clip that can't start (deleted, its folder can't be made) says so and
         // the next one goes; nothing else would start the rest of the queue.
@@ -2380,8 +2381,8 @@ impl App {
     pub(super) fn clip_export_job(&self) -> Option<jobs::BgJob> {
         self.clips.rx.as_ref()?;
         let left = self.clips.queue.len();
-        let detail = if left > 0 { format!("還有 {left} 個等待中") } else { "FFmpeg 處理中".to_string() };
-        Some(jobs::BgJob::new(jobs::JobKind::ClipExport, "輸出片段", detail, None))
+        let detail = if left > 0 { t!("還有 {left} 個等待中", left) } else { t!("FFmpeg 處理中").to_string() };
+        Some(jobs::BgJob::new(jobs::JobKind::ClipExport, t!("輸出片段"), detail, None))
     }
 
     /// Stops the clip being written and drops the ones waiting.
@@ -2444,8 +2445,8 @@ impl App {
         let root = lib.root.clone();
         let ff = self.ffmpeg_dir.clone();
         let label = match &target {
-            Some(id) => format!("與「{}」相似", lib.items.get(id).map(|i| i.name.as_str()).unwrap_or("?")),
-            None => "可能重複的素材".to_string(),
+            Some(id) => t!("與「{i}」相似", i = lib.items.get(id).map(|i| i.name.as_str()).unwrap_or("?")),
+            None => t!("可能重複的素材").to_string(),
         };
         let limit = if target.is_some() { self.similar_near } else { self.similar_dupes };
         let ctx = self.egui_ctx.clone();
@@ -2462,7 +2463,7 @@ impl App {
             ctx.request_repaint();
         });
         self.dupes.similar_rx = Some(rx);
-        self.toast("正在比對相似的素材…");
+        self.toast(t!("正在比對相似的素材…"));
     }
 
     fn poll_similarity(&mut self) {
@@ -2472,7 +2473,7 @@ impl App {
             Reply::Done(found) => found,
             Reply::Lost => {
                 self.dupes.similar_rx = None;
-                return self.toast_error(format!("比對相似的素材失敗：{}", state::LOST));
+                return self.toast_error(t!("比對相似的素材失敗：{state}", state = crate::i18n::tr(state::LOST)));
             }
         };
         self.dupes.similar_rx = None;
@@ -2506,7 +2507,7 @@ impl App {
             }
         }
         if check.is_empty() {
-            return self.show_results("完全相同的檔案".into(), sure, IdsSource::Exact, true);
+            return self.show_results(t!("完全相同的檔案").into(), sure, IdsSource::Exact, true);
         }
         let ctx = self.egui_ctx.clone();
         let (tx, rx) = std::sync::mpsc::channel();
@@ -2520,7 +2521,7 @@ impl App {
             ctx.request_repaint();
         });
         self.dupes.exact_rx = Some(rx);
-        self.toast("正在比對大檔案的內容…");
+        self.toast(t!("正在比對大檔案的內容…"));
     }
 
     /// A fresh cancel flag for a duplicate search; the one before it is stopped.
@@ -2533,9 +2534,9 @@ impl App {
     /// The duplicate or similarity search under way, for the status bar's jobs list.
     pub(super) fn dup_search_job(&self) -> Option<jobs::BgJob> {
         let name = if self.dupes.similar_rx.is_some() {
-            "比對相似的素材"
+            t!("比對相似的素材")
         } else if self.dupes.exact_rx.is_some() {
-            "比對大檔案的內容"
+            t!("比對大檔案的內容")
         } else {
             return None;
         };
@@ -2556,11 +2557,11 @@ impl App {
             Reply::Done(groups) => groups,
             Reply::Lost => {
                 self.dupes.exact_rx = None;
-                return self.toast_error(format!("找出完全相同的檔案失敗：{}", state::LOST));
+                return self.toast_error(t!("找出完全相同的檔案失敗：{state}", state = crate::i18n::tr(state::LOST)));
             }
         };
         self.dupes.exact_rx = None;
-        self.show_results("完全相同的檔案".into(), groups, IdsSource::Exact, true);
+        self.show_results(t!("完全相同的檔案").into(), groups, IdsSource::Exact, true);
     }
 
     /// Shows result groups, each led by the item to keep (highest rating, then
@@ -2569,7 +2570,7 @@ impl App {
         let Some(lib) = &self.lib else { return };
         groups.retain(|g| g.len() > 1);
         if groups.is_empty() {
-            self.toast(format!("{label}：沒有找到"));
+            self.toast(t!("{label}：沒有找到", label));
             if matches!(&self.view, View::Ids { source: s, .. } if *s == source) {
                 self.view = View::Ids { label, ids: Vec::new(), groups: Vec::new(), source };
             }
@@ -2582,7 +2583,7 @@ impl App {
             groups.sort_by_key(|g| (std::cmp::Reverse(g.len()), g[0].clone()));
         }
         let total: usize = groups.iter().map(Vec::len).sum();
-        self.toast(if grouped { format!("{label}：{} 組、{total} 個項目", groups.len()) } else { format!("{label}：{total} 個項目") });
+        self.toast(if grouped { t!("{label}：{n} 組、{total} 個項目", label, n = groups.len(), total) } else { t!("{label}：{total} 個項目", label, total) });
         let lens = if grouped { groups.iter().map(Vec::len).collect() } else { Vec::new() };
         self.view = View::Ids { label, ids: groups.concat(), groups: lens, source };
         self.selected.clear();
@@ -2626,7 +2627,7 @@ impl App {
             kept += 1;
         }
         if new.is_empty() {
-            return self.toast("先在要保留的項目上點一下（每組選一個）");
+            return self.toast(t!("先在要保留的項目上點一下（每組選一個）"));
         }
         let ids: Vec<String> = new.keys().cloned().collect();
         self.edit_items(&ids, |it| {
@@ -2635,8 +2636,8 @@ impl App {
             }
         });
         self.selected.clear();
-        let what = if merge { "合併" } else { "保留" };
-        self.toast_undo(format!("{kept} 組各{what}一個，{trashed} 個移到垃圾桶"));
+        let what = if merge { t!("合併") } else { t!("保留") };
+        self.toast_undo(t!("{kept} 組各{what}一個，{trashed} 個移到垃圾桶", kept, what, trashed));
     }
 
     /// Runs the search the results came from again (after changing the threshold).
@@ -2949,7 +2950,7 @@ impl App {
                 count += 1;
             }
         }
-        self.toast_undo(format!("已重新命名 {count} 個項目"));
+        self.toast_undo(t!("已重新命名 {count} 個項目", count));
     }
 
     fn delete_message(&self, ids: &[String]) -> String {
@@ -2968,18 +2969,23 @@ impl App {
     /// Items `delete_forever` left because their metadata.json couldn't go.
     fn report_kept_items(&mut self, kept: usize) {
         if kept > 0 {
-            self.toast_error(format!("{kept} 個項目無法刪除（檔案可能正被其他程式使用），仍留在原處；關閉那個程式後再試一次"));
+            self.toast_error(t!("{kept} 個項目無法刪除（檔案可能正被其他程式使用），仍留在原處；關閉那個程式後再試一次", kept));
         }
     }
 
     fn report_delete_failures(&mut self, failed: Vec<PathBuf>) {
         if let Some(first) = failed.first() {
-            self.toast(format!("{} 個原始檔案無法刪除（可能正被其他程式使用）：\n{}", failed.len(), first.display()));
+            self.toast(t!("{n} 個原始檔案無法刪除（可能正被其他程式使用）：\n{path}", n = failed.len(), path = first.display()));
         }
     }
 
     /// Applies theme and UI scale from the config.
     pub fn apply_settings(&self, ctx: &egui::Context) {
+        // Tests make apps with default settings and check Chinese text; the
+        // language is set once for the whole process, so they leave it alone.
+        if !cfg!(test) {
+            crate::i18n::set(self.config.language.unwrap_or_else(crate::i18n::Lang::system));
+        }
         ctx.set_theme(match self.config.theme {
             ThemeSetting::Dark => egui::ThemePreference::Dark,
             ThemeSetting::Light => egui::ThemePreference::Light,
@@ -3005,7 +3011,7 @@ impl App {
             want,
             |m| (m.port, m.token.clone()),
             |(port, token)| {
-                crate::mcp::McpServer::start(port, token, ctx, mcp_tools::tool_defs()).map_err(|e| format!("無法在連接埠 {port} 啟動：{e}"))
+                crate::mcp::McpServer::start(port, token, ctx, mcp_tools::tool_defs()).map_err(|e| t!("無法在連接埠 {port} 啟動：{e}", port, e))
             },
         );
     }
@@ -3028,7 +3034,7 @@ impl App {
         self.web.sync(
             want,
             |w| (w.port, w.token.clone()),
-            |(port, token)| crate::webclip::WebServer::start(port, token, ctx).map_err(|e| format!("無法在連接埠 {port} 啟動：{e}")),
+            |(port, token)| crate::webclip::WebServer::start(port, token, ctx).map_err(|e| t!("無法在連接埠 {port} 啟動：{e}", port, e)),
         );
     }
 
@@ -3072,13 +3078,13 @@ impl App {
         let Some(lib) = &self.lib else { return };
         let paths: Vec<PathBuf> = ids.iter().filter_map(|id| lib.items.get(id)).map(|it| lib.file_path(it)).filter(|p| p.is_file()).collect();
         if paths.is_empty() {
-            self.toast("沒有符合的素材");
+            self.toast(t!("沒有符合的素材"));
             return;
         }
         if crate::clipboard::copy_files(&paths) {
             self.mark_used(&ids);
             let name = paths[0].file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
-            self.toast(if paths.len() == 1 { format!("已複製「{name}」") } else { format!("已複製 {} 個檔案", paths.len()) });
+            self.toast(if paths.len() == 1 { t!("已複製「{name}」", name) } else { t!("已複製 {n} 個檔案", n = paths.len()) });
             self.send_back(ctx);
         }
     }
@@ -3098,7 +3104,7 @@ impl App {
             let out = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| self.mcp_call(&call.name, &call.args))).unwrap_or_else(|p| {
                 let why = p.downcast_ref::<&str>().map(|s| s.to_string()).or_else(|| p.downcast_ref::<String>().cloned()).unwrap_or_default();
                 crate::log::error("mcp", format!("{} 發生內部錯誤：{why}", call.name));
-                crate::mcp::ToolOutput::error(format!("OrangeLink 執行 {} 時發生內部錯誤（詳見記錄）", call.name))
+                crate::mcp::ToolOutput::error(t!("OrangeLink 執行 {call} 時發生內部錯誤（詳見記錄）", call = call.name))
             });
             let _ = call.reply.send(out);
         }
@@ -3140,7 +3146,7 @@ impl App {
         self.mark_used(&used);
         self.drag_out_pos = pos.unwrap_or(screen.center());
         if let Err(e) = drag::start_drag(frame, drag::DragItem::Files(paths), image, |_, _| {}, drag::Options::default()) {
-            self.toast(format!("無法拖曳到外部程式：{e}"));
+            self.toast(t!("無法拖曳到外部程式：{e}", e));
         }
         self.release_pointer = true;
         ctx.request_repaint();
@@ -3156,7 +3162,7 @@ impl App {
             }
             Confirmed::CreateLibrary(path, imports) => {
                 if let Err(e) = Library::create(&path) {
-                    return self.toast_error(format!("建立資源庫失敗：{e:#}"));
+                    return self.toast_error(t!("建立資源庫失敗：{e}", e = format!("{:#}", e)));
                 }
                 if !imports.is_empty() {
                     self.pending_import = Some((path.clone(), imports));
@@ -3165,7 +3171,7 @@ impl App {
             }
             Confirmed::AiImport { paths, link } => {
                 if self.import_running() {
-                    self.toast("目前有匯入正在進行，請稍後再請 AI 匯入");
+                    self.toast(t!("目前有匯入正在進行，請稍後再請 AI 匯入"));
                 } else {
                     self.act(Action::StartImport { paths, link });
                 }
@@ -3190,7 +3196,7 @@ impl App {
                     self.thumbs.tex.remove(id);
                     self.selected.remove(id);
                 }
-                self.toast(format!("已永久刪除 {} 個項目", ids.len() - kept));
+                self.toast(t!("已永久刪除 {n} 個項目", n = ids.len() - kept));
                 self.report_delete_failures(failed);
                 self.report_kept_items(kept);
             }
@@ -3203,7 +3209,7 @@ impl App {
                     self.thumbs.tex.remove(id);
                 }
                 self.selected.clear();
-                self.toast(format!("已清空垃圾桶（{} 個項目）", ids.len() - kept));
+                self.toast(t!("已清空垃圾桶（{n} 個項目）", n = ids.len() - kept));
                 self.report_kept_items(kept);
             }
             Confirmed::DeleteFolder(id) => {
@@ -3219,7 +3225,7 @@ impl App {
             Confirmed::SwitchLibrary(_) | Confirmed::CloseUnsaved | Confirmed::AiImport { .. } | Confirmed::UndoAi { .. } | Confirmed::CreateLibrary(..) => {}
             Confirmed::DeleteField(name) => {
                 lib.delete_field(&name);
-                self.toast(format!("已刪除欄位「{name}」"));
+                self.toast(t!("已刪除欄位「{name}」", name));
             }
         }
     }
@@ -3261,7 +3267,7 @@ impl App {
     fn export_premiere_xml(&mut self, ids: Vec<String>) {
         let Some(lib) = &self.lib else { return };
         if !ids.iter().any(|id| lib.items.get(id).is_some_and(|it| crate::premiere::is_exportable(lib, it))) {
-            self.toast("沒有可匯出的項目：Premiere 只能使用圖片、影片和音訊（字幕、XML 等其他檔案會略過）");
+            self.toast(t!("沒有可匯出的項目：Premiere 只能使用圖片、影片和音訊（字幕、XML 等其他檔案會略過）"));
             return;
         }
         self.premiere_dialog = Some(ids);
@@ -3276,26 +3282,26 @@ impl App {
         let mut open = true;
         let mut go = false;
         let c = &mut self.config;
-        egui::Window::new("匯出 Premiere 用 XML").open(&mut open).resizable(false).collapsible(false).anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0]).show(ctx, |ui| {
-            ui.label(format!("{count} 個項目會放進素材箱（依資源庫資料夾分組），片段是子剪輯。"));
+        egui::Window::new(t!("匯出 Premiere 用 XML")).open(&mut open).resizable(false).collapsible(false).anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0]).show(ctx, |ui| {
+            ui.label(t!("{count} 個項目會放進素材箱（依資源庫資料夾分組），片段是子剪輯。", count));
             ui.add_space(4.0);
-            ui.add_enabled(clips > 0, egui::Checkbox::new(&mut c.premiere_sequence, format!("同時建立序列：{clips} 個片段依序排在時間軸上")))
-                .on_hover_text("每段開頭有 marker，名稱是片段名稱，註解是精華候選的原因");
-            ui.add_enabled(vertical > 0, egui::Checkbox::new(&mut c.premiere_vertical, format!("另建 1080×1920 直式序列（{vertical} 個影片片段，套用 9:16 框的位置）")));
+            ui.add_enabled(clips > 0, egui::Checkbox::new(&mut c.premiere_sequence, t!("同時建立序列：{clips} 個片段依序排在時間軸上", clips)))
+                .on_hover_text(t!("每段開頭有 marker，名稱是片段名稱，註解是精華候選的原因"));
+            ui.add_enabled(vertical > 0, egui::Checkbox::new(&mut c.premiere_vertical, t!("另建 1080×1920 直式序列（{vertical} 個影片片段，套用 9:16 框的位置）", vertical)));
             ui.add_enabled_ui(clips > 0 && (c.premiere_sequence || c.premiere_vertical), |ui| {
                 ui.horizontal(|ui| {
-                    ui.label("片段間隔");
-                    ui.selectable_value(&mut c.premiere_gap, 0.0, "無");
-                    ui.selectable_value(&mut c.premiere_gap, 1.0, "1 秒");
+                    ui.label(t!("片段間隔"));
+                    ui.selectable_value(&mut c.premiere_gap, 0.0, t!("無"));
+                    ui.selectable_value(&mut c.premiere_gap, 1.0, t!("1 秒"));
                 });
             });
             if clips == 0 {
-                ui.label(egui::RichText::new("選取的項目沒有片段，所以不能建立序列。").small().weak());
+                ui.label(egui::RichText::new(t!("選取的項目沒有片段，所以不能建立序列。")).small().weak());
             }
             ui.add_space(6.0);
             ui.horizontal(|ui| {
-                go = ui.button("匯出…").clicked();
-                cancel = ui.button("取消").clicked();
+                go = ui.button(t!("匯出…")).clicked();
+                cancel = ui.button(t!("取消")).clicked();
             });
         });
         if !open || cancel {
@@ -3318,11 +3324,11 @@ impl App {
             .count();
         let skipped = ids.len() - usable;
         if usable == 0 {
-            self.toast("沒有可匯出的項目：Premiere 只能使用圖片、影片和音訊（字幕、XML 等其他檔案會略過）");
+            self.toast(t!("沒有可匯出的項目：Premiere 只能使用圖片、影片和音訊（字幕、XML 等其他檔案會略過）"));
             return;
         }
         let Some(path) = rfd::FileDialog::new()
-            .set_title("匯出 Premiere 用 XML")
+            .set_title(t!("匯出 Premiere 用 XML"))
             .add_filter("Final Cut Pro XML", &["xml"])
             .set_file_name(format!("{}.xml", lib.name()))
             .save_file()
@@ -3333,16 +3339,16 @@ impl App {
         self.mark_used(&ids);
         match std::fs::write(&path, xml) {
             Ok(_) => {
-                let mut msg = format!("已匯出 {usable} 個項目。在 Premiere 選「檔案 → 匯入」並選這個 XML");
+                let mut msg = t!("已匯出 {usable} 個項目。在 Premiere 選「檔案 → 匯入」並選這個 XML", usable);
                 if seq.sequence || seq.vertical {
-                    msg += "；序列在專案面板的最下面";
+                    msg += t!("；序列在專案面板的最下面");
                 }
                 if skipped > 0 {
-                    msg += &format!("\n略過 {skipped} 個 Premiere 無法使用的檔案（字幕、文件或遺失的檔案）");
+                    msg += &t!("\n略過 {skipped} 個 Premiere 無法使用的檔案（字幕、文件或遺失的檔案）", skipped);
                 }
-                self.toast_with(msg, "在檔案總管中顯示", Action::RevealPath(path.clone()));
+                self.toast_with(msg, t!("在檔案總管中顯示"), Action::RevealPath(path.clone()));
             }
-            Err(e) => self.toast(format!("匯出失敗：{e}")),
+            Err(e) => self.toast(t!("匯出失敗：{e}", e)),
         }
     }
 }
@@ -3419,7 +3425,7 @@ impl eframe::App for App {
                     ui.vertical_centered(|ui| {
                         ui.add_space(ui.available_height() * 0.4);
                         ui.spinner();
-                        ui.label(format!("正在開啟資源庫…\n{name}"));
+                        ui.label(t!("正在開啟資源庫…\n{name}", name));
                     });
                 });
             });
@@ -3490,13 +3496,13 @@ impl eframe::App for App {
                         Err(e) => {
                             let msg = format!("{e:#}");
                             if self.save_error.is_none() {
-                                self.toast_error(format!("儲存失敗，會自動重試：{msg}"));
+                                self.toast_error(t!("儲存失敗，會自動重試：{msg}", msg));
                             }
                             self.save_error = Some(msg);
                         }
                         Ok(()) => {
                             if self.save_error.take().is_some() {
-                                self.toast("之前沒存到的修改已經儲存");
+                                self.toast(t!("之前沒存到的修改已經儲存"));
                             }
                         }
                     }
@@ -3525,9 +3531,7 @@ impl App {
             crate::log::error("save", format!("關閉前儲存失敗：{e:#}"));
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             self.dialog = Some(Dialog::Confirm {
-                message: format!(
-                    "有修改沒能儲存：\n{e:#}\n\n按「確定」仍要關閉，沒存到的修改會遺失。\n按「取消」留在程式中，處理好問題（例如關掉鎖住檔案的程式、清出磁碟空間）後再關閉一次即可重試。"
-                ),
+                message: t!("有修改沒能儲存：\n{e}\n\n按「確定」仍要關閉，沒存到的修改會遺失。\n按「取消」留在程式中，處理好問題（例如關掉鎖住檔案的程式、清出磁碟空間）後再關閉一次即可重試。", e = format!("{:#}", e)),
                 on_yes: Confirmed::CloseUnsaved,
             });
         }
@@ -3606,7 +3610,7 @@ impl App {
             if self.dialog.is_none() {
                 self.dialog = Some(Dialog::UpdatePrompt { tag });
             } else {
-                self.toast_with(format!("偵測到 GitHub 上有新版本 {tag}"), "查看更新", Action::ShowUpdatePrompt);
+                self.toast_with(t!("偵測到 GitHub 上有新版本 {tag}", tag), t!("查看更新"), Action::ShowUpdatePrompt);
             }
         }
     }
@@ -3743,12 +3747,12 @@ fn originals_policy(config: &Config) -> Originals {
 /// The question before deleting `count` items for good, `linked` of them kept
 /// in place: it says what happens to those originals.
 fn delete_message(count: usize, linked: usize, policy: Originals) -> String {
-    let mut msg = format!("永久刪除 {count} 個項目？此動作無法復原。");
+    let mut msg = t!("永久刪除 {count} 個項目？此動作無法復原。", count);
     if linked > 0 {
         msg += &match policy {
-            Originals::Keep => format!("\n\n其中 {linked} 個是「保留在原位置」的檔案：只會從資源庫移除，硬碟上的原始檔案會保留。"),
-            Originals::RecycleBin => format!("\n\n⚠ 其中 {linked} 個是「保留在原位置」的檔案：原始檔案會被移到 Windows 資源回收筒。"),
-            Originals::Erase => format!("\n\n⚠ 其中 {linked} 個是「保留在原位置」的檔案：原始檔案會從硬碟上直接刪除，無法還原！"),
+            Originals::Keep => t!("\n\n其中 {linked} 個是「保留在原位置」的檔案：只會從資源庫移除，硬碟上的原始檔案會保留。", linked),
+            Originals::RecycleBin => t!("\n\n⚠ 其中 {linked} 個是「保留在原位置」的檔案：原始檔案會被移到 Windows 資源回收筒。", linked),
+            Originals::Erase => t!("\n\n⚠ 其中 {linked} 個是「保留在原位置」的檔案：原始檔案會從硬碟上直接刪除，無法還原！", linked),
         };
     }
     msg

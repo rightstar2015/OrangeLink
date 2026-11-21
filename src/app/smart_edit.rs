@@ -12,7 +12,7 @@ impl App {
         };
         let Some((_, f)) = &mut self.smart_edit else { return };
         let (mut open, mut save, mut cancel) = (true, false, false);
-        egui::Window::new(format!("智慧資料夾條件：{name}"))
+        egui::Window::new(t!("智慧資料夾條件：{name}", name))
             .id(egui::Id::new("smart-edit"))
             .open(&mut open)
             .resizable(false)
@@ -20,11 +20,11 @@ impl App {
             .default_width(460.0)
             .show(ctx, |ui| {
                 egui::Grid::new("smart-edit-grid").num_columns(2).spacing([12.0, 8.0]).show(ui, |ui| {
-                    ui.label("搜尋");
-                    ui.add(egui::TextEdit::singleline(&mut f.search).hint_text("可用搜尋語法，例如 #直播 -草稿").desired_width(280.0));
+                    ui.label(t!("搜尋"));
+                    ui.add(egui::TextEdit::singleline(&mut f.search).hint_text(t!("可用搜尋語法，例如 #直播 -草稿")).desired_width(280.0));
                     ui.end_row();
 
-                    ui.label("類型");
+                    ui.label(t!("類型"));
                     ui.horizontal(|ui| {
                         for k in MediaKind::ALL {
                             let mut on = f.kinds.contains(&k) || f.kind == Some(k);
@@ -45,67 +45,67 @@ impl App {
                     });
                     ui.end_row();
 
-                    ui.label("長度");
+                    ui.label(t!("長度"));
                     ui.horizontal(|ui| {
-                        minutes(ui, "至少", &mut f.min_duration);
-                        minutes(ui, "最多", &mut f.max_duration);
+                        minutes(ui, t!("至少"), &mut f.min_duration);
+                        minutes(ui, t!("最多"), &mut f.max_duration);
                     });
                     ui.end_row();
 
-                    ui.label("片段");
+                    ui.label(t!("片段"));
                     ui.horizontal(|ui| {
-                        either(ui, "smart-clips", &mut f.has_clips, ["不限", "有片段", "沒有片段"]);
-                        ui.checkbox(&mut f.has_candidates, "有還沒處理的精華候選");
+                        either(ui, "smart-clips", &mut f.has_clips, [t!("不限"), t!("有片段"), t!("沒有片段")]);
+                        ui.checkbox(&mut f.has_candidates, t!("有還沒處理的精華候選"));
                     });
                     ui.end_row();
 
-                    ui.label("字幕");
-                    either(ui, "smart-sub", &mut f.has_subtitle, ["不限", "有字幕", "沒有字幕"]).on_hover_text("只看影片和音訊：Whisper 產生的、手動指定的，或資源庫裡同名的 .srt／.vtt");
+                    ui.label(t!("字幕"));
+                    either(ui, "smart-sub", &mut f.has_subtitle, [t!("不限"), t!("有字幕"), t!("沒有字幕")]).on_hover_text(t!("只看影片和音訊：Whisper 產生的、手動指定的，或資源庫裡同名的 .srt／.vtt"));
                     ui.end_row();
 
-                    ui.label("使用");
+                    ui.label(t!("使用"));
                     ui.horizontal(|ui| {
-                        ui.checkbox(&mut f.never_used, "從未使用");
-                        days(ui, "最近", &mut f.used_days, "天內用過");
+                        ui.checkbox(&mut f.never_used, t!("從未使用"));
+                        days(ui, t!("最近"), &mut f.used_days, t!("天內用過"));
                     });
                     ui.end_row();
 
-                    ui.label("加入時間");
-                    days(ui, "最近", &mut f.added_days, "天內加入");
+                    ui.label(t!("加入時間"));
+                    days(ui, t!("最近"), &mut f.added_days, t!("天內加入"));
                     ui.end_row();
 
-                    ui.label("評分");
-                    ui.add(egui::Slider::new(&mut f.min_rating, 0..=5).text("星以上"));
+                    ui.label(t!("評分"));
+                    ui.add(egui::Slider::new(&mut f.min_rating, 0..=5).text(t!("星以上")));
                     ui.end_row();
 
-                    ui.label("其他");
+                    ui.label(t!("其他"));
                     ui.horizontal_wrapped(|ui| {
-                        ui.checkbox(&mut f.missing, "找不到原始檔");
-                        ui.checkbox(&mut f.untagged, "未標籤");
-                        ui.checkbox(&mut f.uncategorized, "未分類");
-                        ui.checkbox(&mut f.unrated, "未評分");
+                        ui.checkbox(&mut f.missing, t!("找不到原始檔"));
+                        ui.checkbox(&mut f.untagged, t!("未標籤"));
+                        ui.checkbox(&mut f.uncategorized, t!("未分類"));
+                        ui.checkbox(&mut f.unrated, t!("未評分"));
                     });
                     ui.end_row();
                 });
                 ui.add_space(4.0);
-                ui.label(egui::RichText::new("標籤、顏色、副檔名、尺寸等條件保持原樣；要改這些，先在工具列篩選，再右鍵選「以目前的篩選條件更新」。").small().weak());
+                ui.label(egui::RichText::new(t!("標籤、顏色、副檔名、尺寸等條件保持原樣；要改這些，先在工具列篩選，再右鍵選「以目前的篩選條件更新」。")).small().weak());
                 ui.add_space(4.0);
                 ui.horizontal(|ui| {
-                    save = ui.button("儲存").clicked();
-                    cancel = ui.button("取消").clicked();
+                    save = ui.button(t!("儲存")).clicked();
+                    cancel = ui.button(t!("取消")).clicked();
                 });
             });
         if save {
             match self.smart_edit.take() {
                 Some((_, f)) if f.is_empty() => {
                     self.smart_edit = Some((id, f));
-                    self.toast("至少要有一個條件");
+                    self.toast(t!("至少要有一個條件"));
                 }
                 Some((id, f)) => {
                     if let Some(lib) = &mut self.lib {
                         lib.update_smart_filter(&id, f);
                     }
-                    self.toast("已更新智慧資料夾的條件");
+                    self.toast(t!("已更新智慧資料夾的條件"));
                 }
                 None => {}
             }
@@ -121,7 +121,7 @@ fn minutes(ui: &mut egui::Ui, label: &str, v: &mut Option<f64>) {
     ui.checkbox(&mut on, label);
     if on {
         let mut m = v.unwrap_or(30.0 * 60.0) / 60.0;
-        ui.add(egui::DragValue::new(&mut m).range(0.0..=24.0 * 60.0).speed(1.0).suffix(" 分"));
+        ui.add(egui::DragValue::new(&mut m).range(0.0..=24.0 * 60.0).speed(1.0).suffix(t!(" 分")));
         *v = Some(m * 60.0);
     } else {
         *v = None;

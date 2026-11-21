@@ -89,7 +89,7 @@ impl App {
         let job = self.subtitle_index.as_ref()?;
         let done = job.done.load(Ordering::Relaxed);
         let progress = (job.total > 0).then(|| done as f32 / job.total as f32);
-        Some(super::jobs::BgJob::new(super::jobs::JobKind::SubtitleIndex, "建立台詞索引", format!("{done}/{}，讓舊素材的台詞也能搜尋", job.total), progress))
+        Some(super::jobs::BgJob::new(super::jobs::JobKind::SubtitleIndex, t!("建立台詞索引"), t!("{done}/{total}，讓舊素材的台詞也能搜尋", done, total = job.total), progress))
     }
 }
 

@@ -31,11 +31,11 @@ pub enum IntegrityFix {
 impl App {
     pub(super) fn start_integrity_check(&mut self) {
         if self.integrity.is_some() {
-            return self.toast("正在檢查資源庫");
+            return self.toast(t!("正在檢查資源庫"));
         }
         if self.import.is_some() {
             // An item being imported looks just like a leftover until it is done.
-            return self.toast("匯入進行中，請等匯入完成後再檢查");
+            return self.toast(t!("匯入進行中，請等匯入完成後再檢查"));
         }
         let Some(lib) = &self.lib else { return };
         let input = lib.integrity_input();
@@ -64,7 +64,7 @@ impl App {
                     let cancelled = run.cancel.load(Ordering::Relaxed);
                     self.integrity = None;
                     if !cancelled {
-                        self.toast_error(format!("檢查資源庫失敗：{}", state::LOST));
+                        self.toast_error(t!("檢查資源庫失敗：{state}", state = crate::i18n::tr(state::LOST)));
                     }
                     return;
                 }
@@ -78,9 +78,9 @@ impl App {
         if found.is_clean() && refs == 0 {
             let note = match found.unreadable_files {
                 0 => String::new(),
-                n => format!("（{n} 個檔案無法讀取，沒有比對）"),
+                n => t!("（{n} 個檔案無法讀取，沒有比對）", n),
             };
-            return self.toast(format!("資源庫沒有發現問題{note}"));
+            return self.toast(t!("資源庫沒有發現問題{note}", note));
         }
         self.dialog = Some(Dialog::Integrity(found));
     }
@@ -91,7 +91,7 @@ impl App {
             return None;
         }
         let done = run.done.load(Ordering::Relaxed).min(run.total);
-        Some(jobs::BgJob::new(jobs::JobKind::Integrity, "檢查資源庫", format!("{done}/{}", run.total), Some(done as f32 / run.total.max(1) as f32)))
+        Some(jobs::BgJob::new(jobs::JobKind::Integrity, t!("檢查資源庫"), format!("{done}/{}", run.total), Some(done as f32 / run.total.max(1) as f32)))
     }
 
     pub(super) fn cancel_integrity(&mut self) {
@@ -106,7 +106,7 @@ impl App {
         match fix {
             IntegrityFix::RemoveLeftovers => {
                 if self.import.is_some() {
-                    return self.toast("匯入進行中，請等匯入完成後再處理");
+                    return self.toast(t!("匯入進行中，請等匯入完成後再處理"));
                 }
                 let all = std::mem::take(&mut found.leftovers);
                 let (removed, failed) = remove_leftovers(all, |id| lib.items.contains_key(id), |dir| {
@@ -118,22 +118,22 @@ impl App {
                 let n = failed.len();
                 found.leftovers = failed;
                 if n > 0 {
-                    self.toast_error(format!("有 {n} 個資料夾無法移到資源回收筒（可能正被其他程式使用）"));
+                    self.toast_error(t!("有 {n} 個資料夾無法移到資源回收筒（可能正被其他程式使用）", n));
                 } else {
-                    self.toast(format!("已把 {removed} 個殘留的資料夾移到資源回收筒"));
+                    self.toast(t!("已把 {removed} 個殘留的資料夾移到資源回收筒", removed));
                 }
             }
             IntegrityFix::DropFolderRefs => {
                 let n = lib.drop_missing_folders();
-                self.toast(format!("已整理 {n} 個素材的資料夾"));
+                self.toast(t!("已整理 {n} 個素材的資料夾", n));
             }
             IntegrityFix::ShowChanged => {
                 let ids = found.changed.iter().map(|(id, _)| id.clone()).collect();
-                self.act(Action::SetView(View::Ids { label: "內容和匯入時不同".into(), ids, groups: Vec::new(), source: IdsSource::Plain }));
+                self.act(Action::SetView(View::Ids { label: t!("內容和匯入時不同").into(), ids, groups: Vec::new(), source: IdsSource::Plain }));
             }
             IntegrityFix::AcceptChanged => {
                 let n = lib.accept_hashes(std::mem::take(&mut found.changed));
-                self.toast(format!("已更新 {n} 個素材的比對資料"));
+                self.toast(t!("已更新 {n} 個素材的比對資料", n));
             }
         }
     }

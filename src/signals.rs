@@ -93,9 +93,9 @@ pub fn loudness(ffmpeg_dir: &Path, input: &Path, mut progress: impl FnMut(f64) -
         .spawn()
         .map_err(|e| {
             crate::log::command_failed("loudness", &cmd, format!("無法啟動：{e}"));
-            format!("無法啟動 FFmpeg：{e}")
+            t!("無法啟動 FFmpeg：{e}", e)
         })?;
-    let stderr = child.stderr.take().ok_or("無法讀取 FFmpeg 輸出")?;
+    let stderr = child.stderr.take().ok_or(t!("無法讀取 FFmpeg 輸出"))?;
     let mut reader = BufReader::new(stderr);
     let mut buf = Vec::new();
     let mut out: Vec<f32> = Vec::new();
@@ -130,7 +130,7 @@ pub fn loudness(ffmpeg_dir: &Path, input: &Path, mut progress: impl FnMut(f64) -
     let status = child.wait().map_err(|e| e.to_string())?;
     if !status.success() || out.is_empty() {
         crate::log::command_failed("loudness", &cmd, format!("結束代碼 {:?}，取得 {} 秒", status.code(), out.len()));
-        return Err("無法分析這個檔案的聲音".into());
+        return Err(t!("無法分析這個檔案的聲音").into());
     }
     // Silence reads as -inf or -120; keep the curve in a drawable range.
     Ok(out.into_iter().map(|v| (v.max(-70.0) * 10.0).round() / 10.0).collect())
@@ -258,7 +258,7 @@ pub fn describe(chat: Option<&[f32]>, hits: Option<&Hits>, loud: Option<&[f32]>,
             let here = c[r.clone()].iter().sum::<f32>() / r.len() as f32;
             let ratio = here / all;
             if ratio >= 1.1 {
-                parts.push(format!("聊天 ×{ratio:.1}"));
+                parts.push(t!("聊天 ×{ratio}", ratio = format!("{:.1}", ratio)));
             }
         }
     }
@@ -271,7 +271,7 @@ pub fn describe(chat: Option<&[f32]>, hits: Option<&Hits>, loud: Option<&[f32]>,
             if let Some(&median) = sorted.get(sorted.len() / 2) {
                 let up = (max - median).round();
                 if up >= 1.0 {
-                    parts.push(format!("音量 +{up} dB"));
+                    parts.push(t!("音量 +{up} dB", up));
                 }
             }
         }
@@ -290,10 +290,10 @@ pub fn describe(chat: Option<&[f32]>, hits: Option<&Hits>, loud: Option<&[f32]>,
         top.sort_by_key(|t| std::cmp::Reverse(t.0));
         if !top.is_empty() {
             let words: Vec<String> = top.iter().take(3).map(|(n, w)| format!("{w} ×{n}")).collect();
-            parts.push(format!("關鍵字：{}", words.join(" ")));
+            parts.push(t!("關鍵字：{words}", words = words.join(" ")));
         }
     }
-    (!parts.is_empty()).then(|| parts.join("、"))
+    (!parts.is_empty()).then(|| parts.join(t!("、")))
 }
 
 #[cfg(test)]

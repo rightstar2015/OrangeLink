@@ -100,16 +100,16 @@ impl App {
             let row = |ui: &mut Ui, q: &String, pinned: bool, action: &mut Option<Do>| {
                 ui.horizontal(|ui| {
                     let star = if pinned { "★" } else { "☆" };
-                    let tip = if pinned { "取消釘選" } else { "釘選，一直留在清單上" };
+                    let tip = if pinned { t!("取消釘選") } else { t!("釘選，一直留在清單上") };
                     if ui.add(egui::Button::new(star).frame(false)).on_hover_text(tip).clicked() {
                         *action = Some(if pinned { Do::Unpin(q.clone()) } else { Do::Pin(q.clone()) });
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if pinned {
-                            if ui.small_button("✨").on_hover_text("存成智慧資料夾").clicked() {
+                            if ui.small_button("✨").on_hover_text(t!("存成智慧資料夾")).clicked() {
                                 *action = Some(Do::Save(q.clone()));
                             }
-                        } else if ui.small_button("✖").on_hover_text("從最近搜尋移除").clicked() {
+                        } else if ui.small_button("✖").on_hover_text(t!("從最近搜尋移除")).clicked() {
                             *action = Some(Do::Forget(q.clone()));
                         }
                         let w = ui.available_width();
@@ -121,7 +121,7 @@ impl App {
                 });
             };
             if !pinned.is_empty() {
-                ui.label(RichText::new("釘選的搜尋").small().weak());
+                ui.label(RichText::new(t!("釘選的搜尋")).small().weak());
                 for q in &pinned {
                     row(ui, q, true, &mut action);
                 }
@@ -130,7 +130,7 @@ impl App {
                 if !pinned.is_empty() {
                     ui.separator();
                 }
-                ui.label(RichText::new("最近搜尋").small().weak());
+                ui.label(RichText::new(t!("最近搜尋")).small().weak());
                 for q in &recent {
                     row(ui, q, false, &mut action);
                 }
@@ -193,17 +193,17 @@ impl App {
     }
 
     pub(super) fn toolbar_left(&mut self, ui: &mut Ui, ctx: &egui::Context) {
-        if ui.add_enabled(self.history.can_go_back(), egui::Button::new("←").frame(false)).on_hover_text("上一個檢視（Alt + ←、滑鼠側鍵）").clicked() {
+        if ui.add_enabled(self.history.can_go_back(), egui::Button::new("←").frame(false)).on_hover_text(t!("上一個檢視（Alt + ←、滑鼠側鍵）")).clicked() {
             self.act(Action::NavBack);
         }
-        if ui.add_enabled(self.history.can_go_forward(), egui::Button::new("→").frame(false)).on_hover_text("下一個檢視（Alt + →）").clicked() {
+        if ui.add_enabled(self.history.can_go_forward(), egui::Button::new("→").frame(false)).on_hover_text(t!("下一個檢視（Alt + →）")).clicked() {
             self.act(Action::NavForward);
         }
         ui.separator();
         if ui
             .add_enabled(self.can_undo(), egui::Button::new("↩").frame(false))
             .on_hover_text(self.undo_tip())
-            .on_disabled_hover_text("沒有可以復原的操作（Ctrl+Z）")
+            .on_disabled_hover_text(t!("沒有可以復原的操作（Ctrl+Z）"))
             .clicked()
         {
             self.act(Action::Undo);
@@ -211,32 +211,32 @@ impl App {
         if ui
             .add_enabled(self.can_redo(), egui::Button::new("↪").frame(false))
             .on_hover_text(self.redo_tip())
-            .on_disabled_hover_text("沒有可以重做的操作（Ctrl+Y）")
+            .on_disabled_hover_text(t!("沒有可以重做的操作（Ctrl+Y）"))
             .clicked()
         {
             self.act(Action::Redo);
         }
         ui.separator();
-        ui.menu_button(RichText::new("＋ 匯入").strong(), |ui| {
-            if ui.button("匯入檔案…").clicked() {
+        ui.menu_button(RichText::new(t!("＋ 匯入")).strong(), |ui| {
+            if ui.button(t!("匯入檔案…")).clicked() {
                 self.act(Action::ImportFiles);
                 ui.close_menu();
             }
-            if ui.button("匯入資料夾…").clicked() {
+            if ui.button(t!("匯入資料夾…")).clicked() {
                 self.act(Action::ImportFolder);
                 ui.close_menu();
             }
-            if ui.button("從網址下載（yt-dlp）…").clicked() {
+            if ui.button(t!("從網址下載（yt-dlp）…")).clicked() {
                 self.act(Action::OpenYtdlp);
                 ui.close_menu();
             }
             ui.separator();
-            ui.label(RichText::new("也可以直接把檔案拖進視窗").small().weak());
+            ui.label(RichText::new(t!("也可以直接把檔案拖進視窗")).small().weak());
         });
 
         let search = ui.add(
             TextEdit::singleline(&mut self.search)
-                .hint_text("🔍 搜尋名稱、標籤、字幕…（如 ext:png rating:4）")
+                .hint_text(t!("🔍 搜尋名稱、標籤、字幕…（如 ext:png rating:4）"))
                 // Grows with the window, leaving room for the filter and the right side.
                 .desired_width((ui.available_width() - 620.0).clamp(150.0, 400.0)),
         );
@@ -244,7 +244,7 @@ impl App {
             search
         } else {
             search.on_hover_ui(|ui| {
-                ui.label(RichText::new("搜尋語法").strong());
+                ui.label(RichText::new(t!("搜尋語法")).strong());
                 super::shortcuts::search_syntax_table(ui);
             })
         };
@@ -267,12 +267,12 @@ impl App {
                 self.send_back(ctx);
             }
         }
-        if !self.search.is_empty() && ui.small_button("✖").on_hover_text("清除搜尋").clicked() {
+        if !self.search.is_empty() && ui.small_button("✖").on_hover_text(t!("清除搜尋")).clicked() {
             self.search.clear();
         }
         let syntax_btn = ui
             .add(egui::Button::new(RichText::new("?").small().color(if self.syntax_open { accent() } else { tokens().text_muted })))
-            .on_hover_text("搜尋語法速查（點擊快速套用）");
+            .on_hover_text(t!("搜尋語法速查（點擊快速套用）"));
         if syntax_btn.clicked() {
             self.syntax_open = !self.syntax_open;
             if self.syntax_open {
@@ -282,16 +282,16 @@ impl App {
         if self.syntax_open {
             self.syntax_popover(ctx, syntax_btn.rect);
         }
-        if ui.selectable_label(self.config.search_all, "搜尋全部").on_hover_text("開啟：搜尋時不限目前選的資料夾和標籤\n關閉：只搜尋目前選的範圍").clicked() {
+        if ui.selectable_label(self.config.search_all, t!("搜尋全部")).on_hover_text(t!("開啟：搜尋時不限目前選的資料夾和標籤\n關閉：只搜尋目前選的範圍")).clicked() {
             self.config.search_all = !self.config.search_all;
             self.config.save();
         }
 
         ui.separator();
         let n = self.filter_count();
-        let label = if n == 0 { "篩選 ▼".to_string() } else { format!("篩選 ({n}) ▼") };
+        let label = if n == 0 { t!("篩選 ▼").to_string() } else { t!("篩選 ({n}) ▼", n) };
         let text = if n == 0 { RichText::new(label) } else { RichText::new(label).color(accent()) };
-        let button = ui.button(text).on_hover_text("格式、評分、顏色");
+        let button = ui.button(text).on_hover_text(t!("格式、評分、顏色"));
         if button.clicked() {
             self.filter_open = !self.filter_open;
             if self.filter_open {
@@ -312,10 +312,10 @@ impl App {
             .show(ctx, |ui| {
                 egui::Frame::popup(ui.style()).show(ui, |ui| {
                     ui.set_max_width(420.0);
-                    ui.label(RichText::new("常用搜尋語法（點一下加入搜尋欄）").strong());
+                    ui.label(RichText::new(t!("常用搜尋語法（點一下加入搜尋欄）")).strong());
                     ui.add_space(4.0);
                     ui.horizontal_wrapped(|ui| {
-                        for token in ["ext:mp4", "ext:png", "rating:4", "dur>10m", "w>=1920", "-草稿", "貓 OR 狗"] {
+                        for token in ["ext:mp4", "ext:png", "rating:4", "dur>10m", "w>=1920", t!("-草稿"), t!("貓 OR 狗")] {
                             if ui.add(egui::Button::new(RichText::new(token).small().monospace().color(accent()))).clicked() {
                                 insert = Some(token);
                             }
@@ -351,20 +351,20 @@ impl App {
                 egui::Frame::popup(ui.style()).show(ui, |ui| {
                     ui.set_max_width(440.0);
                     ui.horizontal(|ui| {
-                        ui.label(RichText::new("格式").strong());
-                        if !self.ext_filter.is_empty() && ui.small_button("清除").clicked() {
+                        ui.label(RichText::new(t!("格式")).strong());
+                        if !self.ext_filter.is_empty() && ui.small_button(t!("清除")).clicked() {
                             self.ext_filter.clear();
                         }
                     });
                     if groups.is_empty() {
-                        ui.label(RichText::new("資源庫是空的").weak());
+                        ui.label(RichText::new(t!("資源庫是空的")).weak());
                     }
                     for (kind, exts) in &groups {
                         ui.horizontal_wrapped(|ui| {
                             ui.label(RichText::new(format!("{} {}", kind.icon(), kind.label())).weak());
                             for (ext, count) in exts {
                                 let mut on = self.ext_filter.contains(ext);
-                                if ui.toggle_value(&mut on, ext.to_uppercase()).on_hover_text(format!("{count} 個")).changed() {
+                                if ui.toggle_value(&mut on, ext.to_uppercase()).on_hover_text(t!("{count} 個", count)).changed() {
                                     if on {
                                         self.ext_filter.push(ext.clone());
                                         self.ext_filter.sort();
@@ -378,17 +378,17 @@ impl App {
                     ui.separator();
 
                     ui.horizontal(|ui| {
-                        ui.label(RichText::new("評分").strong());
+                        ui.label(RichText::new(t!("評分")).strong());
                         for r in 0..=5u8 {
-                            let text = if r == 0 { "不限".to_string() } else { format!("★{r}+") };
+                            let text = if r == 0 { t!("不限").to_string() } else { format!("★{r}+") };
                             ui.selectable_value(&mut self.min_rating, r, text);
                         }
                     });
                     ui.separator();
 
                     ui.horizontal(|ui| {
-                        ui.label(RichText::new("顏色").strong());
-                        if self.color_filter.is_some() && ui.small_button("清除").clicked() {
+                        ui.label(RichText::new(t!("顏色")).strong());
+                        if self.color_filter.is_some() && ui.small_button(t!("清除")).clicked() {
                             self.color_filter = None;
                         }
                     });
@@ -402,9 +402,9 @@ impl App {
                     });
                     ui.horizontal(|ui| {
                         let draft = self.color_draft.get_or_insert(self.color_filter.unwrap_or([230, 60, 60]));
-                        ui.label("自訂");
+                        ui.label(t!("自訂"));
                         egui::color_picker::color_edit_button_srgb(ui, draft);
-                        if ui.button("套用").clicked() {
+                        if ui.button(t!("套用")).clicked() {
                             self.color_filter = Some(*draft);
                         }
                         let picked = self.lib.as_ref().and_then(|lib| {
@@ -413,9 +413,9 @@ impl App {
                             it.palette.iter().max_by(|a, b| a.ratio.total_cmp(&b.ratio)).map(|p| p.rgb)
                         });
                         if ui
-                            .add_enabled(picked.is_some(), egui::Button::new("從選取的素材取色"))
-                            .on_hover_text("用選取素材的主要顏色篩選")
-                            .on_disabled_hover_text("先選取一個素材")
+                            .add_enabled(picked.is_some(), egui::Button::new(t!("從選取的素材取色")))
+                            .on_hover_text(t!("用選取素材的主要顏色篩選"))
+                            .on_disabled_hover_text(t!("先選取一個素材"))
                             .clicked()
                         {
                             self.color_filter = picked;
@@ -426,11 +426,11 @@ impl App {
 
                     ui.horizontal(|ui| {
                         let any = !self.current_filter().is_empty();
-                        if ui.add_enabled(any, egui::Button::new("✨ 儲存成智慧資料夾")).on_hover_text("把目前的搜尋與篩選存成智慧資料夾").clicked() {
+                        if ui.add_enabled(any, egui::Button::new(t!("✨ 儲存成智慧資料夾"))).on_hover_text(t!("把目前的搜尋與篩選存成智慧資料夾")).clicked() {
                             self.act(Action::SaveSmartFolder);
                             self.filter_open = false;
                         }
-                        if self.filter_count() > 0 && ui.button("全部清除").clicked() {
+                        if self.filter_count() > 0 && ui.button(t!("全部清除")).clicked() {
                             self.ext_filter.clear();
                             self.min_rating = 0;
                             self.color_filter = None;
@@ -463,7 +463,7 @@ impl App {
             .inner_margin(egui::Margin::symmetric(8.0, 4.0))
             .show(ui, |ui| {
                 ui.horizontal_wrapped(|ui| {
-                    ui.label(RichText::new("篩選條件：").small().weak());
+                    ui.label(RichText::new(t!("篩選條件：")).small().weak());
                     let mut remove_tag = None;
                     for t in &self.tag_filter {
                         if accent_chip(ui, &format!("#{t}")) {
@@ -482,7 +482,7 @@ impl App {
                     if let Some(e) = remove_ext {
                         self.ext_filter.retain(|x| *x != e);
                     }
-                    if self.min_rating > 0 && accent_chip(ui, &format!("★{} 以上", self.min_rating)) {
+                    if self.min_rating > 0 && accent_chip(ui, &t!("★{min_rating} 以上", min_rating = self.min_rating)) {
                         self.min_rating = 0;
                     }
                     if let Some(c) = self.color_filter {
@@ -490,15 +490,15 @@ impl App {
                         ui.painter().rect_filled(r, 3.0, Color32::from_rgb(c[0], c[1], c[2]));
                         // An edge, so white reads on the light theme and black on the dark.
                         ui.painter().rect_stroke(r, 3.0, Stroke::new(1.0_f32, tokens().outline));
-                        if accent_chip(ui, "顏色") {
+                        if accent_chip(ui, t!("顏色")) {
                             self.color_filter = None;
                         }
                     }
-                    if everywhere && accent_chip(ui, "搜尋全部") {
+                    if everywhere && accent_chip(ui, t!("搜尋全部")) {
                         self.config.search_all = false;
                         self.config.save();
                     }
-                    if (!self.tag_filter.is_empty() || self.filter_count() > 0) && ui.small_button("全部清除").clicked() {
+                    if (!self.tag_filter.is_empty() || self.filter_count() > 0) && ui.small_button(t!("全部清除")).clicked() {
                         self.clear_filters();
                     }
                 });
@@ -507,7 +507,7 @@ impl App {
 
     /// Right to left: settings, thumbnail size, view mode, sort.
     pub(super) fn toolbar_right(&mut self, ui: &mut Ui) {
-        if ui.button("⚙").on_hover_text("設定").clicked() {
+        if ui.button("⚙").on_hover_text(t!("設定")).clicked() {
             self.act(Action::OpenSettings);
         }
         ui.separator();
@@ -517,12 +517,12 @@ impl App {
         let list = self.config.view_mode == ViewMode::List;
         let slider = egui::Slider::new(&mut self.config.thumb_size, crate::config::THUMB_SIZES).show_value(false);
         ui.add_enabled(!list, slider)
-            .on_hover_text("縮圖大小（Ctrl+滾輪）")
-            .on_disabled_hover_text("清單檢視沒有縮圖大小");
+            .on_hover_text(t!("縮圖大小（Ctrl+滾輪）"))
+            .on_disabled_hover_text(t!("清單檢視沒有縮圖大小"));
         for (mode, label, tip) in [
-            (ViewMode::List, "清單", "詳細清單，可點欄位排序"),
-            (ViewMode::Justified, "比例", "依圖片比例排列"),
-            (ViewMode::Grid, "格狀", "固定大小的格子"),
+            (ViewMode::List, t!("清單"), t!("詳細清單，可點欄位排序")),
+            (ViewMode::Justified, t!("比例"), t!("依圖片比例排列")),
+            (ViewMode::Grid, t!("格狀"), t!("固定大小的格子")),
         ] {
             if ui.selectable_label(self.config.view_mode == mode, label).on_hover_text(tip).clicked() {
                 self.config.view_mode = mode;
@@ -532,7 +532,7 @@ impl App {
         let arrow = if self.sort_desc { "⬇" } else { "⬆" };
         let grouped = match self.config.group_by {
             GroupBy::None => String::new(),
-            by => format!("・依{}分組", by.label()),
+            by => t!("・依{label}分組", label = by.label()),
         };
         ui.menu_button(format!("{} {arrow}{grouped}", self.sort.label()), |ui| {
             for key in SortKey::ALL {
@@ -542,16 +542,16 @@ impl App {
                 }
             }
             ui.separator();
-            if ui.selectable_label(!self.sort_desc, "⬆ 遞增").clicked() {
+            if ui.selectable_label(!self.sort_desc, t!("⬆ 遞增")).clicked() {
                 self.sort_desc = false;
                 ui.close_menu();
             }
-            if ui.selectable_label(self.sort_desc, "⬇ 遞減").clicked() {
+            if ui.selectable_label(self.sort_desc, t!("⬇ 遞減")).clicked() {
                 self.sort_desc = true;
                 ui.close_menu();
             }
             ui.separator();
-            ui.label(RichText::new("分組").weak());
+            ui.label(RichText::new(t!("分組")).weak());
             for by in GroupBy::ALL {
                 if ui.selectable_label(self.config.group_by == by, by.label()).clicked() {
                     self.config.group_by = by;
@@ -560,10 +560,10 @@ impl App {
             }
         })
         .response
-        .on_hover_text("排序與分組");
+        .on_hover_text(t!("排序與分組"));
         if self.view == View::Trash {
             ui.separator();
-            if ui.button("🗑 清空垃圾桶").clicked() {
+            if ui.button(t!("🗑 清空垃圾桶")).clicked() {
                 self.act(Action::ConfirmEmptyTrash);
             }
         }
@@ -582,7 +582,7 @@ fn swatch(ui: &mut Ui, c: [u8; 3], chosen: bool) -> egui::Response {
         Stroke::new(1.0_f32, tokens().outline)
     };
     painter.rect_stroke(r.shrink(1.0), 5.0, stroke);
-    resp.on_hover_text("依這個顏色篩選")
+    resp.on_hover_text(t!("依這個顏色篩選"))
 }
 
 #[cfg(test)]

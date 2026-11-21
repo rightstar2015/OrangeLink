@@ -1,5 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+#[macro_use]
+mod i18n;
 mod app;
 mod clipboard;
 #[cfg(windows)]
@@ -99,8 +101,11 @@ fn main() -> eframe::Result<()> {
         .with_min_inner_size([960.0, 600.0])
         .with_drag_and_drop(true)
         .with_icon(window_icon());
+    let config = config::Config::load();
+    // Before the app starts, so what it creates (default names) is in this language.
+    i18n::set(config.language.unwrap_or_else(i18n::Lang::system));
     // Reopen where the window was last closed.
-    if let Some(g) = config::Config::load().window.filter(|g| g.on_screen()) {
+    if let Some(g) = config.window.filter(|g| g.on_screen()) {
         viewport = viewport
             .with_position([g.x, g.y])
             .with_inner_size([g.w.max(960.0), g.h.max(600.0)])

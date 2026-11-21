@@ -84,12 +84,12 @@ impl App {
             if run.progress.is_some() || queued > 0 {
                 let (mut detail, progress) = match run.progress {
                     Some((done, total)) if total > 0 => (format!("{done}/{total}"), Some(done as f32 / total as f32)),
-                    _ => ("掃描檔案中…".to_string(), None),
+                    _ => (t!("掃描檔案中…").to_string(), None),
                 };
                 if queued > 0 {
-                    detail += &format!("（另有 {queued} 批排隊）");
+                    detail += &t!("（另有 {queued} 批排隊）", queued);
                 }
-                jobs.push(BgJob::new(JobKind::Import, "匯入", detail, progress));
+                jobs.push(BgJob::new(JobKind::Import, t!("匯入"), detail, progress));
             }
         }
         jobs.extend(self.ytdlp_job());
@@ -109,7 +109,7 @@ impl App {
         } else {
             let since = *self.thumbs.busy_since.get_or_insert(now);
             if now - since >= THUMBS_AFTER {
-                let mut job = BgJob::new(JobKind::Thumbnails, "產生縮圖", format!("還有 {} 個", self.thumbs.pending.len()), None);
+                let mut job = BgJob::new(JobKind::Thumbnails, t!("產生縮圖"), t!("還有 {n} 個", n = self.thumbs.pending.len()), None);
                 job.can_cancel = false;
                 jobs.push(job);
             }
@@ -155,7 +155,7 @@ impl App {
         }
         let dropped = std::mem::take(&mut self.import_queue).len();
         if dropped > 0 {
-            self.toast(format!("已取消 {dropped} 批排隊中的匯入"));
+            self.toast(t!("已取消 {dropped} 批排隊中的匯入", dropped));
         }
     }
 

@@ -31,10 +31,10 @@ impl GroupBy {
 
     pub fn label(self) -> &'static str {
         match self {
-            GroupBy::None => "不分組",
-            GroupBy::Added => "加入日期",
-            GroupBy::Kind => "類型",
-            GroupBy::Size => "檔案大小",
+            GroupBy::None => t!("不分組"),
+            GroupBy::Added => t!("加入日期"),
+            GroupBy::Kind => t!("類型"),
+            GroupBy::Size => t!("檔案大小"),
         }
     }
 }
@@ -85,34 +85,34 @@ fn group_of(it: &Item, by: GroupBy, today: NaiveDate) -> (u8, &'static str) {
         }
         GroupBy::Added => {
             let Some(date) = chrono::DateTime::from_timestamp_millis(it.added_at).map(|d| d.with_timezone(&chrono::Local).date_naive()) else {
-                return (7, "沒有日期");
+                return (7, t!("沒有日期"));
             };
             let week_start = today - Days::new(u64::from(today.weekday().num_days_from_monday()));
             if date >= today {
-                (0, "今天")
+                (0, t!("今天"))
             } else if Some(date) == today.pred_opt() {
-                (1, "昨天")
+                (1, t!("昨天"))
             } else if date >= week_start {
-                (2, "本週")
+                (2, t!("本週"))
             } else if date.year() == today.year() && date.month() == today.month() {
-                (3, "本月")
+                (3, t!("本月"))
             } else if date.year() == today.year() {
-                (4, "今年")
+                (4, t!("今年"))
             } else if date.year() == today.year() - 1 {
-                (5, "去年")
+                (5, t!("去年"))
             } else {
-                (6, "更早")
+                (6, t!("更早"))
             }
         }
         // Explorer's own size bands.
         GroupBy::Size => match it.size {
-            0 => (0, "空的"),
-            s if s < 16 * 1024 => (1, "極小（16 KB 以下）"),
-            s if s < 1024 * 1024 => (2, "小（16 KB 到 1 MB）"),
-            s if s < 128 * 1024 * 1024 => (3, "中（1 到 128 MB）"),
-            s if s < 1024 * 1024 * 1024 => (4, "大（128 MB 到 1 GB）"),
-            s if s < 4 * 1024 * 1024 * 1024 => (5, "很大（1 到 4 GB）"),
-            _ => (6, "超大（4 GB 以上）"),
+            0 => (0, t!("空的")),
+            s if s < 16 * 1024 => (1, t!("極小（16 KB 以下）")),
+            s if s < 1024 * 1024 => (2, t!("小（16 KB 到 1 MB）")),
+            s if s < 128 * 1024 * 1024 => (3, t!("中（1 到 128 MB）")),
+            s if s < 1024 * 1024 * 1024 => (4, t!("大（128 MB 到 1 GB）")),
+            s if s < 4 * 1024 * 1024 * 1024 => (5, t!("很大（1 到 4 GB）")),
+            _ => (6, t!("超大（4 GB 以上）")),
         },
     }
 }

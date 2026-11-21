@@ -1,6 +1,8 @@
 # OrangeLink
 
-*OrangeLink is a Windows desktop app for organizing images, video, audio and subtitles in one library, and for turning long recordings (such as live-stream archives) into short clips. It is a single executable written in Rust with [egui](https://github.com/emilk/egui), with no installer and no database. Most of the interface and documentation is in Traditional Chinese.*
+**繁體中文** · [简体中文](docs/README.zh-CN.md) · [English](docs/README.en.md) · [日本語](docs/README.ja.md) · [한국어](docs/README.ko.md)
+
+*OrangeLink is a Windows desktop app for organizing images, video, audio and subtitles in one library, and for turning long recordings (such as live-stream archives) into short clips. It is a single executable written in Rust with [egui](https://github.com/emilk/egui), with no installer and no database. The interface is available in Traditional Chinese, Simplified Chinese, English, Japanese and Korean; the detailed documentation is in Traditional Chinese.*
 
 ![OrangeLink 主視窗：左側是類型與智慧資料夾，中間是依比例排列的圖片，右側是選取素材的評分與標籤](docs/images/hero.png)
 

@@ -118,7 +118,7 @@ mod platform {
         let file = StorageFile::GetFileFromPathAsync(&HSTRING::from(full.to_string_lossy().replace('/', "\\"))).and_then(|a| a.join()).map_err(e)?;
         let doc = PdfDocument::LoadFromFileAsync(&file).and_then(|a| a.join()).map_err(|err| {
             if doc_locked(&err) {
-                "PDF 有密碼保護".to_string()
+                t!("PDF 有密碼保護").to_string()
             } else {
                 e(err)
             }
@@ -184,7 +184,7 @@ mod platform {
         sync::mpsc::{Receiver, Sender},
     };
     pub fn serve(_: &Path, _: u32, _: &Receiver<u32>, _: &Sender<Update>, _: &dyn Fn()) -> Result<(), String> {
-        Err("只有 Windows 能預覽 PDF".into())
+        Err(t!("只有 Windows 能預覽 PDF").into())
     }
 }
 

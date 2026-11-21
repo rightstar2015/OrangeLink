@@ -90,7 +90,7 @@ pub fn latest_version() -> Option<String> {
 
 /// Downloads the latest yt-dlp.exe into the tools folder.
 pub fn install_latest() -> Result<PathBuf, String> {
-    let dir = tools_dir().ok_or("找不到 APPDATA 資料夾")?;
+    let dir = tools_dir().ok_or(t!("找不到 APPDATA 資料夾"))?;
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let (exe, part) = (dir.join(EXE), dir.join("yt-dlp.exe.part"));
     let out = curl()?
@@ -98,7 +98,7 @@ pub fn install_latest() -> Result<PathBuf, String> {
         .arg(&part)
         .arg(RELEASE_URL)
         .output()
-        .map_err(|e| format!("無法執行 curl：{e}"))?;
+        .map_err(|e| t!("無法執行 curl：{e}", e))?;
     if !out.status.success() {
         let _ = std::fs::remove_file(&part);
         return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
@@ -111,15 +111,15 @@ pub fn install_latest() -> Result<PathBuf, String> {
         (Some(w), Some(g)) if w == g => {}
         (None, _) => {
             let _ = std::fs::remove_file(&part);
-            return Err("讀不到 yt-dlp 公布的 SHA-256，無法確認下載的檔案，請稍後再試".into());
+            return Err(t!("讀不到 yt-dlp 公布的 SHA-256，無法確認下載的檔案，請稍後再試").into());
         }
         _ => {
             let _ = std::fs::remove_file(&part);
-            return Err("下載的 yt-dlp.exe 和官方公布的 SHA-256 不符，已刪除".into());
+            return Err(t!("下載的 yt-dlp.exe 和官方公布的 SHA-256 不符，已刪除").into());
         }
     }
-    std::fs::rename(&part, &exe).map_err(|e| format!("無法取代 yt-dlp.exe（是否正在下載中？）：{e}"))?;
-    version(&exe).ok_or("下載的 yt-dlp 無法執行")?;
+    std::fs::rename(&part, &exe).map_err(|e| t!("無法取代 yt-dlp.exe（是否正在下載中？）：{e}", e))?;
+    version(&exe).ok_or(t!("下載的 yt-dlp 無法執行"))?;
     Ok(exe)
 }
 
@@ -167,9 +167,9 @@ impl OutFormat {
     }
     pub fn note(self) -> &'static str {
         match self {
-            OutFormat::Mp4 => "影片優先 avc1（H.264）＋ AAC，沒有時才用 VP9；合併需 FFmpeg",
-            OutFormat::Mp3 => "只下載音訊並轉成 MP3（最高音質）；需 FFmpeg",
-            OutFormat::M4a => "只下載音訊（AAC / M4A），通常不需轉檔",
+            OutFormat::Mp4 => t!("影片優先 avc1（H.264）＋ AAC，沒有時才用 VP9；合併需 FFmpeg"),
+            OutFormat::Mp3 => t!("只下載音訊並轉成 MP3（最高音質）；需 FFmpeg"),
+            OutFormat::M4a => t!("只下載音訊（AAC / M4A），通常不需轉檔"),
         }
     }
 }
@@ -200,13 +200,13 @@ pub struct Request {
 impl Request {
     pub fn label(&self) -> String {
         let what = if self.chat_only {
-            "聊天室".to_string()
+            t!("聊天室").to_string()
         } else if self.custom.is_some() {
-            "自訂格式".to_string()
+            t!("自訂格式").to_string()
         } else {
             self.format.label().to_string()
         };
-        format!("{}（{what}）", self.url)
+        t!("{url}（{what}）", url = self.url, what)
     }
 }
 
@@ -323,7 +323,7 @@ impl FormatInfo {
         !self.acodec.is_empty() && self.acodec != "none"
     }
     pub fn label(&self) -> String {
-        let size = self.size.map(human_mb).unwrap_or_else(|| "大小未知".to_string());
+        let size = self.size.map(human_mb).unwrap_or_else(|| t!("大小未知").to_string());
         if self.has_video() {
             let res = self.height.map(|h| format!("{h}p")).unwrap_or_else(|| "?".into());
             format!("{res} | {} | {} | {size} | ID {}", self.ext, self.vcodec, self.id)
@@ -395,7 +395,7 @@ fn codec_rank(vcodec: &str) -> u8 {
 
 /// Parses `yt-dlp -J` output.
 pub fn parse_probe(json: &str) -> Result<ProbeInfo, String> {
-    let v: Value = serde_json::from_str(json.trim_start_matches('\u{feff}')).map_err(|e| format!("無法解讀影片資訊：{e}"))?;
+    let v: Value = serde_json::from_str(json.trim_start_matches('\u{feff}')).map_err(|e| t!("無法解讀影片資訊：{e}", e))?;
     let duration = v.get("duration").and_then(Value::as_f64);
     let s = |f: &Value, k: &str| f.get(k).and_then(Value::as_str).unwrap_or_default().to_string();
     let formats = v
@@ -455,7 +455,7 @@ fn last_error(stderr: &str) -> String {
         .rev()
         .find(|l| l.contains("ERROR"))
         .or_else(|| stderr.lines().rev().find(|l| !l.trim().is_empty()))
-        .unwrap_or("yt-dlp 執行失敗")
+        .unwrap_or(t!("yt-dlp 執行失敗"))
         .trim()
         .to_string()
 }
@@ -540,7 +540,7 @@ impl Job {
             let last_error = err_reader.join().ok().flatten();
             let result = match status {
                 Ok(s) if s.success() => Ok(()),
-                Ok(_) => Err(last_error.unwrap_or_else(|| "yt-dlp 執行失敗".to_string())),
+                Ok(_) => Err(last_error.unwrap_or_else(|| t!("yt-dlp 執行失敗").to_string())),
                 Err(e) => Err(e.to_string()),
             };
             let _ = tx.send(Event::Done(result));
@@ -638,6 +638,7 @@ pub struct ChatMessage {
 }
 
 /// One readable line per chat message: `[1:23] 名稱：訊息`, with Super Chat amounts.
+/// A file the user keeps, so it is the same in every interface language.
 pub fn chat_lines(json_lines: &str) -> Vec<String> {
     chat_messages(json_lines)
         .into_iter()

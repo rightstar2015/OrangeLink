@@ -206,14 +206,14 @@ impl App {
 
         if hovered && !missing && img.width() >= 130.0 && img.height() >= 90.0 && !egui::DragAndDrop::has_any_payload(ui.ctx()) {
             let label = match it.kind {
-                MediaKind::Video => "✂ 剪輯",
-                _ => "👁 預覽",
+                MediaKind::Video => t!("✂ 剪輯"),
+                _ => t!("👁 預覽"),
             };
             let btn = egui::Button::new(RichText::new(label).small().color(Color32::WHITE))
                 .fill(Color32::from_black_alpha(185))
                 .stroke(Stroke::new(1.0_f32, Color32::from_white_alpha(60)));
             let at = Rect::from_center_size(pos2(img.center().x, img.bottom() - 16.0), vec2(58.0, 20.0));
-            if ui.put(at, btn).on_hover_text("開啟預覽／剪輯工作台").clicked() {
+            if ui.put(at, btn).on_hover_text(t!("開啟預覽／剪輯工作台")).clicked() {
                 self.act(Action::OpenViewer(it.id.clone()));
             }
         }
@@ -223,11 +223,11 @@ impl App {
                 &painter,
                 img.center(),
                 Align2::CENTER_BOTTOM,
-                "⚠ 找不到檔案",
+                t!("⚠ 找不到檔案"),
                 ERROR_ON_DARK,
             );
             if roomy && img.height() >= 90.0 {
-                let button = egui::Button::new(RichText::new("重新指定位置…").small());
+                let button = egui::Button::new(RichText::new(t!("重新指定位置…")).small());
                 let at = Rect::from_center_size(
                     pos2(img.center().x, label.max.y + 14.0),
                     vec2(img.width().min(120.0), 20.0),

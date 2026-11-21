@@ -27,9 +27,10 @@ $text = [Text.Encoding]::GetEncoding(28591).GetString([IO.File]::ReadAllBytes("t
    git push origin v0.1.6
    ```
 
-2. GitHub Actions 建置、執行測試，並建立該版本的**草稿** release，附上 zip、`SHA256SUMS.txt` 和還沒簽章的 `latest.json`。標籤必須是 `vX.Y.Z` 而且和 `Cargo.toml` 的版本一致。建置用唯讀的權杖，只有最後建立草稿的步驟能寫入。同一個標籤已經有 release（草稿或已發布）時工作流程會失敗，不會覆蓋檔案；要重建草稿，先刪掉草稿再重跑。
-3. 維護者在非公開的環境為草稿裡的 zip 簽署 `latest.json`，換掉草稿裡那份沒有簽章的（簽章流程不在這個 repo 公開）。
-4. 確認後發布草稿。發布前 OrangeLink 看不到這個版本；`latest.json` 沒有 `sig`、或簽章驗不過時，OrangeLink 完全不提示這個版本（不顯示 ⬆ 徽章，也不提供下載頁連結），只寫進記錄檔。
+2. GitHub Actions 建置、執行測試，並建立該版本的**草稿** release，附上 zip、`SHA256SUMS.txt` 和 `latest.json`。標籤必須是 `vX.Y.Z` 而且和 `Cargo.toml` 的版本一致。建置用唯讀的權杖，只有最後建立草稿的步驟能寫入。同一個標籤已經有 release（草稿或已發布）時工作流程會失敗，不會覆蓋檔案；要重建草稿，先刪掉草稿再重跑。
+3. 確認後發布草稿。發布前 OrangeLink 看不到這個版本；發布後，OrangeLink 讀到 `latest.json` 的版本號比較新，就提示使用者到 release 頁面手動下載。不需要簽章。
+
+0.1.6 到 0.1.9 只在 `latest.json` 有效簽章時才提示新版。release 不再簽章之後，這些版本不會再收到通知，release 說明裡可以提醒使用者手動下載一次。
 
 ### 0.1.6:雲端硬碟上的過渡版（只做這一次）
 

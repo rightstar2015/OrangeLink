@@ -1,6 +1,6 @@
 # Pushing a version tag (e.g. `git tag v0.1.6 && git push origin v0.1.6`) builds the
 # Windows exe, runs the tests and attaches the zip to a draft release for that tag.
-# The draft is published by hand after latest.json is signed (docs/RELEASING.md).
+# The draft is published by hand after a look (docs/RELEASING.md).
 #
 # Two jobs, so the token that can write releases never meets the build: `build`
 # compiles and tests (and so runs every dependency's build script, proc-macro and
@@ -74,11 +74,9 @@ jobs:
           $sums = Get-ChildItem dist/*.zip | Get-FileHash -Algorithm SHA256 |
             ForEach-Object { "$($_.Hash.ToLower())  $(Split-Path $_.Path -Leaf)`n" }
           [IO.File]::WriteAllText("$PWD/dist/SHA256SUMS.txt", -join $sums)
-          # latest.json for the updater. `sig` is left out: the release is created as
-          # a draft, the release key signs the zip on the release computer
-          # (docs/RELEASING.md), and the signed latest.json replaces this one
-          # before the draft is published. Without `sig` the app only shows that a
-          # new version exists. WriteAllText writes UTF-8 without a BOM.
+          # latest.json for the new-version notice, which reads only `version`;
+          # releases are not signed (docs/RELEASING.md). WriteAllText writes UTF-8
+          # without a BOM.
           $hash = (Get-FileHash -Algorithm SHA256 "dist/$name.zip").Hash.ToLower()
           $latest = [ordered]@{ version = $env:TAG.Substring(1); asset = "$name.zip"; sha256 = $hash; notes = "" }
           [IO.File]::WriteAllText("$PWD/dist/latest.json", ($latest | ConvertTo-Json))
@@ -107,8 +105,8 @@ jobs:
       - name: Create the draft
         run: |
           if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then echo "::error::tag '$TAG' is not vX.Y.Z"; exit 1; fi
-          # Never replace the files of an existing release: a published one would
-          # lose its signed latest.json. To rebuild a draft, delete it first.
+          # Never replace the files of an existing release: what users already
+          # downloaded would change under them. To rebuild a draft, delete it first.
           if gh release view "$TAG" > /dev/null 2>&1; then
             echo "::error::release $TAG already exists; delete the draft to rebuild it (a published release is never rebuilt)"
             exit 1

@@ -26,13 +26,6 @@ mod pdf;
 mod player;
 mod premiere;
 mod process;
-mod release_keys;
-// The signing tool's latest.json reader, so the app's tests can hold it to
-// serde_json (update.rs). Not part of the app.
-#[cfg(test)]
-#[allow(dead_code)]
-#[path = "../tools/sign_release/src/latest.rs"]
-mod sign_release_latest;
 #[cfg(test)]
 mod release_workflow;
 mod signals;

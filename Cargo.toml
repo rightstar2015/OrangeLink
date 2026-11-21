@@ -30,10 +30,8 @@ encoding_rs = "0.8"
 ferrous-opencc = { version = "0.4", default-features = false, features = ["s2t-conversion"] }
 notify = "8"
 global-hotkey = "0.9"
-# Checking downloads, and the signature on updates (verify only; no randomness needed).
+# Checking downloads.
 sha2 = "0.10"
-ed25519-compact = { version = "2", default-features = false }
-# The release key is made and used by tools/sign_release, a crate of its own.
 
 [profile.release]
 opt-level = 3

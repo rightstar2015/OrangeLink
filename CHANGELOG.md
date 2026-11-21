@@ -2,6 +2,15 @@
 
 格式參考 [Keep a Changelog](https://keepachangelog.com/zh-TW/1.1.0/),版本號依 [語意化版本](https://semver.org/lang/zh-TW/)。
 
+## [Unreleased]
+
+### 變更
+- 發布的版本不再簽章。OrangeLink 從 0.1.8 起只提示有新版、請到 GitHub 手動下載更新；之後的版本讀到比較新的版本號就會提示，不再檢查簽章。
+- **0.1.6 到 0.1.9 版不會再收到新版提示**（它們只認有簽章的版本），請到 [GitHub Releases](https://github.com/rightstar2015/OrangeLink/releases) 手動下載一次。0.1.6、0.1.7 的自動更新也不會再動作。
+
+### 維護
+- 移除簽章工具 `tools/sign_release`、公鑰清單 `release_keys.txt` 和程式裡的簽章驗證。
+
 ## [0.1.9]
 
 ### 變更

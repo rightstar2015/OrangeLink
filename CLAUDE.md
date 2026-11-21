@@ -67,8 +67,8 @@ Rust + egui 的 Windows 素材管理程式。下面每條規則都對應一個�
 
 ## 更新與發布
 
-- 更新只從本 repo 的 GitHub Releases 取得;zip 的網址由程式自己組出來,`latest.json` 只能指定檔名。
-- 簽章驗證(`self_update.rs`,公鑰清單在 repo 根目錄的 `release_keys.txt`)不能拿掉或放寬。公鑰只寫在 `release_keys.txt`,app 和 `tools/sign_release` 都讀這個檔案。私鑰不能進 repo,也不能放進 GitHub secret。
+- 新版資訊只從本 repo 的 GitHub Releases 的 `latest.json` 取得,程式只讀其中的版本號。
+- 新版只提示、不自動下載安裝;release 不簽章。提示開啟的網址由程式依版本號組出來,不能用 `latest.json` 裡的網址。
 
 ## 修 bug 與 commit
 

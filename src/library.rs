@@ -596,6 +596,8 @@ impl Library {
         self.drop_missing_folders();
         self.touch_meta();
         self.flush()?;
+        // Linked items now point where they did then, which may be gone (or back).
+        self.refresh_missing();
         Ok(restored)
     }
 
@@ -1775,6 +1777,26 @@ mod tests {
         assert!(lib.meta.folders.iter().all(|f| f.id != new));
         assert_eq!(lib.items["b"].folders, std::slice::from_ref(&old), "the folder made after the backup is gone");
         assert_eq!(lib.items["a"].folders, [old]);
+        drop(lib);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn after_a_restore_linked_files_that_are_gone_show_as_missing() {
+        let root = std::env::temp_dir().join(format!("orangelink-restore-missing-{}", new_id()));
+        let mut lib = Library::create(&root.join("lib")).unwrap();
+        fs::create_dir_all(item_dir(&lib.root, "a")).unwrap();
+        fs::write(root.join("here.png"), "x").unwrap();
+        lib.insert_item(item("a"));
+        lib.items.get_mut("a").unwrap().source = Some(root.join("old place.png"));
+        lib.touch("a");
+        lib.flush().unwrap();
+        lib.write_backup("backup-20000101-000000.json").unwrap();
+        lib.relink("a", root.join("here.png"));
+        lib.refresh_missing();
+        assert!(lib.missing.is_empty());
+        lib.restore_backup(&lib.root.join("backups").join("backup-20000101-000000.json")).unwrap();
+        assert!(lib.missing.contains("a"), "the restored path is gone but the item isn't marked missing");
         drop(lib);
         let _ = fs::remove_dir_all(&root);
     }

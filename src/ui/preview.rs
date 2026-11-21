@@ -600,7 +600,8 @@ impl App {
                     let block = Rect::from_x_y_ranges(x(a)..=x(b).max(x(a) + 2.0), strip.y_range());
                     let candidate = crate::app::is_candidate(&c.name);
                     let color = if selected.contains(&c.id) { Color32::WHITE } else { accent() };
-                    let body = ui.interact(block, ui.id().with(("clip-block", &c.id)), Sense::click());
+                    let grips = [(false, x(a)), (true, x(b))].map(|(end, px)| (end, Rect::from_x_y_ranges(px - EDGE..=px + EDGE, strip.y_range())));
+                    let (body, edges) = clip_block(ui, block, grips, ui.id().with(&c.id));
                     if candidate {
                         ui.painter().rect_filled(block, 2.0, color.gamma_multiply(0.25));
                         dashed_rect(ui.painter(), block.shrink(0.5), Stroke::new(1.0_f32, color));
@@ -612,9 +613,8 @@ impl App {
                         picked = Some(c.id.clone());
                         p.seek(c.start);
                     }
-                    for (end, px) in [(false, x(a)), (true, x(b))] {
-                        let grip = Rect::from_x_y_ranges(px - EDGE..=px + EDGE, strip.y_range());
-                        let g = ui.interact(grip, ui.id().with(("clip-edge", &c.id, end)), Sense::drag()).on_hover_cursor(egui::CursorIcon::ResizeHorizontal);
+                    for (end, g) in edges {
+                        let g = g.on_hover_cursor(egui::CursorIcon::ResizeHorizontal);
                         if g.dragged() {
                             if let Some(pos) = g.interact_pointer_pos() {
                                 // At least 0.1 s long; the other end stays put.
@@ -1204,4 +1204,35 @@ fn preset_menu(ui: &mut Ui, presets: &[crate::config::ExportPreset], video: bool
 fn dashed_rect(painter: &egui::Painter, rect: Rect, stroke: Stroke) {
     let pts = [rect.left_top(), rect.right_top(), rect.right_bottom(), rect.left_bottom(), rect.left_top()];
     painter.extend(egui::Shape::dashed_line(&pts, stroke, 4.0, 3.0));
+}
+
+/// A clip's block on the timeline and the grips on its two ends (`grips`: whether
+/// it is the out point, and its area). The block's response also reports clicks on
+/// the grips: a short clip on a long video is narrower than its two grips, and
+/// with drag-only grips no click on it would get through (see `hits`).
+fn clip_block(ui: &Ui, block: Rect, grips: [(bool, Rect); 2], id: egui::Id) -> (egui::Response, [(bool, egui::Response); 2]) {
+    let body = ui.interact(block, id.with("clip-block"), Sense::click());
+    let (body, start) = super::hits::with_handle(ui, body, grips[0].1, id.with(("clip-edge", grips[0].0)));
+    let (body, end) = super::hits::with_handle(ui, body, grips[1].1, id.with(("clip-edge", grips[1].0)));
+    (body, [(grips[0].0, start), (grips[1].0, end)])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A 30-second highlight on a 2-hour stream is a few pixels wide, all of it
+    /// under the grips.
+    #[test]
+    fn a_clip_narrower_than_its_grips_can_still_be_clicked() {
+        let (left, right) = (100.0, 106.0);
+        let block = Rect::from_x_y_ranges(left..=right, 10.0..=23.0);
+        let grip = |px: f32| Rect::from_x_y_ranges(px - 5.0..=px + 5.0, 10.0..=23.0);
+        let clicks = super::super::hits::pointer::click(pos2(103.0, 16.0), |ui| {
+            let (body, edges) = clip_block(ui, block, [(false, grip(left)), (true, grip(right))], egui::Id::new("clip"));
+            (body.clicked(), edges.iter().any(|(_, e)| e.dragged()))
+        });
+        assert!(clicks.iter().any(|(clicked, _)| *clicked), "the click selects the clip");
+        assert!(clicks.iter().all(|(_, dragged)| !dragged), "and doesn't move its ends");
+    }
 }

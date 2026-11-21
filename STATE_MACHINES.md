@@ -100,6 +100,7 @@ cargo test state::
 | 開啟資源庫 | 永遠停在「正在開啟資源庫…」 | 顯示「無法開啟資源庫」 |
 | 輸出片段 | 輸出佇列卡住 | 這個片段失敗（紅框提示），繼續下一個 |
 | 整場處理 | 佇列卡住 | 這個項目失敗，繼續下一個 |
+| 擴充套件 | （新功能，一開始就用 `Reply`） | 這個項目失敗，繼續下一個 |
 | 音量分析 | 一直顯示分析中 | 顯示錯誤 |
 | 語音轉字幕 | 佇列卡住 | 這個項目失敗，繼續下一個 |
 | yt-dlp 下載 | 一直顯示下載中 | 這個下載失敗 |
@@ -130,7 +131,7 @@ cargo test state::
 | 資源庫生命週期 | `lib`、`lib_loading`、`pending_import` | 沒開 → 開啟中 → 已開啟 | `lib` 有數百處使用。轉換只發生在 `switch_library` 和 `poll_library_loading` 兩個函式裡，`get_status` 也已經回報這個狀態。之後可以改成 `LibraryState` enum |
 | 預覽開啟去抖動 | `viewer`、`viewer_loading`、`pending_media` | 已開啟 → 停留 35 ms 後才載入 → 已載入 | 轉換集中在 `open_viewer_at` 和 `finish_viewer_open` |
 | 播放引擎 | `player::Backend` | Media Foundation 失敗 → 從同一個位置改用 FFmpeg | 已經是 enum |
-| 工作佇列 | 輸出片段（`clip_rx`、`clip_queue`）、語音轉字幕（`whisper.queue`、`running`）、整場處理（`stream_queue`、`stream_run`）、yt-dlp（`queue`、`running`、`run_queue`） | 閒置 → 執行一個並有 N 個等待 → 閒置 | 四個佇列的形狀相同，執行緒當掉時的處理已經補上。之後可以合併成一個共用的 `WorkQueue` |
+| 工作佇列 | 輸出片段（`clip_rx`、`clip_queue`）、語音轉字幕（`whisper.queue`、`running`）、整場處理（`stream_queue`、`stream_run`）、擴充套件（`ext.queue`、`ext.run`）、yt-dlp（`queue`、`running`、`run_queue`） | 閒置 → 執行一個並有 N 個等待 → 閒置 | 五個佇列的形狀相同，執行緒當掉時的處理已經補上。之後可以合併成一個共用的 `WorkQueue` |
 | 懸停預覽 | `hover_since`、`preview` | 游標停留 → 預覽（GIF 或播放器） | 只在 `update_hover_preview` 裡轉換 |
 | 時間軸縮圖 | `scrub::Scrub` | 一次擷取一格，`wanted` 記住下一格 | 已經封裝成獨立模組 |
 | 關閉流程 | `guard_close`、`force_close`、`update_relaunch` | 要求關閉 → 儲存 →（失敗時）確認對話框 → 關閉並安裝更新 | 必須配合 egui 的 viewport 指令，轉換集中在 `guard_close` 和 `Drop` |

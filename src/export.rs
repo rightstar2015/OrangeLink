@@ -182,6 +182,9 @@ fn codec_args(encoder: &str) -> Vec<String> {
 }
 
 /// Set once NVENC failed this session (no NVIDIA card, old driver): Auto stops trying it.
+/// What `run` answers when it was cancelled.
+pub const CANCELLED: &str = "已取消";
+
 static NVENC_FAILED: AtomicBool = AtomicBool::new(false);
 
 /// The encoders FFmpeg was built with (`ffmpeg -encoders`), asked once.
@@ -213,7 +216,8 @@ fn command(ffmpeg_dir: &Path) -> Command {
 /// Writes the clip to `out` (blocking), trying the next encoder when one fails.
 /// Returns the encoder used (or "copy"/"aac"/"audio" without video), or
 /// FFmpeg's last error line.
-pub fn run(ffmpeg_dir: &Path, choice: VideoEncoder, job: &Export, out: &Path) -> Result<&'static str, String> {
+/// Encodes the clip; stops FFmpeg and removes the partial file when `cancel` is set.
+pub fn run(ffmpeg_dir: &Path, choice: VideoEncoder, job: &Export, out: &Path, cancel: &AtomicBool) -> Result<&'static str, String> {
     let order = if job.encodes_video() { encoder_order(choice, ffmpeg_encoders(ffmpeg_dir), NVENC_FAILED.load(Ordering::Relaxed)) } else { vec![job.other_codec()] };
     let mut last = String::from("ffmpeg 失敗");
     for (n, encoder) in order.iter().enumerate() {
@@ -222,9 +226,13 @@ pub fn run(ffmpeg_dir: &Path, choice: VideoEncoder, job: &Export, out: &Path) ->
         if let Some(dir) = job.subtitles.as_ref().and_then(|p| p.parent()) {
             cmd.current_dir(dir);
         }
-        match cmd.output() {
-            Ok(o) if o.status.success() && out.is_file() => return Ok(encoder),
-            Ok(o) => {
+        match crate::process::output_or_cancel(&mut cmd, cancel) {
+            Ok(None) => {
+                let _ = std::fs::remove_file(out);
+                return Err(CANCELLED.to_string());
+            }
+            Ok(Some(o)) if o.status.success() && out.is_file() => return Ok(encoder),
+            Ok(Some(o)) => {
                 let err = String::from_utf8_lossy(&o.stderr).to_string();
                 crate::log::command_failed("clip", &cmd, format!("結束代碼 {:?}\n{err}", o.status.code()));
                 last = err.lines().last().unwrap_or("ffmpeg 失敗").to_string();
@@ -332,7 +340,7 @@ mod tests {
             subtitles: None,
         };
         let out = dir.join("v.mp4");
-        let enc = run(&ff, VideoEncoder::Auto, &job, &out).unwrap();
+        let enc = run(&ff, VideoEncoder::Auto, &job, &out, &AtomicBool::new(false)).unwrap();
         println!("encoder: {enc}");
         let p = crate::media::probe(&ff, &out).unwrap();
         assert_eq!((p.width, p.height), SHORTS);
@@ -346,7 +354,7 @@ mod tests {
         job.subtitles = Some(sub);
         job.preset.loudnorm = false;
         let subbed = dir.join("s.mp4");
-        run(&ff, VideoEncoder::Auto, &job, &subbed).unwrap();
+        run(&ff, VideoEncoder::Auto, &job, &subbed, &AtomicBool::new(false)).unwrap();
         let frame = |f: &Path| {
             let o = command(&ff).args(["-v", "error", "-ss", "1", "-i"]).arg(f).args(["-frames:v", "1", "-vf", "crop=1080:400:0:1300,scale=54:20", "-f", "rawvideo", "-pix_fmt", "gray", "-"]).stdout(Stdio::piped()).output().unwrap();
             o.stdout
@@ -368,15 +376,20 @@ mod tests {
             assert!(made.success());
             let portrait = Export { input: src, crop: None, end: 1.5, start: 0.0, ..job.clone() };
             let out = dir.join(name);
-            run(&ff, VideoEncoder::Auto, &portrait, &out).unwrap();
+            run(&ff, VideoEncoder::Auto, &portrait, &out, &AtomicBool::new(false)).unwrap();
             let p = crate::media::probe(&ff, &out).unwrap();
             assert_eq!((p.width, p.height), SHORTS, "{size}");
         }
 
         job.preset = ExportPreset { shape: ExportShape::AudioOnly, ..Default::default() };
         let out = dir.join("a.m4a");
-        assert_eq!(run(&ff, VideoEncoder::Auto, &job, &out).unwrap(), "aac", "logged as what it is");
+        assert_eq!(run(&ff, VideoEncoder::Auto, &job, &out, &AtomicBool::new(false)).unwrap(), "aac", "logged as what it is");
         assert!(crate::media::probe(&ff, &out).unwrap().duration.is_some());
+
+        // Cancelled: FFmpeg is ended and nothing half-written is left.
+        let out = dir.join("cancelled.m4a");
+        assert_eq!(run(&ff, VideoEncoder::Auto, &job, &out, &AtomicBool::new(true)), Err(CANCELLED.to_string()));
+        assert!(!out.exists());
         let _ = std::fs::remove_dir_all(&dir);
     }
 

@@ -417,6 +417,8 @@ struct DupSearch {
 #[derive(Default)]
 struct ClipExports {
     rx: Option<Receiver<ClipExported>>,
+    /// Stops the clip being written (FFmpeg is ended, the partial file removed).
+    cancel: Arc<AtomicBool>,
     queue: std::collections::VecDeque<(String, String, crate::config::ExportPreset)>,
 }
 
@@ -1178,7 +1180,7 @@ impl App {
         self.cancel_stream();
         self.signals = None;
         self.pending_media = None;
-        self.clips.queue.clear();
+        self.cancel_clip_queue();
         self.clips.rx = None;
         self.dupes.similar_rx = None;
         self.dupes.exact_rx = None;
@@ -2176,8 +2178,10 @@ impl App {
         let encoder = self.config.video_encoder;
         let (tx, rx) = std::sync::mpsc::channel();
         let ctx = self.egui_ctx.clone();
+        let cancel = Arc::new(AtomicBool::new(false));
+        self.clips.cancel = cancel.clone();
         std::thread::spawn(move || {
-            let result = crate::export::run(&ff, encoder, &job, &out).map(|enc| (out, job.preset.import, enc));
+            let result = crate::export::run(&ff, encoder, &job, &out, &cancel).map(|enc| (out, job.preset.import, enc));
             if let Some(sub) = &job.subtitles {
                 let _ = std::fs::remove_file(sub);
             }
@@ -2211,6 +2215,7 @@ impl App {
                     self.toast_with("片段輸出完成", "在檔案總管中顯示", Action::RevealPath(path));
                 }
             }
+            Err(e) if e == crate::export::CANCELLED => self.toast("已取消輸出片段"),
             Err(e) => self.toast_error(format!("輸出片段失敗：{e}")),
         }
         // A clip that can't start (deleted, its folder can't be made) says so and
@@ -2226,14 +2231,13 @@ impl App {
         self.clips.rx.as_ref()?;
         let left = self.clips.queue.len();
         let detail = if left > 0 { format!("還有 {left} 個等待中") } else { "FFmpeg 處理中".to_string() };
-        let mut job = jobs::BgJob::new(jobs::JobKind::ClipExport, "輸出片段", detail, None);
-        job.can_cancel = left > 0;
-        Some(job)
+        Some(jobs::BgJob::new(jobs::JobKind::ClipExport, "輸出片段", detail, None))
     }
 
-    /// Drops the clips waiting; the one being written finishes.
+    /// Stops the clip being written and drops the ones waiting.
     pub(super) fn cancel_clip_queue(&mut self) {
         self.clips.queue.clear();
+        self.clips.cancel.store(true, Ordering::Relaxed);
     }
 
     pub fn clip_exporting(&self) -> bool {

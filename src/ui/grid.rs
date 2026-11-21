@@ -6,7 +6,7 @@ use cell::{paint_group_header, GROUP_HEADER_H};
 
 /// A row of the justified view: (visible index, aspect ratio) of its cells, its
 /// height, and the group whose header it is instead.
-type JustifiedRow = (Vec<(usize, f32)>, f32, Option<usize>);
+use crate::app::JustifiedRow;
 
 impl App {
     /// Above similarity and duplicate results: the count, the threshold, search
@@ -519,14 +519,9 @@ impl App {
     }
 
     /// Justified rows: every row has the same height and images keep their aspect ratio.
-    pub(super) fn justified_ui(&mut self, ui: &mut Ui) {
-        let Some(lib) = &self.lib else { return };
+    fn justified_layout(&self, lib: &crate::library::Library, width: f32, target_h: f32, key: (u64, u64, u32, u32)) -> crate::app::JustifiedLayout {
         let gap = 8.0;
         let label_h = 20.0;
-        // Not below a thumbnail's width: a very narrow window (or the side panels
-        // taking it all) made it negative, and every row a negative height.
-        let width = (ui.available_width() - 12.0).max(40.0);
-        let target_h = self.config.thumb_size;
         let aspect = |id: &String| {
             lib.items
                 .get(id)
@@ -568,6 +563,30 @@ impl App {
             y += row_h(row);
         }
         let total_h = y;
+        crate::app::JustifiedLayout { key, rows, tops, total_h }
+    }
+
+    pub(super) fn justified_ui(&mut self, ui: &mut Ui) {
+        let Some(lib) = &self.lib else { return };
+        let gap = 8.0;
+        let label_h = 20.0;
+        // Not below a thumbnail's width: a very narrow window (or the side panels
+        // taking it all) made it negative, and every row a negative height.
+        let width = (ui.available_width() - 12.0).max(40.0);
+        let target_h = self.config.thumb_size;
+        // Packing every item into rows is redone only when something it depends
+        // on changes, not every frame.
+        let key = (lib.revision, self.visible_gen, width.to_bits(), target_h.to_bits());
+        let layout = match &self.justified_cache {
+            Some(l) if l.key == key => l.clone(),
+            _ => {
+                let l = std::rc::Rc::new(self.justified_layout(lib, width, target_h, key));
+                self.justified_cache = Some(l.clone());
+                l
+            }
+        };
+        let (rows, tops, total_h) = (&layout.rows, &layout.tops, layout.total_h);
+        let row_h = |(_, h, header): &JustifiedRow| if header.is_some() { GROUP_HEADER_H } else { h + label_h + gap };
 
         let mut scroll = ScrollArea::vertical().id_salt("justified").auto_shrink([false, false]).drag_to_scroll(false);
         if let Some(offset) = self.glide(ui, total_h) {
@@ -1021,4 +1040,39 @@ impl App {
 /// A menu entry with its keyboard shortcut on the right.
 fn menu_item(ui: &mut Ui, label: impl Into<egui::WidgetText>, shortcut: &str) -> egui::Response {
     ui.add(egui::Button::new(label).shortcut_text(RichText::new(shortcut).weak()))
+}
+
+#[cfg(test)]
+mod tests {
+    use eframe::egui;
+
+    #[test]
+    fn the_proportional_view_lays_out_rows_once_until_something_changes() {
+        let root = std::env::temp_dir().join(format!("orangelink-justified-{}", crate::model::new_id()));
+        let mut lib = crate::library::Library::create(&root).unwrap();
+        for id in ["a", "b", "c"] {
+            let it: crate::model::Item = serde_json::from_value(serde_json::json!({
+                "id": id, "name": id, "file_name": "a.png", "ext": "png", "kind": "image", "size": 1,
+                "width": 300, "height": 200, "added_at": 0, "modified_at": 0
+            }))
+            .unwrap();
+            lib.insert_item(it);
+        }
+        let ctx = egui::Context::default();
+        let mut app = crate::app::App::with_config(&ctx, crate::config::Config::default());
+        app.lib = Some(lib);
+        app.visible = vec!["a".into(), "b".into(), "c".into()];
+        let frame = |app: &mut crate::app::App| {
+            let _ = ctx.run(egui::RawInput::default(), |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| app.justified_ui(ui));
+            });
+            app.justified_cache.clone().expect("laid out")
+        };
+        let first = frame(&mut app);
+        assert_eq!(first.rows.iter().map(|r| r.0.len()).sum::<usize>(), 3);
+        assert!(std::rc::Rc::ptr_eq(&first, &frame(&mut app)), "laid out again with nothing changed");
+        app.lib.as_mut().unwrap().touch("a");
+        assert!(!std::rc::Rc::ptr_eq(&first, &frame(&mut app)), "a library edit kept the old rows");
+        let _ = std::fs::remove_dir_all(&root);
+    }
 }

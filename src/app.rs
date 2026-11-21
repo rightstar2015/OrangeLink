@@ -42,6 +42,18 @@ use std::{
     },
 };
 
+/// Rows of the proportional (justified) view: cells as (index in `visible`,
+/// width / height), row height, and the group index for a header row; with each row's top.
+pub type JustifiedRow = (Vec<(usize, f32)>, f32, Option<usize>);
+
+pub struct JustifiedLayout {
+    /// (library revision, `visible_gen`, width bits, thumbnail size bits) it was made for.
+    pub key: (u64, u64, u32, u32),
+    pub rows: Vec<JustifiedRow>,
+    pub tops: Vec<f32>,
+    pub total_h: f32,
+}
+
 /// See `App::multi_summary`.
 #[derive(Default)]
 pub struct MultiSummary {
@@ -881,7 +893,8 @@ pub struct App {
     /// and action bar; rebuilt when the library, selection or shown order changes.
     multi_summary: Option<std::rc::Rc<MultiSummary>>,
     /// Counts recomputations of `visible`, so caches can tell the order changed.
-    visible_gen: u64,
+    pub(crate) visible_gen: u64,
+    pub(crate) justified_cache: Option<std::rc::Rc<JustifiedLayout>>,
     /// Search syntax quick-reference popover open.
     pub syntax_open: bool,
     /// Studio header 🏷 整理 popover open.
@@ -1074,6 +1087,7 @@ impl App {
             sidebar_cache: RefCell::new((None, crate::ui::SidebarStats::default())),
             multi_summary: None,
             visible_gen: 0,
+            justified_cache: None,
             syntax_open: false,
             viewer_tags_open: false,
             signal_plot_cache: crate::ui::SignalPlotCache::default(),

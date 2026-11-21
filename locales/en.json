@@ -1210,7 +1210,6 @@
  "開啟記錄資料夾": "Open the log folder",
  "複製最近的記錄": "Copy the recent log",
  "複製最後 200 行，可以貼到回報裡；不會自動上傳": "Copies the last 200 lines to paste into a report; nothing is uploaded automatically",
- "本機 MCP 伺服器執行中；按一下查看 AI 操作紀錄": "The local MCP server is running; click to see the AI activity",
  "AI 助理整合（MCP）尚未啟用；按一下開啟整合設定": "AI assistant integration (MCP) is off; click to open the integration settings",
  "🖼  全部": "🖼  All",
  "📥  未分類": "📥  Unfiled",

@@ -381,6 +381,12 @@ impl App {
                         if r.clicked() {
                             self.show_ai_log = true;
                         }
+                    } else if ui
+                        .add(egui::Button::new(RichText::new("○ MCP").small().weak()).frame(false))
+                        .on_hover_text(t!("AI 助理整合（MCP）尚未啟用；按一下開啟整合設定"))
+                        .clicked()
+                    {
+                        self.act(Action::OpenSettingsAt(crate::config::SettingsPage::Integration));
                     }
                     if let Some(lib) = &self.lib {
                         ui.add(egui::Label::new(RichText::new(lib.name()).small().weak()).truncate())

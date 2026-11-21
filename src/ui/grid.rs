@@ -698,6 +698,7 @@ impl App {
             return;
         }
         let row_h = 34.0;
+        let link_badge = self.with_sidebar_stats(|s| s.link_badge_tells());
         // (title, width, sort key)
         let cols: [(&str, f32, Option<SortKey>); 7] = [
             (t!("名稱"), 0.0, Some(SortKey::Name)),
@@ -808,7 +809,7 @@ impl App {
                     }
                     let name_text = if missing {
                         format!("⚠ {}", it.name)
-                    } else if it.source.is_some() {
+                    } else if it.source.is_some() && link_badge {
                         format!("🔗 {}", it.name)
                     } else {
                         it.name.clone()

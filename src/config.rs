@@ -260,6 +260,8 @@ pub struct Config {
     /// A release the 發現新版本 window was told to skip: it shows only as the
     /// status bar's badge, until a newer one comes out.
     pub skipped_update: Option<String>,
+    /// The viewer shows an image's (or another file's) info panel beside it.
+    pub viewer_info: bool,
     /// How long a wheel notch glides in the grid, 0..=100; 0 scrolls in steps.
     pub scroll_smoothness: u32,
 
@@ -424,6 +426,7 @@ impl Config {
                 self.auto_update = d.auto_update;
                 self.skipped_update = d.skipped_update;
                 self.collapsed_sections = d.collapsed_sections;
+                self.viewer_info = d.viewer_info;
                 self.clip_sort = d.clip_sort;
             }
         }
@@ -495,6 +498,7 @@ impl Default for Config {
             ffmpeg_hint_dismissed: false,
             auto_update: true,
             skipped_update: None,
+            viewer_info: true,
             mcp_enabled: false,
             mcp_port: 47821,
             mcp_token: String::new(),
@@ -671,6 +675,16 @@ impl Config {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Pictures in the viewer had no info panel: their tags and notes were a
+    /// trip back to the library away. A config from before it shows the panel.
+    #[test]
+    fn the_viewer_shows_a_pictures_info_panel_unless_hidden() {
+        let old: Config = serde_json::from_str("{}").unwrap();
+        assert!(old.viewer_info);
+        let hidden: Config = serde_json::from_str(r#"{"viewer_info": false}"#).unwrap();
+        assert!(!hidden.viewer_info);
+    }
 
     #[test]
     fn the_one_press_export_uses_the_last_preset_that_still_fits() {

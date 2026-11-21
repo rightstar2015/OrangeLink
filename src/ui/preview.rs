@@ -124,6 +124,20 @@ impl App {
                 .width_range(240.0..=560.0)
                 .frame(egui::Frame::side_top_panel(ui.style()))
                 .show_inside(ui, |ui| self.viewer_side(ui, &id));
+        } else if self.config.viewer_info && self.selected.len() == 1 && self.selected.contains(&id) {
+            // A picture gets the same info panel as in the library: tags,
+            // rating, notes, folders, file info. ⓘ hides it.
+            egui::SidePanel::right("viewer-info")
+                .resizable(true)
+                .default_width(300.0)
+                .width_range(240.0..=520.0)
+                .frame(egui::Frame::side_top_panel(ui.style()))
+                .show_inside(ui, |ui| {
+                    ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+                        ui.add_space(8.0);
+                        self.inspector_single(ui);
+                    });
+                });
         }
 
         // Snapshot metadata before mutable UI calls so we can borrow `self` cleanly.
@@ -263,6 +277,9 @@ impl App {
                             self.viewer_tags_open = !self.viewer_tags_open;
                         }
                         tags_anchor = Some(tags_btn.rect);
+                        if !has_player && ui.selectable_label(self.config.viewer_info, "ⓘ").on_hover_text(t!("顯示或隱藏資訊面板")).clicked() {
+                            self.config.viewer_info = !self.config.viewer_info;
+                        }
                         ui.separator();
 
                         if has_player {

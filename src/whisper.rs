@@ -42,8 +42,20 @@ fn model_file(name: &str) -> String {
     format!("ggml-{name}.bin")
 }
 
+/// The model and language come from config.json, which can be edited by hand:
+/// only the listed ones go into the model's path and FFmpeg's filter string.
+fn check_settings(model: &str, language: &str) -> Result<(), String> {
+    if !MODELS.iter().any(|(m, _)| *m == model) {
+        return Err(format!("不支援的語音模型「{model}」，請在字幕視窗重新選擇"));
+    }
+    if !LANGUAGES.iter().any(|(l, _)| *l == language) {
+        return Err(format!("不支援的語言「{language}」，請在字幕視窗重新選擇"));
+    }
+    Ok(())
+}
+
 pub fn has_model(name: &str) -> bool {
-    models_dir().is_some_and(|d| d.join(model_file(name)).is_file())
+    check_settings(name, "auto").is_ok() && models_dir().is_some_and(|d| d.join(model_file(name)).is_file())
 }
 
 /// Whether this FFmpeg build includes the whisper filter.
@@ -87,6 +99,7 @@ impl Download {
 
 /// Downloads a model; curl is ended, and the partial file removed, once `cancel` is set.
 fn download_model(name: &str, cancel: &AtomicBool, got: &AtomicU64, total: &AtomicU64, ctx: &egui::Context) -> Result<(), String> {
+    check_settings(name, "auto")?;
     let dir = models_dir().ok_or("找不到 APPDATA 資料夾")?;
     let file = model_file(name);
     let url = format!("https://huggingface.co/ggerganov/whisper.cpp/resolve/main/{file}");
@@ -203,6 +216,7 @@ impl Job {
 
 #[allow(clippy::too_many_arguments)]
 fn run(exe: &Path, input: &Path, out: &Path, model: &str, language: &str, stop: &AtomicBool, tx: &Sender<Event>, ctx: &egui::Context) -> Result<(), String> {
+    check_settings(model, language)?;
     let dir = models_dir().ok_or("找不到 APPDATA 資料夾")?;
     // Run inside the model folder: Windows paths would need escaping twice in a filter.
     let temp = format!("job-{}.srt", crate::model::new_id());
@@ -439,6 +453,15 @@ mod tests {
         assert!(done(&bad).is_err());
         let leftovers = std::fs::read_dir(models_dir().unwrap()).unwrap().flatten().filter(|e| e.file_name().to_string_lossy().starts_with("job-")).count();
         assert_eq!(leftovers, 0);
+    }
+
+    #[test]
+    fn only_listed_models_and_languages_reach_paths_and_filters() {
+        assert!(check_settings("small", "zh").is_ok());
+        for (model, language) in [(r"..\..\evil", "zh"), ("small:x=1", "zh"), ("small", "zh:destination=C\\x.srt"), ("", "auto"), ("small", "")] {
+            assert!(check_settings(model, language).is_err(), "{model} {language}");
+        }
+        assert!(!has_model(r"..\..\Windows\notepad"));
     }
 
     #[test]

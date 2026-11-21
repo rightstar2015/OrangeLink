@@ -55,7 +55,8 @@ impl App {
         }
         let line = ctx.options(|o| o.line_scroll_speed);
         raw.events.retain(|e| match e {
-            egui::Event::MouseWheel { unit, delta, modifiers } if !(modifiers.ctrl || modifiers.command || modifiers.shift) => {
+            // A sideways tilt of the wheel (no vertical part) is left to egui.
+            egui::Event::MouseWheel { unit, delta, modifiers } if !(modifiers.ctrl || modifiers.command || modifiers.shift) && delta.y != 0.0 => {
                 let px = match unit {
                     egui::MouseWheelUnit::Point => return true,
                     egui::MouseWheelUnit::Line => delta.y * line,
@@ -95,6 +96,27 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::{advance, time_constant};
+
+    #[test]
+    fn a_sideways_wheel_tilt_is_left_for_egui() {
+        use eframe::egui::{self, pos2, vec2};
+        let ctx = egui::Context::default();
+        let id = egui::Id::new("wheel-test");
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::Area::new(id).fixed_pos(pos2(0.0, 0.0)).show(ctx, |ui| ui.allocate_space(vec2(400.0, 300.0)));
+        });
+        let config = crate::config::Config { scroll_smoothness: 50, ..Default::default() };
+        let mut app = crate::app::App::with_config(&ctx, config);
+        let wheel = |delta| egui::Event::MouseWheel { unit: egui::MouseWheelUnit::Line, delta, modifiers: egui::Modifiers::NONE };
+        let mut take = |delta| {
+            app.wheel_area = Some((egui::Rect::from_min_size(pos2(0.0, 0.0), vec2(400.0, 300.0)), egui::LayerId::new(egui::Order::Middle, id)));
+            let mut raw = egui::RawInput { events: vec![egui::Event::PointerMoved(pos2(100.0, 100.0)), wheel(delta)], ..Default::default() };
+            app.take_wheel(&ctx, &mut raw);
+            raw.events.iter().any(|e| matches!(e, egui::Event::MouseWheel { .. }))
+        };
+        assert!(!take(vec2(0.0, -1.0)), "an ordinary notch is smoothed");
+        assert!(take(vec2(1.0, 0.0)), "the sideways tilt was swallowed");
+    }
 
     #[test]
     fn smoothness_sets_how_long_the_glide_takes() {

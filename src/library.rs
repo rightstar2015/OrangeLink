@@ -804,10 +804,25 @@ impl Library {
     }
 
     /// Removes items from the library. What happens to linked originals depends
-    /// on `originals`. Returns original files that could not be deleted.
+    /// on `originals`. Returns original files that could not be deleted. An item
+    /// whose metadata.json can't be deleted stays in the library.
     pub fn delete_forever(&mut self, ids: &[String], originals: Originals) -> Vec<PathBuf> {
         let mut failed = Vec::new();
         for id in ids {
+            // metadata.json goes first: it is what brings an item back on the next
+            // open, while a file another program holds open can stop the rest of
+            // the folder going (that becomes a leftover the library check clears).
+            // When even metadata.json can't go, the item stays.
+            let dir = item_dir(&self.root, id);
+            if self.items.contains_key(id) {
+                match fs::remove_file(dir.join(META_FILE)) {
+                    Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
+                        crate::log::error("delete", format!("無法刪除 {}：{e}", dir.display()));
+                        continue;
+                    }
+                    _ => {}
+                }
+            }
             if let Some(item) = self.items.remove(id) {
                 if let Some(from) = item.imported_from() {
                     self.meta.ignored_sources.push(crate::importer::source_key(from));
@@ -823,7 +838,9 @@ impl Library {
                         failed.push(src.clone());
                     }
                 }
-                let _ = fs::remove_dir_all(item_dir(&self.root, id));
+                if let Err(e) = fs::remove_dir_all(&dir) {
+                    crate::log::error("delete", format!("無法刪除 {}：{e}", dir.display()));
+                }
                 self.revision += 1;
             }
             self.dirty.remove(id);

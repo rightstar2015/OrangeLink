@@ -207,7 +207,7 @@ impl App {
                                 }
                             }
                             if ui
-                                .add_enabled(self.can_undo(), egui::Button::new("↶"))
+                                .add_enabled(self.can_undo(), egui::Button::new("↩"))
                                 .on_hover_text(self.undo_tip())
                                 .on_disabled_hover_text("沒有可以復原的操作（Ctrl+Z）")
                                 .clicked()
@@ -229,7 +229,7 @@ impl App {
                                 pan = egui::Vec2::ZERO;
                             }
                             if ui
-                                .add_enabled(self.can_undo(), egui::Button::new("↶"))
+                                .add_enabled(self.can_undo(), egui::Button::new("↩"))
                                 .on_hover_text(self.undo_tip())
                                 .on_disabled_hover_text("沒有可以復原的操作（Ctrl+Z）")
                                 .clicked()
@@ -1006,7 +1006,7 @@ impl App {
                         ui.label(RichText::new("可以直接用本機 Whisper 產生繁體中文字幕，或手動選擇既有的字幕檔。").small().weak());
                         ui.add_space(8.0);
                         ui.horizontal_wrapped(|ui| {
-                            let whisper_btn = egui::Button::new(RichText::new("🎙 用 Whisper 產生字幕…").color(Color32::WHITE))
+                            let whisper_btn = egui::Button::new(RichText::new("🎤 用 Whisper 產生字幕…").color(Color32::WHITE))
                                 .fill(tokens().selection_bg);
                             if ui.add(whisper_btn).clicked() {
                                 pending.push(Action::OpenWhisper(vec![id.to_string()]));

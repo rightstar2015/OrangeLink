@@ -198,7 +198,7 @@ impl App {
         }
         ui.separator();
         if ui
-            .add_enabled(self.can_undo(), egui::Button::new("↶").frame(false))
+            .add_enabled(self.can_undo(), egui::Button::new("↩").frame(false))
             .on_hover_text(self.undo_tip())
             .on_disabled_hover_text("沒有可以復原的操作（Ctrl+Z）")
             .clicked()
@@ -206,7 +206,7 @@ impl App {
             self.act(Action::Undo);
         }
         if ui
-            .add_enabled(self.can_redo(), egui::Button::new("↷").frame(false))
+            .add_enabled(self.can_redo(), egui::Button::new("↪").frame(false))
             .on_hover_text(self.redo_tip())
             .on_disabled_hover_text("沒有可以重做的操作（Ctrl+Y）")
             .clicked()

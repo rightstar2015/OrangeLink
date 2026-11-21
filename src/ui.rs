@@ -355,7 +355,7 @@ impl App {
                     if lib.has_unsaved() {
                         ui.label(RichText::new("• 儲存中…").small().weak());
                     } else {
-                        ui.label(RichText::new("✓ 已自動存檔").small().color(good().gamma_multiply(0.85)));
+                        ui.label(RichText::new("✔ 已自動存檔").small().color(good().gamma_multiply(0.85)));
                     }
                 }
                 // Thumbnails come and go with scrolling: not worth a toast.

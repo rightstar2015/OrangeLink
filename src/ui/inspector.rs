@@ -602,7 +602,7 @@ impl App {
                     let has_draft = !draft.trim().is_empty();
                     let w = (ui.available_width() - if has_draft { 28.0 } else { 0.0 }).max(60.0);
                     let r = ui.add(TextEdit::singleline(draft).hint_text(hint).desired_width(w));
-                    let apply_clicked = has_draft && ui.small_button("✓").on_hover_text("套用到選取的項目").clicked();
+                    let apply_clicked = has_draft && ui.small_button("✔").on_hover_text("套用到選取的項目").clicked();
                     let esc = ui.input(|i| i.key_pressed(Key::Escape));
                     if (apply_clicked || (r.lost_focus() && !esc)) && !draft.trim().is_empty() {
                         pending.push(Action::SetField(ids.clone(), name.clone(), std::mem::take(draft)));

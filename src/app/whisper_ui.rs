@@ -217,7 +217,7 @@ impl App {
                 let shown = MODELS.iter().find(|m| m.0 == c.whisper_model).map_or(c.whisper_model.clone(), |m| format!("{}（{}）", m.0, m.1));
                 egui::ComboBox::from_id_salt("whisper-model").width(260.0).selected_text(shown).show_ui(ui, |ui| {
                     for (name, size) in MODELS {
-                        let have = if whisper::has_model(name) { " ✓" } else { "" };
+                        let have = if whisper::has_model(name) { " ✔" } else { "" };
                         ui.selectable_value(&mut c.whisper_model, name.to_string(), format!("{name}（{size}）{have}"));
                     }
                 });

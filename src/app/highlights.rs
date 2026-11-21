@@ -401,7 +401,7 @@ pub fn candidates_ui(app: &mut App, ui: &mut egui::Ui, id: &str) {
             let (chat_text, chat_ok) = match (&s.chat_file, &s.chat, &s.chat_rx) {
                 (None, ..) => ("找不到同名 .live_chat.json（下載時勾選聊天室並與影片同資料夾）".to_string(), false),
                 (Some(_), _, Some(_)) => ("聊天室：讀取中…".to_string(), false),
-                (Some(_), Some(c), _) => (format!("✓ 聊天室已載入（約 {} 分鐘）", c.len() / 60), true),
+                (Some(_), Some(c), _) => (format!("✔ 聊天室已載入（約 {} 分鐘）", c.len() / 60), true),
                 (Some(_), None, None) => ("聊天室紀錄沒有可用的時間資訊".to_string(), false),
             };
             ui.label(RichText::new(chat_text).small().color(if chat_ok { crate::ui::good() } else { t.text_muted }));
@@ -413,7 +413,7 @@ pub fn candidates_ui(app: &mut App, ui: &mut egui::Ui, id: &str) {
                     cancel = ui.small_button("取消").clicked();
                 }
                 (Some(_), None) => {
-                    ui.label(RichText::new("✓ 音量軌已分析").small().color(crate::ui::good()));
+                    ui.label(RichText::new("✔ 音量軌已分析").small().color(crate::ui::good()));
                     analyze = ui.small_button("重新分析").clicked();
                 }
                 (None, None) => {

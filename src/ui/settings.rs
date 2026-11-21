@@ -561,7 +561,7 @@ impl App {
                                     let label = if cl.blocked { RichText::new(format!("⛔ {text}（已拒絕）")).small().color(danger()) } else { RichText::new(text).small().monospace() };
                                     ui.label(label);
                                     if only {
-                                        ui.label(RichText::new("✓ 只允許這個").small().color(good()));
+                                        ui.label(RichText::new("✔ 只允許這個").small().color(good()));
                                     } else if !cl.origin.is_empty()
                                         && ui.small_button("只允許這個").on_hover_text("其他擴充功能和程式即使有配對碼也會被拒絕").clicked()
                                     {

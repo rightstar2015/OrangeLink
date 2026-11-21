@@ -14,7 +14,7 @@ cargo test state::
 
 1. **一組互斥的狀態用一個 `enum` 表示**，不要再用 `Option` 加 `bool` 拼湊。判斷方式：如果兩個欄位不該同時是 `Some`，它們就應該是同一個 enum 的不同變體。
 2. **轉換邏輯放在狀態型別自己的方法裡**（例如 `Service::sync`、`FullImage::finish`），`App` 只負責 I/O：開執行緒、建立貼圖、顯示提示。只要用得上泛型（例如貼圖用 `T`），就把型別放進 `state.rs` 並補上測試。
-3. **背景執行緒的回覆一律用 `state::poll(&rx)` 讀取**，不要用 `rx.try_recv().ok()`。後者分不出「還在做」和「執行緒已經當掉」，後一種情況會讓工作永遠顯示執行中，排在後面的佇列也會跟著卡住。`Reply::Lost` 要讓工作以失敗結束，錯誤訊息用 `state::LOST`。
+3. **背景執行緒的回覆一律用 `state::poll(&rx)` 讀取**，不要用 `rx.try_recv().ok()`。後者分不出「還在做」和「執行緒已經當掉」，後一種情況會讓工作永遠顯示執行中，排在後面的佇列也會跟著卡住。`Reply::Lost` 要讓工作以失敗結束，錯誤訊息用 `state::LOST`。 只等一個回覆的工作用 `state::take(&mut slot).finished()`：工作結束（不論成功或當掉）時會清空 `slot`。
 4. **新的背景工作要接上四個地方**：
    - `jobs.rs` 的 `background_jobs`：狀態列會顯示這個工作，AI 也能從 `get_status` 看到。新的 `JobKind` 要在 `key()` 裡給一個固定的名稱，測試會檢查名稱不重複。
    - `cancel_job`：可以從狀態列取消。

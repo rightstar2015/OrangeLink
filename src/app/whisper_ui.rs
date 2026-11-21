@@ -69,13 +69,11 @@ impl App {
     }
 
     pub(super) fn poll_whisper(&mut self) {
-        if let Some(ok) = self.whisper.filter_rx.as_ref().and_then(|rx| rx.try_recv().ok()) {
-            self.whisper.filter_rx = None;
-            self.whisper.filter_ok = Some(ok);
+        if let Some(ok) = super::state::take(&mut self.whisper.filter_rx).finished() {
+            self.whisper.filter_ok = Some(ok.unwrap_or(false));
         }
-        if let Some(result) = self.whisper.download_rx.as_ref().and_then(|rx| rx.try_recv().ok()) {
-            self.whisper.download_rx = None;
-            self.whisper.status = match result {
+        if let Some(result) = super::state::take(&mut self.whisper.download_rx).finished() {
+            self.whisper.status = match result.map_err(str::to_string).and_then(|r| r) {
                 Ok(()) => ("模型下載完成".into(), false),
                 Err(e) => (format!("模型下載失敗：{e}"), true),
             };
@@ -293,5 +291,22 @@ impl App {
             self.config.save();
             self.start_next_whisper();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_model_download_whose_thread_died_shows_as_failed() {
+        let mut app = App::with_config(&egui::Context::default(), crate::config::Config::default());
+        let (tx, rx) = std::sync::mpsc::channel();
+        app.whisper.download_rx = Some(rx);
+        app.whisper.status = ("正在下載模型…".into(), false);
+        drop(tx); // the download thread panicked
+        app.poll_whisper();
+        assert!(app.whisper.download_rx.is_none(), "no longer downloading");
+        assert!(app.whisper.status.1 && app.whisper.status.0.contains("失敗"), "{:?}", app.whisper.status);
     }
 }

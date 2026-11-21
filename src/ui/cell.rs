@@ -52,6 +52,12 @@ fn pill(
     rect
 }
 
+/// Whether a thumbnail carries the item's name: audio whose thumbnail is a
+/// waveform (cover art gives the item a palette; a waveform doesn't).
+fn name_on_thumbnail(it: &crate::model::Item) -> bool {
+    it.kind == MediaKind::Audio && it.palette.is_empty()
+}
+
 /// Height of a group's header row in the grid and justified views.
 pub(super) const GROUP_HEADER_H: f32 = 30.0;
 
@@ -204,6 +210,18 @@ impl App {
             }
         }
 
+        // Waveforms look alike: an audio file without cover art shows its name
+        // large across the thumbnail, so 860 of them can be told apart.
+        if roomy && !missing && name_on_thumbnail(it) {
+            let mut job = egui::text::LayoutJob::simple(it.name.clone(), FontId::proportional(15.0), Color32::WHITE, img.width() - 20.0);
+            job.wrap.max_rows = 2;
+            job.halign = Align::Center;
+            let galley = painter.layout_job(job);
+            let back = Rect::from_center_size(img.center() - vec2(0.0, 6.0), galley.size() + vec2(12.0, 8.0));
+            painter.rect_filled(back, 6.0, Color32::from_black_alpha(150));
+            painter.galley(pos2(back.center().x, back.top() + 4.0), galley, Color32::WHITE);
+        }
+
         if hovered && !missing && img.width() >= 130.0 && img.height() >= 90.0 && !egui::DragAndDrop::has_any_payload(ui.ctx()) {
             let label = match it.kind {
                 MediaKind::Video => t!("✂ 剪輯"),
@@ -308,5 +326,21 @@ mod tests {
         assert_eq!(elide("a long file name", 8.0, w), "a long …");
         assert_eq!(elide("素材名稱很長很長", 5.0, w), "素材名稱…");
         assert_eq!(elide("abc", 0.5, w), "…");
+    }
+
+    /// 860 sound effects in a grid were 860 copies of one orange waveform.
+    #[test]
+    fn audio_without_cover_art_shows_its_name_on_the_thumbnail() {
+        let item = |kind: &str, palette: serde_json::Value| -> crate::model::Item {
+            serde_json::from_value(serde_json::json!({
+                "id": "i", "name": "爆炸音效", "file_name": "a.wav", "ext": "wav", "kind": kind, "size": 1,
+                "width": 0, "height": 0, "added_at": 0, "modified_at": 0, "palette": palette
+            }))
+            .unwrap()
+        };
+        let cover = serde_json::json!([{"rgb": [200, 30, 30], "ratio": 1.0}]);
+        assert!(super::name_on_thumbnail(&item("audio", serde_json::json!([]))));
+        assert!(!super::name_on_thumbnail(&item("audio", cover)), "cover art tells it apart already");
+        assert!(!super::name_on_thumbnail(&item("video", serde_json::json!([]))));
     }
 }

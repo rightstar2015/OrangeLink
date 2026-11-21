@@ -1037,17 +1037,7 @@ impl App {
                 let current = subs.at(pos);
                 let follow = playing && current.is_some() && current != subs.last_cue && subs.search.is_empty();
                 subs.last_cue = current;
-                let q = subs.search.trim().to_lowercase();
-                let filtered: Vec<usize> = if q.is_empty() {
-                    (0..subs.cues.len()).collect()
-                } else {
-                    subs.cues
-                        .iter()
-                        .enumerate()
-                        .filter(|(_, c)| c.text.to_lowercase().contains(&q))
-                        .map(|(i, _)| i)
-                        .collect()
-                };
+                let filtered = subs.matching();
                 ui.label(RichText::new("點一句跳到該時間；右鍵可從這句建立片段").small().weak());
                 let row_h = 26.0;
                 let mut scroll = ScrollArea::vertical().id_salt("cues").auto_shrink([false, false]);

@@ -567,9 +567,30 @@ pub struct Subtitles {
     pub focus: Option<usize>,
     /// The list still has to scroll to `focus`; it does so once, then scrolls freely.
     pub scroll_to_focus: bool,
+    /// The lines matching `search`, and the search they were found for.
+    pub matches: Option<(String, std::rc::Rc<Vec<usize>>)>,
 }
 
 impl Subtitles {
+    /// The lines (indexes into `cues`) that contain the search, all of them for
+    /// none; looked for again only when the search changes, not every frame.
+    pub fn matching(&mut self) -> std::rc::Rc<Vec<usize>> {
+        if let Some((q, found)) = &self.matches {
+            if *q == self.search {
+                return found.clone();
+            }
+        }
+        let q = self.search.trim().to_lowercase();
+        let found: Vec<usize> = if q.is_empty() {
+            (0..self.cues.len()).collect()
+        } else {
+            self.cues.iter().enumerate().filter(|(_, c)| c.text.to_lowercase().contains(&q)).map(|(i, _)| i).collect()
+        };
+        let found = std::rc::Rc::new(found);
+        self.matches = Some((self.search.clone(), found.clone()));
+        found
+    }
+
     /// Marks `i` and scrolls the list to it once.
     pub fn focus_on(&mut self, i: Option<usize>) {
         self.focus = i;
@@ -2239,7 +2260,7 @@ impl App {
         if let Some(p) = &path {
             self.index_subtitles(id, p);
         }
-        self.subs = is_media.then(|| Subtitles { id: id.to_string(), path, cues, search: String::new(), last_cue: None, focus: None, scroll_to_focus: false });
+        self.subs = is_media.then(|| Subtitles { id: id.to_string(), path, cues, search: String::new(), last_cue: None, focus: None, scroll_to_focus: false, matches: None });
     }
 
     /// Encodes a marked clip to `captures/` on a background thread; it is imported when done.
@@ -4061,6 +4082,7 @@ mod tests {
             last_cue: None,
             focus: None,
             scroll_to_focus: false,
+            matches: None,
         };
         assert_eq!(subs.find("拉我"), Some(1), "the first of equally good lines");
         assert_eq!(subs.find("拉我 center"), Some(2), "more words matched wins");
@@ -4438,7 +4460,14 @@ mod tests {
             last_cue: None,
             focus: None,
             scroll_to_focus: false,
+            matches: None,
         };
+        assert_eq!(*subs.matching(), vec![0, 1, 2]);
+        subs.search = "y".into();
+        assert!(subs.matching().is_empty());
+        let found = subs.matching();
+        assert!(std::rc::Rc::ptr_eq(&found, &subs.matching()), "searched again with the same words");
+        subs.search.clear();
         subs.focus_on(Some(2));
         assert_eq!(subs.scroll_target(None), Some(2));
         // The playhead is not on the line yet: the line stays marked, the list is free.

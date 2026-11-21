@@ -112,6 +112,18 @@ fn chip(ui: &mut Ui, text: &str) -> bool {
     chip_parts(ui, text, false).1
 }
 
+/// An on/off setting shown as a pill: soft orange with an orange border when
+/// on, so it doesn't read as the toolbar's main button.
+fn toggle_pill(ui: &mut Ui, on: bool, text: &str) -> egui::Response {
+    let t = tokens();
+    let label = RichText::new(text).color(if on { accent() } else { ui.visuals().text_color() });
+    let button = egui::Button::new(label)
+        .fill(if on { t.accent_soft } else { Color32::TRANSPARENT })
+        .stroke(if on { Stroke::new(1.0_f32, accent().gamma_multiply(0.6)) } else { ui.visuals().widgets.inactive.bg_stroke })
+        .rounding(CHIP_ROUNDING);
+    ui.add(button)
+}
+
 /// An accented filter chip (soft orange fill + subtle border) with a close button.
 fn accent_chip(ui: &mut Ui, text: &str) -> bool {
     let mut removed = false;

@@ -282,7 +282,7 @@ impl App {
         if self.syntax_open {
             self.syntax_popover(ctx, syntax_btn.rect);
         }
-        if ui.selectable_label(self.config.search_all, t!("搜尋全部")).on_hover_text(t!("開啟：搜尋時不限目前選的資料夾和標籤\n關閉：只搜尋目前選的範圍")).clicked() {
+        if toggle_pill(ui, self.config.search_all, t!("搜尋全部")).on_hover_text(t!("開啟：搜尋時不限目前選的資料夾和標籤\n關閉：只搜尋目前選的範圍")).clicked() {
             self.config.search_all = !self.config.search_all;
             self.config.save();
         }

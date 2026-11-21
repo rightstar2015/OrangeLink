@@ -137,14 +137,25 @@ impl App {
     }
 
     fn start_next_whisper(&mut self) {
-        if self.whisper.running.is_some() || self.whisper.queue.is_empty() {
+        if self.whisper.running.is_some() {
+            return;
+        }
+        // Items deleted since they were queued are dropped here: one left at the
+        // front would stop everything behind it, since nothing else starts the queue.
+        while let Some(id) = self.whisper.queue.first() {
+            if self.output_path(id).is_some() {
+                break;
+            }
+            self.whisper.queue.remove(0);
+        }
+        if self.whisper.queue.is_empty() {
             return;
         }
         let model = self.config.whisper_model.clone();
         let (Some(ff), true) = (self.ffmpeg_dir.clone(), whisper::has_model(&model)) else { return };
         let id = self.whisper.queue.remove(0);
         let (Some(lib), Some(out)) = (&self.lib, self.output_path(&id)) else { return };
-        let Some(it) = lib.items.get(&id) else { return self.start_next_whisper() };
+        let Some(it) = lib.items.get(&id) else { return };
         let job = Job::spawn(&ff, &lib.file_path(it), &out, &model, &self.config.whisper_language, self.egui_ctx.clone());
         self.whisper.running = Some(Running { name: it.name.clone(), duration: it.duration, position: 0.0, id, job });
     }
@@ -308,5 +319,17 @@ mod tests {
         app.poll_whisper();
         assert!(app.whisper.download_rx.is_none(), "no longer downloading");
         assert!(app.whisper.status.1 && app.whisper.status.0.contains("失敗"), "{:?}", app.whisper.status);
+    }
+
+    #[test]
+    fn an_item_deleted_while_queued_does_not_hold_up_the_queue() {
+        let mut app = App::with_config(&egui::Context::default(), crate::config::Config::default());
+        let root = std::env::temp_dir().join(format!("orangelink-whisper-{}", crate::model::new_id()));
+        app.lib = Some(crate::library::Library::create(&root).unwrap());
+        app.whisper.queue = vec!["deleted".into(), "deleted too".into()];
+        app.start_next_whisper();
+        assert!(app.whisper.queue.is_empty(), "{:?}", app.whisper.queue);
+        drop(app);
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

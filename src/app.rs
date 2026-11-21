@@ -4397,6 +4397,19 @@ mod tests {
     }
 
     #[test]
+    fn a_toasts_undo_does_not_take_back_a_newer_structure_edit_instead() {
+        let (mut app, root) = undo_test_app("toastundo");
+        app.edit_items(&["a".to_string()], |it| it.name = "b".into());
+        let seq = app.edits.seq;
+        app.lib.as_mut().unwrap().add_field("x");
+        app.apply(&egui::Context::default(), Action::UndoStep(seq));
+        let lib = app.lib.as_ref().unwrap();
+        assert_eq!(lib.items["a"].name, "b", "an older step was undone past a newer one");
+        assert!(lib.meta.fields.iter().any(|f| f == "x"));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn an_item_sent_back_to_the_trash_by_undo_is_no_longer_selected() {
         let (mut app, root) = undo_test_app("trashundo");
         let mut trashed = app.lib.as_ref().unwrap().items["a"].clone();

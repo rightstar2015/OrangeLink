@@ -111,6 +111,9 @@ impl App {
     /// Undoes an AI change. When later changes were made on top of it, asks
     /// first: they are undone too (and can be redone with Ctrl+Y).
     pub(super) fn undo_ai(&mut self, first: u64, last: u64, confirmed: bool) {
+        // Record this frame's structural edits first, so the count of steps to
+        // undo below includes them (undo would otherwise add one mid-way).
+        self.track_structure();
         match self.ai_undo_state(Some((first, last))) {
             AiUndo::Unavailable => self.toast("這個修改已經復原過，或已超過可以復原的範圍"),
             AiUndo::WithLater(n) if !confirmed => {

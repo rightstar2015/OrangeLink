@@ -276,6 +276,13 @@ pub fn path_key(path: &Path) -> Option<String> {
     dunce_abs(path).ok().map(|abs| source_key(&abs))
 }
 
+/// Names the library uses in an item's folder: metadata.json and what is written
+/// beside it (metadata.json.tmp, .broken copies), and the thumbnail.
+fn is_reserved_name(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    lower.starts_with(META_FILE) || lower.starts_with(THUMB_FILE)
+}
+
 fn import_one(
     root: &Path,
     path: &Path,
@@ -341,8 +348,9 @@ fn import_one(
             .file_name()
             .map(|n| n.to_string_lossy().to_string())
             .unwrap_or_else(|| "file".into());
-        // Never let a copied file collide with metadata.json or _thumbnail.png.
-        if source.is_none() && (file_name.eq_ignore_ascii_case(META_FILE) || file_name.eq_ignore_ascii_case(THUMB_FILE)) {
+        // Never let a copied file collide with metadata.json, _thumbnail.png or the
+        // files made beside them (metadata.json.tmp while saving, .broken when kept).
+        if source.is_none() && is_reserved_name(&file_name) {
             file_name = format!("item_{file_name}");
         }
         let size = fs::metadata(path)?.len();
@@ -1073,6 +1081,32 @@ mod restore_and_similarity_tests {
         let again = Library::open(&lib.root).unwrap();
         assert!(again.recovered.is_none(), "the restored library.json was written");
         assert_eq!(again.folder_name(&folder), Some("參考"));
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn files_named_like_the_librarys_own_are_copied_under_another_name() {
+        for name in ["metadata.json", "METADATA.JSON.tmp", "metadata.json.broken", "metadata.json.broken-1", "_thumbnail.png", "_thumbnail.png.tmp"] {
+            assert!(is_reserved_name(name), "{name}");
+        }
+        for name in ["metadata.jsonl.txt", "my metadata.json", "thumbnail.png", "photo.png"] {
+            assert!(!is_reserved_name(name), "{name}");
+        }
+        let root = std::env::temp_dir().join(format!("orangelink-meta-tmp-{}", new_id()));
+        fs::create_dir_all(&root).unwrap();
+        let src = root.join("metadata.json.tmp");
+        fs::write(&src, b"user's file").unwrap();
+        let mut lib = crate::library::Library::create(&root.join("lib")).unwrap();
+        let opts = ImportOptions { link: false, folder: None, tags: Vec::new(), skip_duplicates: true, ffmpeg_dir: None, cancel: Arc::new(AtomicBool::new(false)) };
+        let item = import_one(&lib.root, &src, &opts, &Mutex::new(Known::default()), 0).unwrap().unwrap();
+        let id = item.id.clone();
+        lib.insert_item(item);
+        // Saving the item writes metadata.json through metadata.json.tmp.
+        lib.items.get_mut(&id).unwrap().tags.push("x".into());
+        lib.touch(&id);
+        lib.flush().unwrap();
+        let item = &lib.items[&id];
+        assert_eq!(fs::read(lib.file_path(item)).unwrap(), b"user's file", "the copy was overwritten while saving");
         fs::remove_dir_all(&root).unwrap();
     }
 

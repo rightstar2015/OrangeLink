@@ -121,6 +121,7 @@ impl App {
             _ => vec2(1.0, 1.0),
         };
         let no_preview = tex.is_none() && self.thumbs.failed.contains(&id);
+        let zoomable = viewer_zoomable(kind, as_text, pdf.is_some());
 
         // Immersive Studio Header (replaces the main library toolbar while preview is open).
         let mut tags_anchor: Option<Rect> = None;
@@ -232,17 +233,21 @@ impl App {
                             }
                         } else {
                             let slideshow_label = if self.slideshow.is_some() { t!("⏸ 停止播放") } else { t!("▶ 幻燈片") };
-                            if ui.button(slideshow_label).on_hover_text(t!("每 {slideshow_secs} 秒換下一張", slideshow_secs = format!("{:.0}", self.config.slideshow_secs))).clicked() {
+                            // Slideshow and zoom are for pictures: a font's or a
+                            // document's system icon only shows them as noise.
+                            if zoomable && ui.button(slideshow_label).on_hover_text(t!("每 {slideshow_secs} 秒換下一張", slideshow_secs = format!("{:.0}", self.config.slideshow_secs))).clicked() {
                                 self.act(Action::ToggleSlideshow);
                             }
-                            ui.separator();
-                            if ui.button(t!("適合視窗")).clicked() {
-                                zoom = 1.0;
-                                pan = egui::Vec2::ZERO;
-                            }
-                            if ui.button("100%").clicked() {
-                                zoom = -1.0; // resolved below once the canvas size is known
-                                pan = egui::Vec2::ZERO;
+                            if zoomable {
+                                ui.separator();
+                                if ui.button(t!("適合視窗")).clicked() {
+                                    zoom = 1.0;
+                                    pan = egui::Vec2::ZERO;
+                                }
+                                if ui.button("100%").clicked() {
+                                    zoom = -1.0; // resolved below once the canvas size is known
+                                    pan = egui::Vec2::ZERO;
+                                }
                             }
                             if ui
                                 .add_enabled(self.can_undo(), egui::Button::new("↩"))
@@ -428,13 +433,15 @@ impl App {
                 ui.ctx().request_repaint();
             }
         }
-        painter.text(
-            rect.right_bottom() - vec2(12.0, 10.0),
-            Align2::RIGHT_BOTTOM,
-            format!("{:.0}%", scale * 100.0),
-            FontId::proportional(12.0),
-            tokens().text_muted,
-        );
+        if zoomable || has_frames {
+            painter.text(
+                rect.right_bottom() - vec2(12.0, 10.0),
+                Align2::RIGHT_BOTTOM,
+                format!("{:.0}%", scale * 100.0),
+                FontId::proportional(12.0),
+                tokens().text_muted,
+            );
+        }
 
         if let Some(v) = &mut self.viewer {
             v.zoom = zoom;
@@ -1130,6 +1137,13 @@ impl App {
 
 /// Chat activity (bars) and loudness (line) along the video, lined up with the progress
 /// bar below, with I/O range highlight. Returns the time clicked.
+/// Whether the preview shows something worth zooming and paging through
+/// as pictures: an image or a PDF page. Not text, nor the system icon of a
+/// font or another file.
+fn viewer_zoomable(kind: MediaKind, as_text: bool, pdf: bool) -> bool {
+    !as_text && (pdf || kind == MediaKind::Image)
+}
+
 /// How wide the info line beside the name may be: what is left once the
 /// buttons after it have their room, or nothing when too little is left to
 /// read. It never reaches into the buttons.
@@ -1242,6 +1256,16 @@ fn clip_block(ui: &Ui, block: Rect, grips: [(bool, Rect); 2], id: egui::Id) -> (
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A font's preview offered 100%, 適合視窗 and 幻燈片 for its system icon.
+    #[test]
+    fn zoom_buttons_are_only_for_images_and_pdf_pages() {
+        assert!(viewer_zoomable(MediaKind::Image, false, false));
+        assert!(viewer_zoomable(MediaKind::Other, false, true), "a PDF");
+        assert!(!viewer_zoomable(MediaKind::Other, false, false), "a font or another file");
+        assert!(!viewer_zoomable(MediaKind::Other, true, false), "a text file");
+        assert!(!viewer_zoomable(MediaKind::Audio, false, false));
+    }
 
     /// The info line (`1 / 2028 · 1920 × 1080 · 9:49:32 · …`) once ran into
     /// the ↩ button: it took all the width the name left.

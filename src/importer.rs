@@ -300,42 +300,36 @@ fn import_one(
     let hash = quick_hash(path)?;
     let mut added_to_seen = false;
     if opts.skip_duplicates {
-        // Snapshot candidate paths for partial hashes so multi-GB byte comparisons
-        // run outside the mutex; re-check any files added concurrently before inserting.
-        let (is_partial, initial) = {
-            let s = lock(seen);
-            if !s.keys.contains(&hash) {
-                (false, None)
-            } else if !crate::imaging::is_partial_hash(&hash) {
-                return Ok(None);
-            } else {
-                match s.files.get(&hash) {
-                    Some(files) if !files.is_empty() => (true, Some(files.clone())),
-                    _ => return Ok(None),
+        // Large files share a partial hash, and comparing their bytes can take
+        // minutes: that happens outside the lock, a few new candidates at a time,
+        // and the file is added under the lock once no candidate is left unchecked.
+        let mut checked = 0;
+        loop {
+            let todo: Vec<PathBuf> = {
+                let mut s = lock(seen);
+                if !s.keys.contains(&hash) {
+                    s.add(&hash, &key, &abs);
+                    break;
                 }
-            }
-        };
-        let checked_len = if let Some(files) = &initial {
-            if files.iter().any(|f| crate::imaging::same_contents(f, path).unwrap_or(false)) {
+                if !crate::imaging::is_partial_hash(&hash) {
+                    return Ok(None);
+                }
+                // Known from the library only, without a path to compare: as before, a copy.
+                let files = s.files.get(&hash).map(Vec::as_slice).unwrap_or_default();
+                if files.is_empty() {
+                    return Ok(None);
+                }
+                if files.len() <= checked {
+                    s.add(&hash, &key, &abs);
+                    break;
+                }
+                files[checked..].to_vec()
+            };
+            if todo.iter().any(|f| crate::imaging::same_contents(f, path).unwrap_or(false)) {
                 return Ok(None);
             }
-            files.len()
-        } else {
-            0
-        };
-        let mut s = lock(seen);
-        if is_partial {
-            let extra_dup = s
-                .files
-                .get(&hash)
-                .is_some_and(|files| files.iter().skip(checked_len).any(|f| crate::imaging::same_contents(f, path).unwrap_or(false)));
-            if extra_dup {
-                return Ok(None);
-            }
-        } else if s.has_copy(&hash, path) {
-            return Ok(None);
+            checked += todo.len();
         }
-        s.add(&hash, &key, &abs);
         added_to_seen = true;
     }
 

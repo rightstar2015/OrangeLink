@@ -54,6 +54,16 @@ impl SidebarStats {
     }
 }
 
+/// The folders whose name has `query` in it (any case), as `(id, name)`;
+/// None for an empty query, where the tree shows instead.
+fn folders_named(flat: &[(String, String, usize)], query: &str) -> Option<Vec<(String, String)>> {
+    let q = query.trim().to_lowercase();
+    if q.is_empty() {
+        return None;
+    }
+    Some(flat.iter().filter(|(_, name, _)| name.to_lowercase().contains(&q)).map(|(id, name, _)| (id.clone(), name.clone())).collect())
+}
+
 impl App {
     /// Sidebar & inspector stats, rebuilt only when `lib.revision` advances.
     pub(super) fn cached_sidebar_stats(&self) -> SidebarStats {
@@ -163,6 +173,7 @@ impl App {
                 let tags = &stats.tag_counts;
                 // Edited through a local so the closure below only needs `&self`.
                 let mut tag_search = std::mem::take(&mut self.tag_search);
+                let mut folder_search = std::mem::take(&mut self.folder_search);
 
                 egui::TopBottomPanel::bottom("sidebar-help").show_inside(ui, |ui| {
                     ui.horizontal(|ui| {
@@ -256,7 +267,26 @@ impl App {
                         if lib.meta.folders.is_empty() {
                             ui.label(RichText::new(t!("尚無資料夾")).small().weak());
                         }
-                        self.folder_tree(ui, lib, None, 0, folder_counts);
+                        if stats.folder_flat.len() > 8 {
+                            ui.add(TextEdit::singleline(&mut folder_search).hint_text(t!("篩選資料夾")).desired_width(f32::INFINITY));
+                        }
+                        let found = folders_named(&stats.folder_flat, &folder_search);
+                        match found {
+                            // A filter shows the folders it finds as a flat list, at any depth.
+                            Some(found) => {
+                                if found.is_empty() {
+                                    ui.label(RichText::new(t!("沒有符合的資料夾")).small().weak());
+                                }
+                                for (id, name) in found {
+                                    let view = View::Folder(id.clone());
+                                    let count = folder_counts.get(&id).copied().unwrap_or(0);
+                                    if tree_row(ui, self.view == view, 0.0, Arrow::Leaf, &name, Some(count), None, Sense::click()).clicked() {
+                                        self.act(Action::SetView(view));
+                                    }
+                                }
+                            }
+                            None => self.folder_tree(ui, lib, None, 0, folder_counts),
+                        }
                     }
                     // Drop zone for moving a folder back to the top level.
                     if egui::DragAndDrop::has_payload_of_type::<DragFolder>(ui.ctx()) {
@@ -320,6 +350,7 @@ impl App {
                     }
                 });
                 self.tag_search = tag_search;
+                self.folder_search = folder_search;
             });
     }
 
@@ -518,5 +549,23 @@ impl App {
                 self.folder_tree(ui, lib, Some(&f.id), depth + 1, counts);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::folders_named;
+
+    /// Only tags had a filter box; 40 folders meant scrolling and unfolding.
+    #[test]
+    fn the_folder_filter_finds_folders_at_any_depth() {
+        let flat: Vec<(String, String, usize)> = [("1", "直播", 0), ("2", "2026 精華", 1), ("3", "表情包", 0), ("4", "BGM", 2)]
+            .iter()
+            .map(|(id, name, d)| (id.to_string(), name.to_string(), *d))
+            .collect();
+        assert_eq!(folders_named(&flat, "  "), None, "no filter: the tree shows");
+        assert_eq!(folders_named(&flat, "精華"), Some(vec![("2".into(), "2026 精華".into())]));
+        assert_eq!(folders_named(&flat, "bgm"), Some(vec![("4".into(), "BGM".into())]), "any case");
+        assert_eq!(folders_named(&flat, "沒有"), Some(vec![]));
     }
 }

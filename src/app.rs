@@ -806,6 +806,8 @@ pub struct App {
     /// The suggestion picked with the arrow keys under a tag box.
     pub tag_pick: Option<usize>,
     pub tag_search: String,
+    /// The sidebar's 篩選資料夾 box.
+    pub folder_search: String,
     /// Custom field values typed in the multi-selection panel, by field name.
     pub field_drafts: HashMap<String, String>,
     pub last_flush: f64,
@@ -1063,6 +1065,7 @@ impl App {
             tag_input: String::new(),
             tag_pick: None,
             tag_search: String::new(),
+            folder_search: String::new(),
             field_drafts: HashMap::new(),
             last_flush: 0.0,
             acts: RefCell::new(Vec::new()),

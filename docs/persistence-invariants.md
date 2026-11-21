@@ -28,7 +28,7 @@ cargo test --locked -- library:: importer:: config:: app::integrity:: app::tests
 | R2 | library.json 壞掉時,資料夾、智慧資料夾、標籤群組、欄位從最新的備份取回,壞檔保留成 `library.json.broken` | `importer::tests::damaged_library_json_comes_back_from_a_backup` |
 | R3 | 壞掉的 metadata.json 會被回報,可以從備份還原 | `importer::tests::damaged_metadata_is_reported_and_restored_from_backup` |
 | R4 | 資料夾樹有環或父資料夾不見時,仍然打得開,每個資料夾都看得到 | `library::tests::folder_loops_and_lost_parents_are_repaired` |
-| R5 | 從備份還原後,不會有項目指向已經不存在的資料夾 | `library::tests::a_restore_drops_folders_that_no_longer_exist` |
+| R5 | 從備份還原後,不會有項目指向已經不存在的資料夾 | `library::tests::a_restore_drops_folders_that_no_longer_exist`、`library::tests::an_item_restored_from_a_backup_leaves_folders_deleted_since` |
 | R6 | 匯入時某個檔案損壞、路徑太深或讓解碼器 panic,只有那個檔案失敗,整批匯入繼續 | `importer::tests::a_panic_becomes_a_failed_file`、`damaged_and_deeply_nested_files_do_not_stop_an_import` |
 
 ## 備份

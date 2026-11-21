@@ -181,26 +181,52 @@ pub fn check_integrity(input: IntegrityInput, cancel: &AtomicBool, done: &Atomic
     Integrity { leftovers, changed, unreadable_files: unreadable_files.into_inner() }
 }
 
-/// Makes the folders a tree again after a hand edit or a restore: a parent that
-/// doesn't exist, or one that leads back round to the folder itself, becomes the
-/// top level. Without this, walking the tree would never end. Returns whether
-/// anything changed.
-fn repair_folder_tree(folders: &mut [Folder]) -> bool {
-    let ids: HashSet<String> = folders.iter().map(|f| f.id.clone()).collect();
+/// Something kept in a tree by its parent's id: folders and smart folders.
+trait TreeNode {
+    fn id(&self) -> &str;
+    fn parent_mut(&mut self) -> &mut Option<String>;
+}
+
+impl TreeNode for Folder {
+    fn id(&self) -> &str {
+        &self.id
+    }
+    fn parent_mut(&mut self) -> &mut Option<String> {
+        &mut self.parent
+    }
+}
+
+impl TreeNode for crate::model::SmartFolder {
+    fn id(&self) -> &str {
+        &self.id
+    }
+    fn parent_mut(&mut self) -> &mut Option<String> {
+        &mut self.parent
+    }
+}
+
+/// Makes the folders (or smart folders) a tree again after a hand edit or a
+/// restore: a parent that doesn't exist, or one that leads back round to the
+/// folder itself, becomes the top level. Without this, a folder in a loop is
+/// never reached from the top and never shown. Returns whether anything changed.
+fn repair_folder_tree<T: TreeNode>(folders: &mut [T]) -> bool {
+    let ids: HashSet<String> = folders.iter().map(|f| f.id().to_string()).collect();
     let mut changed = false;
     for f in folders.iter_mut() {
-        if f.parent.as_ref().is_some_and(|p| *p == f.id || !ids.contains(p)) {
-            f.parent = None;
+        let id = f.id().to_string();
+        let parent = f.parent_mut();
+        if parent.as_ref().is_some_and(|p| *p == id || !ids.contains(p)) {
+            *parent = None;
             changed = true;
         }
     }
     for i in 0..folders.len() {
-        let start = folders[i].id.clone();
+        let start = folders[i].id().to_string();
         let mut seen = HashSet::new();
-        let mut up = folders[i].parent.clone();
+        let mut up = folders[i].parent_mut().clone();
         while let Some(p) = up {
             if p == start {
-                folders[i].parent = None;
+                *folders[i].parent_mut() = None;
                 changed = true;
                 break;
             }
@@ -208,7 +234,7 @@ fn repair_folder_tree(folders: &mut [Folder]) -> bool {
             if !seen.insert(p.clone()) {
                 break;
             }
-            up = folders.iter().find(|f| f.id == p).and_then(|f| f.parent.clone());
+            up = folders.iter_mut().find(|f| f.id() == p).and_then(|f| f.parent_mut().clone());
         }
     }
     changed
@@ -411,6 +437,10 @@ impl Library {
             crate::log::error("library", "資料夾的上層不存在或形成循環，已移到最上層");
             lib.meta_dirty = true;
         }
+        if repair_folder_tree(&mut lib.meta.smart_folders) {
+            crate::log::error("library", "智慧資料夾的上層不存在或形成循環，已移到最上層");
+            lib.meta_dirty = true;
+        }
         if lib.recovered.is_some() {
             lib.meta_dirty = true;
             lib.flush().context("無法寫入還原的 library.json")?;
@@ -562,6 +592,7 @@ impl Library {
         self.meta = backup.meta;
         self.meta.ignored_sources.extend(ignored);
         repair_folder_tree(&mut self.meta.folders);
+        repair_folder_tree(&mut self.meta.smart_folders);
         self.drop_missing_folders();
         self.touch_meta();
         self.flush()?;
@@ -1538,6 +1569,17 @@ mod tests {
 
     /// A hand-edited library.json with a loop or a missing parent still opens,
     /// and every folder shows up.
+    #[test]
+    fn smart_folders_in_a_loop_are_brought_back_to_the_top() {
+        let smart = |id: &str, parent: &str| -> crate::model::SmartFolder {
+            serde_json::from_value(serde_json::json!({ "id": id, "name": id, "filter": {}, "parent": parent })).unwrap()
+        };
+        let mut folders = vec![smart("a", "b"), smart("b", "a"), smart("self", "self")];
+        assert!(repair_folder_tree(&mut folders));
+        let tops = folders.iter().filter(|f| f.parent.is_none()).count();
+        assert_eq!(tops, 2, "one of the loop and the one that was its own parent");
+    }
+
     #[test]
     fn folder_loops_and_lost_parents_are_repaired() {
         let folder = |id: &str, parent: Option<&str>| Folder { id: id.into(), name: id.into(), parent: parent.map(Into::into), created_at: 0, color: None, collapsed: false };

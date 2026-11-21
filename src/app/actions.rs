@@ -450,6 +450,7 @@ impl App {
             Action::CaptureFrame(id, pos) => {
                 let _ = self.capture_frame(&id, pos);
             }
+            Action::FrameAsThumbnail(id, pos) => self.frame_as_thumbnail(&id, pos),
             Action::FindCandidates(id) => self.find_candidates(&id),
             Action::ProcessStreams(ids) => self.process_streams(ids),
             Action::NavBack => self.go_back(),

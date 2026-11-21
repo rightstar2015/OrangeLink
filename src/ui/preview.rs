@@ -1,6 +1,7 @@
 //! The full preview: images, the video and audio player, clips and subtitles.
 
 use super::*;
+use crate::media::CueEdit;
 
 /// How long "+5s" stays over the video after a key jump.
 const FLASH_SECS: f32 = 0.6;
@@ -1024,6 +1025,8 @@ impl App {
         let playing = self.player.as_ref().is_some_and(|p| p.is_playing());
         let mut pending = Vec::new();
         let (mut seek, mut clip) = (None, None);
+        let mut edits: Vec<CueEdit> = Vec::new();
+        let mut undo_subs = false;
         let Some(subs) = self.subs.as_mut().filter(|s| s.id == id) else { return };
         match &subs.path {
             None => {
@@ -1061,16 +1064,30 @@ impl App {
                         }
                     });
                 });
-                ui.checkbox(&mut self.sub_overlay, t!("在畫面上顯示字幕"));
+                ui.horizontal(|ui| {
+                    ui.checkbox(&mut self.sub_overlay, t!("在畫面上顯示字幕"));
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        if !subs.edit.undo.is_empty() && ui.small_button(t!("↩ 復原")).on_hover_text(t!("復原上一個字幕修改（已寫回字幕檔）")).clicked() {
+                            undo_subs = true;
+                        }
+                        ui.toggle_value(&mut subs.edit.tools_open, RichText::new(t!("校對工具")).small());
+                    });
+                });
+                if subs.edit.tools_open {
+                    proofreading_tools(ui, &mut subs.edit, &mut edits);
+                }
                 ui.add(TextEdit::singleline(&mut subs.search).hint_text(t!("🔍 搜尋台詞…")).desired_width(f32::INFINITY));
                 if subs.cues.is_empty() {
                     ui.label(RichText::new(t!("字幕檔中沒有可讀取的內容")).weak());
+                }
+                if let Some((a, b)) = subs.edit.picked().filter(|(_, b)| *b < subs.cues.len()) {
+                    picked_lines_editor(ui, subs, (a, b), pos, &mut edits, &mut clip);
                 }
                 let current = subs.at(pos);
                 let follow = playing && current.is_some() && current != subs.last_cue && subs.search.is_empty();
                 subs.last_cue = current;
                 let filtered = subs.matching();
-                ui.label(RichText::new(t!("點一句跳到該時間；右鍵可從這句建立片段")).small().weak());
+                ui.label(RichText::new(t!("點一句跳到該時間並選取（可校對）；Shift＋點一下選一段，可建立片段")).small().weak());
                 let row_h = 26.0;
                 let mut scroll = ScrollArea::vertical().id_salt("cues").auto_shrink([false, false]);
                 let scroll_target = subs.scroll_target(if follow { current } else { None });
@@ -1081,6 +1098,8 @@ impl App {
                         scroll = scroll.vertical_scroll_offset(target_y);
                     }
                 }
+                let picked = subs.edit.picked();
+                let mut pick = None;
                 scroll.show_rows(ui, row_h, filtered.len(), |ui, range| {
                     for &i in &filtered[range] {
                         let c = &subs.cues[i];
@@ -1099,8 +1118,9 @@ impl App {
                             let bar = Rect::from_min_max(rect.min + vec2(0.0, 3.0), pos2(rect.min.x + 2.0, rect.max.y - 3.0));
                             ui.painter().rect_filled(bar, 1.0, accent());
                         }
-                        if subs.focus == Some(i) && !is_curr {
-                            ui.painter().rect_stroke(rect, 3.0, egui::Stroke::new(1.0_f32, accent()));
+                        let picked = picked.is_some_and(|(a, b)| (a..=b).contains(&i));
+                        if (subs.focus == Some(i) && !is_curr) || picked {
+                            ui.painter().rect_stroke(rect, 3.0, egui::Stroke::new(if picked { 1.5_f32 } else { 1.0_f32 }, accent()));
                         }
                         let ts = fmt_duration(c.start);
                         let ts_w = 46.0;
@@ -1114,7 +1134,11 @@ impl App {
                             tokens().text,
                         );
                         if r.clicked() {
-                            seek = Some(c.start);
+                            let extend = ui.input(|i| i.modifiers.shift);
+                            pick = Some((i, extend));
+                            if !extend {
+                                seek = Some(c.start);
+                            }
                         }
                         r.on_hover_text(format!("{ts}  {}", c.text)).context_menu(|ui| {
                             if ui.button(t!("從這句建立片段")).clicked() {
@@ -1127,6 +1151,9 @@ impl App {
                 if subs.focus.is_some_and(|f| current == Some(f) || seek.is_some()) {
                     subs.focus = None;
                 }
+                if let Some((i, extend)) = pick {
+                    subs.edit.pick(i, extend);
+                }
             }
         }
         if let (Some(t), Some(p)) = (seek, &mut self.player) {
@@ -1136,10 +1163,115 @@ impl App {
         if let Some((a, b, name)) = clip {
             pending.push(Action::AddClip(id.to_string(), a, b, Some(name)));
         }
+        for e in edits {
+            self.edit_subtitles(e);
+        }
+        if undo_subs {
+            self.undo_subtitles();
+        }
         for a in pending {
             self.act(a);
         }
     }
+}
+
+/// 尋找與取代 and moving every line earlier or later.
+fn proofreading_tools(ui: &mut Ui, e: &mut crate::app::subtitle_edit::SubEdit, edits: &mut Vec<CueEdit>) {
+    egui::Frame::none().fill(tokens().bg_elevated).rounding(ROUNDING).inner_margin(8.0).show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        egui::Grid::new("sub-tools").num_columns(2).spacing([6.0, 4.0]).show(ui, |ui| {
+            ui.label(RichText::new(t!("尋找")).small());
+            ui.add(TextEdit::singleline(&mut e.find).desired_width(f32::INFINITY));
+            ui.end_row();
+            ui.label(RichText::new(t!("取代為")).small());
+            ui.horizontal(|ui| {
+                ui.add(TextEdit::singleline(&mut e.replace).desired_width(ui.available_width() - 80.0));
+                if ui.add_enabled(!e.find.is_empty(), egui::Button::new(RichText::new(t!("全部取代")).small())).clicked() {
+                    edits.push(CueEdit::Replace(e.find.clone(), e.replace.clone()));
+                }
+            });
+            ui.end_row();
+            ui.label(RichText::new(t!("時間位移")).small());
+            ui.horizontal(|ui| {
+                ui.add(egui::DragValue::new(&mut e.shift).speed(0.05).range(-600.0..=600.0).fixed_decimals(2).suffix(t!(" 秒")));
+                if ui
+                    .add_enabled(e.shift != 0.0, egui::Button::new(RichText::new(t!("套用到全部")).small()))
+                    .on_hover_text(t!("所有台詞提早（負數）或延後（正數），字幕整體和聲音對不上時用"))
+                    .clicked()
+                {
+                    edits.push(CueEdit::Shift(e.shift));
+                    e.shift = 0.0;
+                }
+            });
+            ui.end_row();
+        });
+    });
+}
+
+/// The picked line's text and times, or what to do with a run of lines.
+fn picked_lines_editor(ui: &mut Ui, subs: &mut crate::app::Subtitles, (a, b): (usize, usize), pos: f64, edits: &mut Vec<CueEdit>, clip: &mut Option<(f64, f64, String)>) {
+    egui::Frame::none()
+        .fill(tokens().bg_elevated)
+        .stroke(Stroke::new(1.0_f32, accent()))
+        .rounding(ROUNDING)
+        .inner_margin(8.0)
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            if a != b {
+                let (start, end) = (subs.cues[a].start, subs.cues[b].end);
+                ui.label(RichText::new(t!("已選 {n} 句（{from} → {to}）", n = b - a + 1, from = fmt_precise(start), to = fmt_precise(end))).small());
+                ui.horizontal_wrapped(|ui| {
+                    if ui.button(t!("建立片段")).on_hover_text(t!("從第一句開始到最後一句結束")).clicked() {
+                        let name: String = subs.cues[a].text.replace('\n', " ").chars().filter(|c| !c.is_control()).take(40).collect();
+                        *clip = Some((start, end, name));
+                    }
+                    if ui.button(t!("刪除這些台詞")).clicked() {
+                        edits.push(CueEdit::Delete((a..=b).collect()));
+                    }
+                });
+                return;
+            }
+            if subs.edit.draft_for != Some(a) {
+                subs.edit.draft = subs.cues[a].text.clone();
+                subs.edit.draft_for = Some(a);
+            }
+            let c = subs.cues[a].clone();
+            let r = ui.add(TextEdit::multiline(&mut subs.edit.draft).desired_rows(2).desired_width(f32::INFINITY));
+            // Written when the box is left (Esc puts the text back instead).
+            if r.lost_focus() {
+                if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                    subs.edit.draft = c.text.clone();
+                } else if subs.edit.draft.trim() != c.text {
+                    edits.push(CueEdit::Text(a, subs.edit.draft.clone()));
+                }
+            }
+            for (label, at, is_end) in [(t!("開始"), c.start, false), (t!("結束"), c.end, true)] {
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new(format!("{label} {}", fmt_precise(at))).small().monospace());
+                    let set = |t: f64| if is_end { CueEdit::End(a, t) } else { CueEdit::Start(a, t) };
+                    if ui.small_button("−0.1").clicked() {
+                        edits.push(set(at - 0.1));
+                    }
+                    if ui.small_button("+0.1").clicked() {
+                        edits.push(set(at + 0.1));
+                    }
+                    if ui.small_button(t!("設為播放位置")).clicked() {
+                        edits.push(set(pos));
+                    }
+                });
+            }
+            ui.horizontal_wrapped(|ui| {
+                if ui.small_button(t!("合併下一句")).clicked() {
+                    edits.push(CueEdit::MergeNext(a));
+                }
+                if ui.small_button(t!("在播放位置拆開")).on_hover_text(t!("播放位置不在這句裡時，從中間拆開")).clicked() {
+                    edits.push(CueEdit::Split(a, pos));
+                }
+                if ui.small_button(t!("刪除這句")).clicked() {
+                    edits.push(CueEdit::Delete(vec![a]));
+                }
+            });
+        });
 }
 
 /// Chat activity (bars) and loudness (line) along the video, lined up with the progress

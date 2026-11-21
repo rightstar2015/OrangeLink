@@ -288,6 +288,178 @@ pub fn subtitle_search_text(path: &Path) -> Option<String> {
     (!cues.is_empty()).then(|| cues.iter().map(|c| c.text.as_str()).collect::<Vec<_>>().join("\n"))
 }
 
+/// A change to a subtitle's lines, made in the 字幕 tab.
+#[derive(Clone, Debug, PartialEq)]
+pub enum CueEdit {
+    /// The line's new text (an empty one deletes the line).
+    Text(usize, String),
+    /// A new start or end, kept only if the line stays longer than nothing.
+    Start(usize, f64),
+    End(usize, f64),
+    /// The line and the next one become one line.
+    MergeNext(usize),
+    /// The line becomes two at this time (its middle when outside it).
+    Split(usize, f64),
+    Delete(Vec<usize>),
+    /// Every line earlier (−) or later (+) by these seconds.
+    Shift(f64),
+    /// Every `find` in the text becomes the other text.
+    Replace(String, String),
+}
+
+/// Applies `edit` to `cues`; false when it changes nothing (a bad index, a
+/// time that would leave the line empty, a word that isn't there). Times are
+/// never pulled into range: a time that doesn't fit is turned down.
+pub fn edit_cues(cues: &mut Vec<Cue>, edit: &CueEdit) -> bool {
+    let ok_time = |t: f64| t.is_finite() && t >= 0.0;
+    match edit {
+        CueEdit::Text(i, text) => {
+            let text = text.trim().replace("\r\n", "\n");
+            match cues.get_mut(*i) {
+                Some(_) if text.is_empty() => {
+                    cues.remove(*i);
+                    true
+                }
+                Some(c) if c.text != text => {
+                    c.text = text;
+                    true
+                }
+                _ => false,
+            }
+        }
+        CueEdit::Start(i, t) => match cues.get_mut(*i) {
+            Some(c) if ok_time(*t) && *t < c.end && *t != c.start => {
+                c.start = *t;
+                cues.sort_by(|a, b| a.start.total_cmp(&b.start));
+                true
+            }
+            _ => false,
+        },
+        CueEdit::End(i, t) => match cues.get_mut(*i) {
+            Some(c) if ok_time(*t) && *t > c.start && *t != c.end => {
+                c.end = *t;
+                true
+            }
+            _ => false,
+        },
+        CueEdit::MergeNext(i) => {
+            if *i + 1 >= cues.len() {
+                return false;
+            }
+            let next = cues.remove(*i + 1);
+            let c = &mut cues[*i];
+            c.end = c.end.max(next.end);
+            c.text = format!("{}\n{}", c.text, next.text);
+            true
+        }
+        CueEdit::Split(i, t) => {
+            let Some(c) = cues.get(*i) else { return false };
+            let chars: Vec<char> = c.text.chars().collect();
+            if chars.len() < 2 || c.end - c.start < 0.2 {
+                return false;
+            }
+            let at = if *t > c.start + 0.1 && *t < c.end - 0.1 { *t } else { (c.start + c.end) / 2.0 };
+            // The text breaks where the time does: at a line break near there
+            // when the line has one, else at that share of its characters.
+            let share = ((at - c.start) / (c.end - c.start) * chars.len() as f64).round() as usize;
+            let breaks: Vec<usize> = chars.iter().enumerate().filter(|(_, ch)| **ch == '\n').map(|(n, _)| n).collect();
+            let cut = breaks.iter().copied().min_by_key(|b| b.abs_diff(share)).unwrap_or(share.clamp(1, chars.len() - 1));
+            let first: String = chars[..cut].iter().collect();
+            let second: String = chars[cut..].iter().collect();
+            let (first, second) = (first.trim().to_string(), second.trim().to_string());
+            if first.is_empty() || second.is_empty() {
+                return false;
+            }
+            let end = c.end;
+            cues[*i].end = at;
+            cues[*i].text = first;
+            cues.insert(*i + 1, Cue { start: at, end, text: second });
+            true
+        }
+        CueEdit::Delete(ids) => {
+            let before = cues.len();
+            let mut n = 0;
+            cues.retain(|_| {
+                n += 1;
+                !ids.contains(&(n - 1))
+            });
+            cues.len() != before
+        }
+        CueEdit::Shift(d) => {
+            if !d.is_finite() || *d == 0.0 || cues.is_empty() {
+                return false;
+            }
+            for c in cues.iter_mut() {
+                let len = c.end - c.start;
+                c.start = (c.start + d).max(0.0);
+                c.end = (c.end + d).max(c.start + len.min(0.01));
+            }
+            true
+        }
+        CueEdit::Replace(find, with) => {
+            if find.is_empty() {
+                return false;
+            }
+            let mut changed = false;
+            for c in cues.iter_mut().filter(|c| c.text.contains(find.as_str())) {
+                c.text = c.text.replace(find.as_str(), with);
+                changed = true;
+            }
+            cues.retain(|c| !c.text.trim().is_empty());
+            changed
+        }
+    }
+}
+
+/// `cues` as a subtitle file: WebVTT when `vtt`, else SRT. Windows line ends.
+pub fn cues_to_file(cues: &[Cue], vtt: bool) -> String {
+    let stamp = |t: f64| {
+        let ms = (t.max(0.0) * 1000.0).round() as u64;
+        let sep = if vtt { '.' } else { ',' };
+        format!("{:02}:{:02}:{:02}{sep}{:03}", ms / 3_600_000, ms / 60_000 % 60, ms / 1000 % 60, ms % 1000)
+    };
+    let mut out = String::new();
+    if vtt {
+        out += "WEBVTT\r\n\r\n";
+    }
+    for (n, c) in cues.iter().enumerate() {
+        if !vtt {
+            out += &format!("{}\r\n", n + 1);
+        }
+        out += &format!("{} --> {}\r\n{}\r\n\r\n", stamp(c.start), stamp(c.end), c.text.replace('\n', "\r\n"));
+    }
+    out
+}
+
+/// Writes edited `cues` over the subtitle file at `path`, as UTF-8: to a
+/// temporary file, to the disk, then in its place. Before the first change the
+/// file as it was is kept beside it as `<name>.orig.<ext>`. False when the file
+/// already holds these lines.
+pub fn save_cues(path: &Path, cues: &[Cue]) -> std::io::Result<bool> {
+    use std::io::Write;
+    let ext = ext_of(path);
+    let mut bytes = vec![0xEF, 0xBB, 0xBF];
+    bytes.extend(cues_to_file(cues, ext == "vtt").into_bytes());
+    if std::fs::read(path).is_ok_and(|old| old == bytes) {
+        return Ok(false);
+    }
+    let stem = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+    let orig = path.with_file_name(format!("{stem}.orig.{ext}"));
+    if path.is_file() && !orig.exists() {
+        std::fs::copy(path, &orig)?;
+    }
+    let tmp = path.with_file_name(format!("{stem}.{ext}.orangelink-tmp"));
+    {
+        let mut f = std::fs::File::create(&tmp)?;
+        f.write_all(&bytes)?;
+        f.sync_all()?;
+    }
+    std::fs::rename(&tmp, path).inspect_err(|_| {
+        let _ = std::fs::remove_file(&tmp);
+    })?;
+    Ok(true)
+}
+
 /// Subtitle text without cue numbers and timestamps, for display.
 pub fn subtitle_lines(text: &str) -> String {
     text.lines()
@@ -335,6 +507,66 @@ pub fn fmt_precise(secs: f64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn cue(start: f64, end: f64, text: &str) -> Cue {
+        Cue { start, end, text: text.into() }
+    }
+
+    #[test]
+    fn subtitle_edits_change_lines_and_turn_down_times_that_dont_fit() {
+        let mut cues = vec![cue(1.0, 3.0, "大家好"), cue(4.0, 6.0, "今天玩這個\n新遊戲"), cue(7.0, 9.0, "草")];
+        assert!(edit_cues(&mut cues, &CueEdit::Text(0, " 大家晚安 ".into())));
+        assert_eq!(cues[0].text, "大家晚安");
+        assert!(!edit_cues(&mut cues, &CueEdit::Start(0, 3.5)), "past its end: turned down, not pulled in");
+        assert!(!edit_cues(&mut cues, &CueEdit::Start(0, -1.0)));
+        assert!(!edit_cues(&mut cues, &CueEdit::End(9, 5.0)), "no such line");
+        assert!(edit_cues(&mut cues, &CueEdit::End(2, 99_999.0)), "past the video's end is kept as written");
+        assert_eq!(cues[2].end, 99_999.0);
+        assert!(edit_cues(&mut cues, &CueEdit::Split(1, 5.0)));
+        assert_eq!((cues[1].text.as_str(), cues[1].end, cues[2].text.as_str(), cues[2].start), ("今天玩這個", 5.0, "新遊戲", 5.0), "split at the line break");
+        assert!(edit_cues(&mut cues, &CueEdit::MergeNext(1)));
+        assert_eq!((cues[1].text.as_str(), cues[1].end), ("今天玩這個\n新遊戲", 6.0));
+        assert!(edit_cues(&mut cues, &CueEdit::Replace("遊戲".into(), "遊戲機".into())));
+        assert!(!edit_cues(&mut cues, &CueEdit::Replace(String::new(), "x".into())), "an empty word replaces nothing");
+        assert!(edit_cues(&mut cues, &CueEdit::Shift(-1.5)));
+        assert_eq!((cues[0].start, cues[0].end), (0.0, 1.5), "kept at 0, not before it");
+        assert!(edit_cues(&mut cues, &CueEdit::Text(2, "  ".into())), "an emptied line goes");
+        assert_eq!(cues.len(), 2);
+        assert!(edit_cues(&mut cues, &CueEdit::Delete(vec![0])));
+        assert_eq!(cues.len(), 1);
+    }
+
+    #[test]
+    fn splitting_a_line_without_breaks_cuts_between_characters() {
+        // Multi-byte text cut at a byte offset once panicked the UI thread.
+        let mut cues = vec![cue(0.0, 4.0, "#aébbb中文字")];
+        assert!(edit_cues(&mut cues, &CueEdit::Split(0, 2.0)));
+        assert_eq!(format!("{}{}", cues[0].text, cues[1].text), "#aébbb中文字");
+        let mut short = vec![cue(0.0, 1.0, "嗯")];
+        assert!(!edit_cues(&mut short, &CueEdit::Split(0, 0.5)), "one character can't be split");
+    }
+
+    #[test]
+    fn edited_subtitles_are_saved_as_utf8_and_the_gbk_original_is_kept() {
+        let dir = std::env::temp_dir().join(format!("orangelink-subsave-{}", crate::model::new_id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("直播.srt");
+        let (gbk, _, _) = encoding_rs::GBK.encode("1\r\n00:00:01,000 --> 00:00:02,500\r\n简体字幕测试\r\n");
+        std::fs::write(&path, &gbk).unwrap();
+        let mut cues = parse_cues(&read_text(&path, 1 << 20).unwrap());
+        assert_eq!(cues[0].text, "简体字幕测试");
+        assert!(edit_cues(&mut cues, &CueEdit::Text(0, "改好的字幕".into())));
+        assert!(save_cues(&path, &cues).unwrap());
+        assert_eq!(std::fs::read(dir.join("直播.orig.srt")).unwrap(), gbk.to_vec(), "the original, byte for byte");
+        let back = parse_cues(&read_text(&path, 1 << 20).unwrap());
+        assert_eq!(back, vec![cue(1.0, 2.5, "改好的字幕")]);
+        assert!(!save_cues(&path, &back).unwrap(), "unchanged: not written");
+        let vtt = dir.join("a.vtt");
+        save_cues(&vtt, &back).unwrap();
+        assert!(read_text(&vtt, 1 << 20).unwrap().starts_with("WEBVTT"));
+        assert_eq!(parse_cues(&read_text(&vtt, 1 << 20).unwrap()), back);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn import_dialog_offers_videos_audio_and_subtitles_not_only_images() {

@@ -13,6 +13,7 @@ mod scrub;
 mod undo;
 mod smart_edit;
 pub mod state;
+pub mod subtitle_edit;
 mod subtitle_index;
 mod watch_folders;
 mod whisper_ui;
@@ -573,6 +574,8 @@ pub struct Subtitles {
     pub scroll_to_focus: bool,
     /// The lines matching `search`, and the search they were found for.
     pub matches: Option<(String, std::rc::Rc<Vec<usize>>)>,
+    /// Proofreading: the lines picked, the text being edited, 復原.
+    pub edit: subtitle_edit::SubEdit,
 }
 
 impl Subtitles {
@@ -2317,7 +2320,7 @@ impl App {
         if let Some(p) = &path {
             self.index_subtitles(id, p);
         }
-        self.subs = is_media.then(|| Subtitles { id: id.to_string(), path, cues, search: String::new(), last_cue: None, focus: None, scroll_to_focus: false, matches: None });
+        self.subs = is_media.then(|| Subtitles { id: id.to_string(), path, cues, search: String::new(), last_cue: None, focus: None, scroll_to_focus: false, matches: None, edit: Default::default() });
     }
 
     /// Encodes a marked clip to `captures/` on a background thread; it is imported when done.
@@ -4188,6 +4191,7 @@ mod tests {
             focus: None,
             scroll_to_focus: false,
             matches: None,
+            edit: Default::default(),
         };
         assert_eq!(subs.find("拉我"), Some(1), "the first of equally good lines");
         assert_eq!(subs.find("拉我 center"), Some(2), "more words matched wins");
@@ -4579,6 +4583,7 @@ mod tests {
             focus: None,
             scroll_to_focus: false,
             matches: None,
+            edit: Default::default(),
         };
         assert_eq!(*subs.matching(), vec![0, 1, 2]);
         subs.search = "y".into();

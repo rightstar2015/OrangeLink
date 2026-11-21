@@ -495,14 +495,12 @@ impl App {
     }
 
     pub(super) fn inspector_multi(&mut self, ui: &mut Ui) {
-        let ids = self.selected_ids();
+        let sum = self.multi_summary();
+        let ids = &sum.ids;
         let stats = self.cached_sidebar_stats();
-        let Some(lib) = &self.lib else { return };
-        let items: Vec<&crate::model::Item> = ids.iter().filter_map(|id| lib.items.get(id)).collect();
 
-        ui.label(RichText::new(format!("已選取 {} 個項目", items.len())).heading());
-        let total: u64 = items.iter().map(|i| i.size).sum();
-        ui.label(RichText::new(human_size(total)).weak());
+        ui.label(RichText::new(format!("已選取 {} 個項目", ids.len())).heading());
+        ui.label(RichText::new(human_size(sum.size)).weak());
         ui.add_space(6.0);
 
         // Stacked preview of the first few.
@@ -510,18 +508,18 @@ impl App {
         let cell = ((w - 12.0) / 3.0).min(90.0);
         ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing = vec2(4.0, 4.0);
-            for it in items.iter().take(9) {
+            for id in ids.iter().take(9) {
                 let (rect, _) = ui.allocate_exact_size(vec2(cell, cell), Sense::hover());
                 ui.painter().rect_filled(rect, ROUNDING, ui.visuals().extreme_bg_color);
-                if let Some((tex, size)) = self.thumb_tex(&it.id) {
+                if let Some((tex, size)) = self.thumb_tex(id) {
                     ui.painter().image(tex, fit_rect(rect.shrink(2.0), size), UV, Color32::WHITE);
                 }
             }
         });
 
         ui.add_space(8.0);
-        let first_rating = items.first().map_or(0, |i| i.rating);
-        let uniform_rating = items.iter().all(|i| i.rating == first_rating);
+        let first_rating = sum.rating.unwrap_or(0);
+        let uniform_rating = sum.rating.is_some();
         let rating_label = if uniform_rating {
             "評分（套用到全部）"
         } else {
@@ -551,13 +549,12 @@ impl App {
 
         ui.add_space(8.0);
         ui.label(RichText::new("共同標籤").small().weak());
-        let mut common: Vec<String> = items.first().map(|i| i.tags.clone()).unwrap_or_default();
-        common.retain(|t| items.iter().all(|i| i.tags.contains(t)));
+        let common = &sum.common_tags;
         ui.horizontal_wrapped(|ui| {
             if common.is_empty() {
                 ui.label(RichText::new("無").small().weak());
             }
-            for t in &common {
+            for t in common {
                 let (filter, x) = chip_parts(ui, t, true);
                 if filter {
                     self.act(Action::ToggleTagFilter(t.clone()));
@@ -570,7 +567,7 @@ impl App {
         let folders = &stats.folder_flat;
         let all_tags = &stats.tag_counts;
         let focus = std::mem::take(&mut self.focus_tag);
-        for t in tag_box(ui, &mut self.tag_input, &mut self.tag_pick, all_tags, &common, "為全部新增標籤，按 Enter", focus) {
+        for t in tag_box(ui, &mut self.tag_input, &mut self.tag_pick, all_tags, common, "為全部新增標籤，按 Enter", focus) {
             self.act(Action::AddTag(ids.clone(), t));
         }
 
@@ -585,12 +582,8 @@ impl App {
             });
         });
         egui::Grid::new("multi-fields").num_columns(2).spacing([8.0, 4.0]).show(ui, |ui| {
-            for name in &lib.meta.fields {
-                let values: std::collections::HashSet<&str> = items.iter().map(|i| i.fields.get(name).map_or("", String::as_str)).collect();
-                let hint = match values.iter().next() {
-                    Some(v) if values.len() == 1 => v.to_string(),
-                    _ => "（多個不同的值）".to_string(),
-                };
+            for (name, shared) in &sum.fields {
+                let hint = shared.clone().unwrap_or_else(|| "（多個不同的值）".to_string());
                 ui.label(RichText::new(name).small()).context_menu(|ui| {
                     if ui.button("清除這些項目的欄位值").clicked() {
                         pending.push(Action::SetField(ids.clone(), name.clone(), String::new()));
@@ -618,7 +611,7 @@ impl App {
         }
 
         ui.add_space(8.0);
-        let used_folders: std::collections::HashSet<&String> = items.iter().flat_map(|i| i.folders.iter()).collect();
+        let used_folders = &sum.folders;
         ui.horizontal_wrapped(|ui| {
             ui.menu_button("📁 加入資料夾…", |ui| {
                 if folders.is_empty() {

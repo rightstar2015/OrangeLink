@@ -42,6 +42,63 @@ use std::{
     },
 };
 
+/// See `App::multi_summary`.
+#[derive(Default)]
+pub struct MultiSummary {
+    revision: u64,
+    visible_gen: u64,
+    selected: HashSet<String>,
+    /// Selected items that exist, in the order shown.
+    pub ids: Vec<String>,
+    pub size: u64,
+    /// The rating when all items share it.
+    pub rating: Option<u8>,
+    /// Tags on every item, in the first item's order.
+    pub common_tags: Vec<String>,
+    /// Per custom field: the value all items share, or `None` when they differ.
+    pub fields: Vec<(String, Option<String>)>,
+    pub folders: HashSet<String>,
+}
+
+impl MultiSummary {
+    pub fn compute(lib: &Library, ids: Vec<String>) -> Self {
+        let items: Vec<&Item> = ids.iter().filter_map(|id| lib.items.get(id)).collect();
+        let first = items.first();
+        let rating = first.map(|f| f.rating).filter(|r| items.iter().all(|i| i.rating == *r));
+        let mut tag_count: HashMap<&str, usize> = HashMap::new();
+        for it in &items {
+            let mut seen = HashSet::new();
+            for t in &it.tags {
+                if seen.insert(t.as_str()) {
+                    *tag_count.entry(t.as_str()).or_default() += 1;
+                }
+            }
+        }
+        let common_tags = first
+            .map(|f| f.tags.iter().filter(|t| tag_count.get(t.as_str()) == Some(&items.len())).cloned().collect())
+            .unwrap_or_default();
+        let fields = lib
+            .meta
+            .fields
+            .iter()
+            .map(|name| {
+                let value = |i: &Item| i.fields.get(name).map_or("", String::as_str).to_string();
+                let shared = first.map(|f| value(f)).filter(|v| items.iter().all(|i| value(i) == *v));
+                (name.clone(), shared)
+            })
+            .collect();
+        Self {
+            size: items.iter().map(|i| i.size).sum(),
+            rating,
+            common_tags,
+            fields,
+            folders: items.iter().flat_map(|i| i.folders.iter().cloned()).collect(),
+            ids: items.iter().map(|i| i.id.clone()).collect(),
+            ..Default::default()
+        }
+    }
+}
+
 #[derive(Clone, PartialEq)]
 pub enum View {
     All,
@@ -820,6 +877,11 @@ pub struct App {
     title_bar_dark: Option<bool>,
     /// Cached sidebar & inspector counts, keyed by `lib.revision`.
     pub sidebar_cache: RefCell<(Option<u64>, crate::ui::SidebarStats)>,
+    /// What the selected items have in common, for the multi-selection inspector
+    /// and action bar; rebuilt when the library, selection or shown order changes.
+    multi_summary: Option<std::rc::Rc<MultiSummary>>,
+    /// Counts recomputations of `visible`, so caches can tell the order changed.
+    visible_gen: u64,
     /// Search syntax quick-reference popover open.
     pub syntax_open: bool,
     /// Studio header 🏷 整理 popover open.
@@ -1010,6 +1072,8 @@ impl App {
             ai_hint: 0,
             title_bar_dark: None,
             sidebar_cache: RefCell::new((None, crate::ui::SidebarStats::default())),
+            multi_summary: None,
+            visible_gen: 0,
             syntax_open: false,
             viewer_tags_open: false,
             signal_plot_cache: crate::ui::SignalPlotCache::default(),
@@ -1101,6 +1165,25 @@ impl App {
     }
 
     /// Selected ids in display order (selected items outside the current view last).
+    /// The selection's shared rating, tags and field values, computed once per
+    /// change instead of every frame (a select-all of a large library is slow to scan).
+    pub fn multi_summary(&mut self) -> std::rc::Rc<MultiSummary> {
+        let Some(lib) = &self.lib else { return Default::default() };
+        let fresh = self.multi_summary.as_ref().is_some_and(|m| {
+            m.revision == lib.revision && m.visible_gen == self.visible_gen && m.selected == self.selected
+        });
+        if !fresh {
+            let ids = self.selected_ids();
+            let lib = self.lib.as_ref().expect("checked");
+            let mut sum = MultiSummary::compute(lib, ids);
+            sum.revision = lib.revision;
+            sum.visible_gen = self.visible_gen;
+            sum.selected = self.selected.clone();
+            self.multi_summary = Some(std::rc::Rc::new(sum));
+        }
+        self.multi_summary.clone().expect("set above")
+    }
+
     pub fn selected_ids(&self) -> Vec<String> {
         let mut out: Vec<String> = self.visible.iter().filter(|id| self.selected.contains(*id)).cloned().collect();
         if out.len() < self.selected.len() {
@@ -1410,6 +1493,7 @@ impl App {
         if !self.visible_key.as_ref().is_some_and(|k| self.view_key_holds(k)) {
             (self.visible, self.groups) = self.compute_visible();
             self.visible_key = Some(self.view_key());
+            self.visible_gen += 1;
         }
         self.refresh_smart_counts();
     }
@@ -4347,6 +4431,53 @@ mod tests {
         assert_eq!(subs.scroll_target(None), None, "the list was held on the found line");
         assert_eq!(subs.focus, Some(2));
         assert_eq!(subs.scroll_target(Some(1)), Some(1), "following playback still scrolls");
+    }
+
+    #[test]
+    fn the_multi_selection_summary_is_reused_until_the_selection_or_library_changes() {
+        let root = std::env::temp_dir().join(format!("orangelink-multisum-{}", crate::model::new_id()));
+        let mut lib = Library::create(&root).unwrap();
+        for (id, rating, tags) in [("a", 3, vec!["x", "y", "z"]), ("b", 3, vec!["z", "x"]), ("c", 1, vec!["x"])] {
+            let it: Item = serde_json::from_value(serde_json::json!({
+                "id": id, "name": id, "file_name": "a.png", "ext": "png", "kind": "image", "size": 10,
+                "width": 1, "height": 1, "added_at": 0, "modified_at": 0, "rating": rating, "tags": tags
+            }))
+            .unwrap();
+            lib.insert_item(it);
+        }
+        lib.add_field("作者");
+        let mut app = App::with_config(&egui::Context::default(), Config::default());
+        app.lib = Some(lib);
+        app.selected.extend(["a".to_string(), "b".to_string()]);
+        let first = app.multi_summary();
+        assert_eq!(first.common_tags, vec!["x", "z"]);
+        assert_eq!(first.rating, Some(3));
+        assert_eq!(first.size, 20);
+        assert_eq!(first.fields, vec![("作者".to_string(), Some(String::new()))]);
+        assert!(std::rc::Rc::ptr_eq(&first, &app.multi_summary()), "recomputed with nothing changed");
+
+        app.selected.insert("c".into());
+        let more = app.multi_summary();
+        assert_eq!(more.common_tags, vec!["x"]);
+        assert_eq!(more.rating, None);
+
+        let lib = app.lib.as_mut().unwrap();
+        lib.items.get_mut("c").unwrap().fields.insert("作者".into(), "我".into());
+        lib.touch("c");
+        assert_eq!(app.multi_summary().fields[0].1, None, "a library edit was not picked up");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn the_cached_stats_count_items_in_missing_folders_and_an_all_trash_library_as_empty() {
+        let (mut app, root) = undo_test_app("cachedstats");
+        app.lib.as_mut().unwrap().items.get_mut("a").unwrap().folders.push("gone".into());
+        app.lib.as_mut().unwrap().touch("a");
+        assert_eq!(app.with_sidebar_stats(|s| (s.missing_folder_refs, s.total)), (1, 1));
+        app.lib.as_mut().unwrap().items.get_mut("a").unwrap().deleted = true;
+        app.lib.as_mut().unwrap().touch("a");
+        assert_eq!(app.with_sidebar_stats(|s| s.total), 0);
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

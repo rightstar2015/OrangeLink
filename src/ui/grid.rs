@@ -92,7 +92,8 @@ impl App {
     /// Floating pill bar at the bottom-center of the grid when multiple items are selected.
     fn multi_action_bar(&mut self, ctx: &egui::Context, panel_rect: Rect) {
         let n = self.selected.len();
-        let ids = self.selected_ids();
+        let sum = self.multi_summary();
+        let ids = &sum.ids;
         let in_trash = self.view == View::Trash;
         let t = tokens();
         let pos = pos2(panel_rect.center().x, panel_rect.bottom() - 16.0);
@@ -298,7 +299,7 @@ impl App {
     /// Nothing to show: the trash is empty, the library is empty (ways to fill
     /// it), or the conditions leave nothing (what they are, and a way out).
     fn empty_state(&mut self, ui: &mut Ui) {
-        let empty_library = self.lib.as_ref().is_some_and(|l| l.items.values().all(|i| i.deleted));
+        let empty_library = self.lib.is_some() && self.with_sidebar_stats(|s| s.total == 0);
         ui.vertical_centered(|ui| {
             ui.add_space(ui.available_height() * 0.25);
             if self.view == View::Trash {

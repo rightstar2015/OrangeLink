@@ -16,6 +16,8 @@ pub struct SidebarStats {
     pub folder_counts: HashMap<String, usize>,
     pub tag_counts: Vec<(String, usize)>,
     pub folder_flat: Vec<(String, String, usize)>,
+    /// Items that name a folder that no longer exists.
+    pub missing_folder_refs: usize,
 }
 
 impl SidebarStats {
@@ -24,6 +26,7 @@ impl SidebarStats {
             folder_counts: lib.folder_counts(),
             tag_counts: lib.tag_counts(),
             folder_flat: lib.folder_flat(),
+            missing_folder_refs: lib.missing_folder_refs(),
             ..Default::default()
         };
         for it in lib.items.values() {
@@ -45,12 +48,17 @@ impl SidebarStats {
 impl App {
     /// Sidebar & inspector stats, rebuilt only when `lib.revision` advances.
     pub(super) fn cached_sidebar_stats(&self) -> SidebarStats {
-        let Some(lib) = &self.lib else { return SidebarStats::default() };
+        self.with_sidebar_stats(SidebarStats::clone)
+    }
+
+    /// Reads the cached stats without copying them.
+    pub(crate) fn with_sidebar_stats<R>(&self, f: impl FnOnce(&SidebarStats) -> R) -> R {
+        let Some(lib) = &self.lib else { return f(&SidebarStats::default()) };
         let mut cache = self.sidebar_cache.borrow_mut();
         if cache.0 != Some(lib.revision) {
             *cache = (Some(lib.revision), SidebarStats::compute(lib));
         }
-        cache.1.clone()
+        f(&cache.1)
     }
 
     pub fn sidebar(&mut self, ctx: &egui::Context) {

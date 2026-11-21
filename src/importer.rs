@@ -280,7 +280,11 @@ pub fn path_key(path: &Path) -> Option<String> {
 /// beside it (metadata.json.tmp, .broken copies), and the thumbnail.
 fn is_reserved_name(name: &str) -> bool {
     let lower = name.to_ascii_lowercase();
-    lower.starts_with(META_FILE) || lower.starts_with(THUMB_FILE)
+    [META_FILE, THUMB_FILE].iter().any(|own| {
+        // The file itself or a temp/backup next to it ("metadata.json.tmp"),
+        // but not another name that merely starts the same ("metadata.jsonl").
+        lower.strip_prefix(own).is_some_and(|rest| rest.is_empty() || rest.starts_with('.'))
+    })
 }
 
 fn import_one(

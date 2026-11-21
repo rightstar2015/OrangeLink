@@ -3950,7 +3950,7 @@ mod tests {
         let root = std::env::temp_dir().join(format!("orangelink-cliprange-{}", crate::model::new_id()));
         let mut lib = Library::create(&root).unwrap();
         let it: Item = serde_json::from_value(serde_json::json!({
-            "id": "v", "name": "v", "file_name": "v.mp4", "ext": "mp4", "kind": "video", "size": 1, "duration": 10.0, "added_at": 0, "modified_at": 0,
+            "id": "v", "name": "v", "file_name": "v.mp4", "ext": "mp4", "kind": "video", "size": 1, "width": 1, "height": 1, "duration": 10.0, "added_at": 0, "modified_at": 0,
             "clips": [{ "id": "c", "name": "c", "start": 0.0, "end": 0.06 }]
         }))
         .unwrap();
@@ -4504,6 +4504,7 @@ mod tests {
         lib.add_field("作者");
         let mut app = App::with_config(&egui::Context::default(), Config::default());
         app.lib = Some(lib);
+        app.visible = vec!["a".into(), "b".into(), "c".into()];
         app.selected.extend(["a".to_string(), "b".to_string()]);
         let first = app.multi_summary();
         assert_eq!(first.common_tags, vec!["x", "z"]);

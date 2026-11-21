@@ -3801,6 +3801,32 @@ mod tests {
     }
 
     #[test]
+    fn dragging_a_clip_edge_keeps_it_within_the_video() {
+        let ctx = egui::Context::default();
+        let mut app = App::with_config(&ctx, Config::default());
+        let root = std::env::temp_dir().join(format!("orangelink-cliprange-{}", crate::model::new_id()));
+        let mut lib = Library::create(&root).unwrap();
+        let it: Item = serde_json::from_value(serde_json::json!({
+            "id": "v", "name": "v", "file_name": "v.mp4", "ext": "mp4", "kind": "video", "size": 1, "duration": 10.0, "added_at": 0, "modified_at": 0,
+            "clips": [{ "id": "c", "name": "c", "start": 0.0, "end": 0.06 }]
+        }))
+        .unwrap();
+        lib.insert_item(it);
+        app.lib = Some(lib);
+        app.act(Action::SetClipRange("v".into(), "c".into(), -0.04, 0.06));
+        app.act(Action::SetClipRange("v".into(), "c".into(), 9.0, 10.5));
+        app.process_actions(&ctx);
+        let c = &app.lib.as_ref().unwrap().items["v"].clips[0];
+        assert_eq!((c.start, c.end), (9.0, 10.0));
+        app.act(Action::SetClipRange("v".into(), "c".into(), -0.04, 0.06));
+        app.process_actions(&ctx);
+        let c = &app.lib.as_ref().unwrap().items["v"].clips[0];
+        assert!(c.start >= 0.0, "{}", c.start);
+        drop(app);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn marks_make_a_clip() {
         assert_eq!(clip_from_marks((Some(10.0), Some(20.0)), 50.0, 100.0), (10.0, 20.0));
         assert_eq!(clip_from_marks((Some(10.0), None), 15.0, 100.0), (10.0, 15.0), "to the playhead");

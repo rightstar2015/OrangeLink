@@ -154,7 +154,9 @@ mod platform {
 
         let offset = (id - FIRST_ID) as usize;
         let folder = paths[0].parent().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
-        let folder_ansi: Vec<u8> = folder.bytes().chain(std::iter::once(0)).collect();
+        // The ANSI field is read as the system code page, not UTF-8: for a folder
+        // with other letters, an old non-Unicode handler gets none rather than garbage.
+        let folder_ansi: Vec<u8> = if folder.is_ascii() { folder.bytes().chain(std::iter::once(0)).collect() } else { Vec::new() };
         let folder_wide = wide(&folder);
         let info = CMINVOKECOMMANDINFOEX {
             cbSize: std::mem::size_of::<CMINVOKECOMMANDINFOEX>() as u32,
@@ -163,7 +165,7 @@ mod platform {
             // The command's offset where a verb string would go, as MAKEINTRESOURCE does.
             lpVerb: PCSTR(offset as *const u8),
             lpVerbW: PCWSTR(offset as *const u16),
-            lpDirectory: PCSTR(folder_ansi.as_ptr()),
+            lpDirectory: if folder_ansi.is_empty() { PCSTR::null() } else { PCSTR(folder_ansi.as_ptr()) },
             lpDirectoryW: PCWSTR(folder_wide.as_ptr()),
             nShow: SW_SHOWNORMAL.0,
             ptInvoke: point,

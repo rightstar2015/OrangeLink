@@ -61,11 +61,12 @@ pub fn ass(cues: &[crate::media::Cue], start: f64, end: f64, res: (u32, u32), st
     let margin = (h as f32 * style.margin / 100.0).round().max(0.0);
     let outline = (style.outline * h as f32 / 1080.0 * 10.0).round() / 10.0;
     let side = (w as f32 * 0.06).round();
-    let font = style.font.replace(',', " ");
+    // A comma or line break in the font name would end the Style line early.
+    let font = style.font.replace([',', '\r', '\n'], " ");
     let mut events = String::new();
     for c in cues.iter().filter(|c| c.end > start && c.start < end) {
         let (a, b) = ((c.start - start).max(0.0), (c.end.min(end) - start).max(0.0));
-        let text: String = c.text.chars().filter(|ch| !matches!(ch, '{' | '}')).collect::<String>().replace("\r\n", "\n").replace('\n', "\\N");
+        let text: String = c.text.chars().filter(|ch| !matches!(ch, '{' | '}')).collect::<String>().replace("\r\n", "\n").replace(['\r', '\n'], "\\N");
         events.push_str(&format!("Dialogue: 0,{},{},Default,,0,0,0,,{text}\n", ass_time(a), ass_time(b)));
     }
     if events.is_empty() {
@@ -391,6 +392,15 @@ mod tests {
         assert_eq!(run(&ff, VideoEncoder::Auto, &job, &out, &AtomicBool::new(true)), Err(CANCELLED.to_string()));
         assert!(!out.exists());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_bare_carriage_return_does_not_break_the_subtitle_file() {
+        let cues = vec![crate::media::Cue { start: 0.0, end: 2.0, text: "上\r下".into() }];
+        let style = BurnStyle { font: "Noto\r\nSans".into(), size: 4.0, margin: 12.5, outline: 3.0 };
+        let ass = ass(&cues, 0.0, 2.0, (1920, 1080), &style).unwrap();
+        assert!(!ass.contains('\r'), "{ass:?}");
+        assert!(ass.contains("上\\N下") && ass.contains("Style: Default,Noto  Sans,"), "{ass}");
     }
 
     #[test]

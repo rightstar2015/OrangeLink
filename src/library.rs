@@ -452,6 +452,7 @@ impl Library {
 
     pub fn insert_item(&mut self, item: Item) {
         self.items.insert(item.id.clone(), item);
+        self.changed_since_backup = true;
         self.revision += 1;
     }
 
@@ -543,6 +544,8 @@ impl Library {
         let backup: Backup = serde_json::from_slice(&fs::read(path)?).context("備份檔格式錯誤")?;
         self.write_backup(&format!("backup-{}-before-restore.json", chrono::Local::now().format("%Y%m%d-%H%M%S")))?;
         rotate_backups(&self.root);
+        let affected: Vec<String> = backup.items.iter().filter(|i| self.items.contains_key(&i.id)).map(|i| i.id.clone()).collect();
+        self.capture(&affected);
         let mut restored = 0;
         for item in backup.items {
             let id = item.id.clone();
@@ -1229,6 +1232,7 @@ impl Library {
             if let Some(t) = g.tags.iter_mut().find(|t| *t == old) {
                 *t = new.to_string();
             }
+            g.tags.sort_by_key(|t| t.to_lowercase());
             g.tags.dedup();
         }
         self.touch_meta();

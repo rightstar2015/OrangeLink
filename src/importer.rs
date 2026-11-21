@@ -291,14 +291,45 @@ fn import_one(
     }
     let source = opts.link.then(|| abs.clone());
     let hash = quick_hash(path)?;
+    let mut added_to_seen = false;
     if opts.skip_duplicates {
-        // Held while a large file is compared, so two copies of it in one
-        // import can't both pass.
-        let mut seen = lock(seen);
-        if seen.has_copy(&hash, path) {
+        // Snapshot candidate paths for partial hashes so multi-GB byte comparisons
+        // run outside the mutex; re-check any files added concurrently before inserting.
+        let (is_partial, initial) = {
+            let s = lock(seen);
+            if !s.keys.contains(&hash) {
+                (false, None)
+            } else if !crate::imaging::is_partial_hash(&hash) {
+                return Ok(None);
+            } else {
+                match s.files.get(&hash) {
+                    Some(files) if !files.is_empty() => (true, Some(files.clone())),
+                    _ => return Ok(None),
+                }
+            }
+        };
+        let checked_len = if let Some(files) = &initial {
+            if files.iter().any(|f| crate::imaging::same_contents(f, path).unwrap_or(false)) {
+                return Ok(None);
+            }
+            files.len()
+        } else {
+            0
+        };
+        let mut s = lock(seen);
+        if is_partial {
+            let extra_dup = s
+                .files
+                .get(&hash)
+                .is_some_and(|files| files.iter().skip(checked_len).any(|f| crate::imaging::same_contents(f, path).unwrap_or(false)));
+            if extra_dup {
+                return Ok(None);
+            }
+        } else if s.has_copy(&hash, path) {
             return Ok(None);
         }
-        seen.add(&hash, &key, &abs);
+        s.add(&hash, &key, &abs);
+        added_to_seen = true;
     }
 
     let id = new_id();
@@ -306,10 +337,14 @@ fn import_one(
     // Guarded here too, so a panic still cleans up the half-made item folder below.
     let result = guarded(|| -> Result<Item> {
         fs::create_dir_all(&dir)?;
-        let file_name = path
+        let mut file_name = path
             .file_name()
             .map(|n| n.to_string_lossy().to_string())
             .unwrap_or_else(|| "file".into());
+        // Never let a copied file collide with metadata.json or _thumbnail.png.
+        if source.is_none() && (file_name.eq_ignore_ascii_case(META_FILE) || file_name.eq_ignore_ascii_case(THUMB_FILE)) {
+            file_name = format!("item_{file_name}");
+        }
         let size = fs::metadata(path)?.len();
         if source.is_none() {
             fs::copy(path, dir.join(&file_name))?;
@@ -399,7 +434,9 @@ fn import_one(
         Ok(item) => Ok(Some(item)),
         Err(e) => {
             let _ = fs::remove_dir_all(&dir);
-            lock(seen).forget(&hash, &key, &abs);
+            if added_to_seen {
+                lock(seen).forget(&hash, &key, &abs);
+            }
             Err(e)
         }
     }
@@ -1004,6 +1041,33 @@ mod restore_and_similarity_tests {
         let again = Library::open(&lib.root).unwrap();
         assert!(again.recovered.is_none(), "the restored library.json was written");
         assert_eq!(again.folder_name(&folder), Some("參考"));
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn copy_import_of_metadata_json_does_not_overwrite_original() {
+        let root = std::env::temp_dir().join(format!("orangelink-meta-clash-{}", new_id()));
+        let src_dir = root.join("src");
+        fs::create_dir_all(&src_dir).unwrap();
+        let src = src_dir.join("metadata.json");
+        fs::write(&src, b"{\"user\":\"original\"}").unwrap();
+        let lib = crate::library::Library::create(&root.join("lib")).unwrap();
+        let seen = Mutex::new(Known::default());
+        let opts = ImportOptions {
+            link: false,
+            folder: None,
+            tags: Vec::new(),
+            skip_duplicates: true,
+            ffmpeg_dir: None,
+            cancel: Arc::new(AtomicBool::new(false)),
+        };
+        let item = import_one(&lib.root, &src, &opts, &seen, 0).unwrap().unwrap();
+        assert_eq!(item.name, "metadata");
+        assert_ne!(item.file_name, META_FILE);
+        assert_eq!(fs::read(lib.file_path(&item)).unwrap(), b"{\"user\":\"original\"}");
+        // Reopening the library still reads the item's own metadata.json cleanly.
+        let reopened = crate::library::Library::open(&lib.root).unwrap();
+        assert!(reopened.items.contains_key(&item.id));
         fs::remove_dir_all(&root).unwrap();
     }
 }

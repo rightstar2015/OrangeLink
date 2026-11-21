@@ -8,15 +8,21 @@ use std::{
     process::Stdio,
 };
 
+/// Upper bound on curve length (48 hours) so corrupt timestamps cannot cause OOM.
+const MAX_SECS: usize = 48 * 3600;
+
 /// Chat weight per second of video. A message counts 1, plus 1 for each keyword in it;
 /// Super Chats, stickers and memberships count 3.
 pub fn chat_activity(messages: &[ChatMessage], keywords: &[String], duration: f64) -> Vec<f32> {
-    let secs = duration.max(0.0).ceil() as usize;
+    let secs = (duration.max(0.0).ceil() as usize).min(MAX_SECS);
     let mut out = vec![0.0; secs.max(1)];
     let keywords: Vec<String> = keywords.iter().map(|k| k.trim().to_lowercase()).filter(|k| !k.is_empty()).collect();
     for m in messages {
         let Some(ms) = m.offset_ms.filter(|ms| *ms >= 0) else { continue };
         let i = (ms / 1000) as usize;
+        if i >= MAX_SECS {
+            continue;
+        }
         if i >= out.len() {
             if duration > 0.0 {
                 continue; // after the end of this (maybe trimmed) video
@@ -45,7 +51,7 @@ pub fn keyword_hits(messages: &[ChatMessage], keywords: &[String], duration: f64
     for m in messages {
         let Some(ms) = m.offset_ms.filter(|ms| *ms >= 0) else { continue };
         let s = ms / 1000;
-        if duration > 0.0 && s as f64 >= duration.ceil() {
+        if s as usize >= MAX_SECS || (duration > 0.0 && s as f64 >= duration.ceil()) {
             continue;
         }
         let text = m.text.to_lowercase();
@@ -90,9 +96,17 @@ pub fn loudness(ffmpeg_dir: &Path, input: &Path, mut progress: impl FnMut(f64) -
             format!("無法啟動 FFmpeg：{e}")
         })?;
     let stderr = child.stderr.take().ok_or("無法讀取 FFmpeg 輸出")?;
+    let mut reader = BufReader::new(stderr);
+    let mut buf = Vec::new();
     let mut out: Vec<f32> = Vec::new();
     let mut time = None;
-    for line in BufReader::new(stderr).lines().map_while(Result::ok) {
+    loop {
+        buf.clear();
+        match reader.read_until(b'\n', &mut buf) {
+            Ok(0) | Err(_) => break,
+            Ok(_) => {}
+        }
+        let line = String::from_utf8_lossy(&buf);
         // Each frame prints `pts_time:1.2`, then `lavfi.r128.M=-24.1`.
         if let Some(t) = line.split("pts_time:").nth(1).and_then(|v| v.trim().parse::<f64>().ok()) {
             time = Some(t);
@@ -100,6 +114,9 @@ pub fn loudness(ffmpeg_dir: &Path, input: &Path, mut progress: impl FnMut(f64) -
         }
         let (Some(t), Some(m)) = (time, line.split("lavfi.r128.M=").nth(1).and_then(|v| v.trim().parse::<f32>().ok())) else { continue };
         let i = t.max(0.0) as usize;
+        if i >= MAX_SECS {
+            continue;
+        }
         if i >= out.len() {
             out.resize(i + 1, f32::NEG_INFINITY);
             if !progress(t) {
@@ -167,7 +184,9 @@ pub fn peaks(chat: Option<&[f32]>, loud: Option<&[f32]>, gap: usize, max: usize)
     let mut score = vec![0.0f32; len];
     if let Some(c) = chat {
         for (i, z) in standardized(c, 10).into_iter().enumerate() {
-            score[i.saturating_sub(CHAT_DELAY)] += z;
+            if let Some(t) = i.checked_sub(CHAT_DELAY) {
+                score[t] += z;
+            }
         }
     }
     if let Some(l) = loud {
@@ -366,6 +385,26 @@ mod tests {
         assert!(curve[5] > curve[1] + 10.0, "{curve:?}");
         assert_eq!(loudness(&ff, &wav, |_| false), Err("已取消".to_string()));
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn chat_peaks_do_not_pile_up_at_zero_and_corrupt_offsets_are_capped() {
+        // Slightly elevated start (0..5s) plus a real highlight at 60..70s: 0:00 must not beat 60s.
+        let mut chat = vec![1.0f32; 120];
+        for v in &mut chat[0..5] {
+            *v = 2.5;
+        }
+        for v in &mut chat[60..70] {
+            *v = 6.0;
+        }
+        let found = peaks(Some(&chat), None, 20, 3);
+        assert!(!found.is_empty());
+        assert!(found[0].at >= 50 && found[0].at <= 70, "real peak should win over 0:00: {found:?}");
+
+        // Huge corrupt offset_ms must not allocate gigabytes.
+        let huge = [msg(i64::MAX / 2, "corrupt", false), msg(2_000, "ok", false)];
+        let curve = chat_activity(&huge, &[], 0.0);
+        assert_eq!(curve.len(), 3);
     }
 }
 

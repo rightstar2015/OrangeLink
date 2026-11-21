@@ -230,7 +230,7 @@ pub fn build_args(r: &Request) -> Vec<String> {
     let mut push = |items: &[&str]| a.extend(items.iter().map(|s| s.to_string()));
     push(&[if r.playlist { "--yes-playlist" } else { "--no-playlist" }]);
     push(&["-P", &r.out_dir.to_string_lossy()]);
-    let name = r.name.trim();
+    let name = r.name.trim().replace('%', "%%");
     let template = match (name.is_empty(), r.playlist) {
         (true, _) => "%(title)s [%(id)s].%(ext)s".to_string(),
         (false, true) => format!("{name} %(playlist_index)s.%(ext)s"),
@@ -253,26 +253,26 @@ pub fn build_args(r: &Request) -> Vec<String> {
     }
     if r.chat_only {
         push(&["--skip-download"]);
-        return a;
-    }
-    match &r.custom {
-        Some((v, au)) => {
-            let sel = match (v, au) {
-                (Some(v), Some(au)) => format!("{v}+{au}"),
-                (Some(v), None) => v.clone(),
-                (None, Some(au)) => au.clone(),
-                (None, None) => "b".to_string(),
-            };
-            push(&["-f", &sel]);
-            if v.is_some() && au.is_some() {
-                push(&["--merge-output-format", "mp4/mkv"]);
+    } else {
+        match &r.custom {
+            Some((v, au)) => {
+                let sel = match (v, au) {
+                    (Some(v), Some(au)) => format!("{v}+{au}"),
+                    (Some(v), None) => v.clone(),
+                    (None, Some(au)) => au.clone(),
+                    (None, None) => "b".to_string(),
+                };
+                push(&["-f", &sel]);
+                if v.is_some() && au.is_some() {
+                    push(&["--merge-output-format", "mp4/mkv"]);
+                }
             }
+            None => match r.format {
+                OutFormat::Mp4 => push(&["-f", MP4_SELECTOR, "--merge-output-format", "mp4"]),
+                OutFormat::Mp3 => push(&["-f", "ba/b", "-x", "--audio-format", "mp3", "--audio-quality", "0"]),
+                OutFormat::M4a => push(&["-f", "ba[ext=m4a]/ba/b", "-x", "--audio-format", "m4a"]),
+            },
         }
-        None => match r.format {
-            OutFormat::Mp4 => push(&["-f", MP4_SELECTOR, "--merge-output-format", "mp4"]),
-            OutFormat::Mp3 => push(&["-f", "ba/b", "-x", "--audio-format", "mp3", "--audio-quality", "0"]),
-            OutFormat::M4a => push(&["-f", "ba[ext=m4a]/ba/b", "-x", "--audio-format", "m4a"]),
-        },
     }
     a.push("--".to_string());
     a.push(r.url.trim().to_string());
@@ -479,7 +479,15 @@ impl Job {
         let err = child.stderr.take().expect("piped");
         let (tx_out, ctx_out) = (tx.clone(), ctx.clone());
         let reader = thread::spawn(move || {
-            for line in BufReader::new(out).lines().map_while(Result::ok) {
+            let mut r = BufReader::new(out);
+            let mut buf = Vec::new();
+            loop {
+                buf.clear();
+                match r.read_until(b'\n', &mut buf) {
+                    Ok(0) | Err(_) => break,
+                    Ok(_) => {}
+                }
+                let line = String::from_utf8_lossy(&buf).trim_end_matches(['\r', '\n']).to_string();
                 let event = if let Some(p) = parse_progress(&line) {
                     Event::Progress(p)
                 } else if let Some(path) = line.trim().strip_prefix(FILE_TAG) {
@@ -494,7 +502,15 @@ impl Job {
         let (tx_err, ctx_err) = (tx.clone(), ctx.clone());
         let err_reader = thread::spawn(move || {
             let mut last = None;
-            for line in BufReader::new(err).lines().map_while(Result::ok) {
+            let mut r = BufReader::new(err);
+            let mut buf = Vec::new();
+            loop {
+                buf.clear();
+                match r.read_until(b'\n', &mut buf) {
+                    Ok(0) | Err(_) => break,
+                    Ok(_) => {}
+                }
+                let line = String::from_utf8_lossy(&buf).trim_end_matches(['\r', '\n']).to_string();
                 if line.contains("ERROR") {
                     last = Some(line.trim().to_string());
                 }
@@ -749,6 +765,10 @@ short  yt-dlp_x86.exe
         let chat = build_args(&Request { chat_only: true, ..req() });
         assert!(has(&chat, &["--write-subs", "--sub-langs", "live_chat", "--skip-download"]));
         assert!(!chat.iter().any(|x| x == "-f"));
+        assert_eq!(chat[chat.len() - 2..], ["--".to_string(), "https://www.youtube.com/watch?v=abc".to_string()]);
+
+        let pct = build_args(&Request { name: "100% 精華".into(), ..req() });
+        assert!(has(&pct, &["-o", "100%% 精華.%(ext)s"]));
     }
 
     /// Real network run with a video you may download:

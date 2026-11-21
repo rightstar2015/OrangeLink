@@ -652,6 +652,8 @@ pub struct App {
 
     /// The import under way, if any (only one runs at a time).
     import: Option<ImportRun>,
+    /// Imports requested while another import is still running (drained on finish).
+    import_queue: std::collections::VecDeque<ImportRequest>,
 
     pub toast: Toasts,
     pub dialog: Option<Dialog>,
@@ -897,6 +899,7 @@ impl App {
             smart_edit: None,
             history: Default::default(),
             import: None,
+            import_queue: std::collections::VecDeque::new(),
             toast: Toasts::default(),
             dialog: None,
             tag_input: String::new(),
@@ -1163,6 +1166,7 @@ impl App {
         if let Some(run) = self.import.take() {
             run.cancel.store(true, Ordering::Relaxed);
         }
+        self.import_queue.clear();
         self.cancel_ytdlp();
         self.yt.pending_import.clear();
         self.drop_whisper();
@@ -1653,24 +1657,28 @@ impl App {
                 if ok > 0 {
                     self.toast(format!("監看資料夾：新增 {ok} 個項目"));
                 }
-                return;
-            }
-            let cancelled = run.cancel.load(Ordering::Relaxed);
-            let mut msg = format!("{}：{ok} 個新項目", if cancelled { "匯入已取消" } else { "匯入完成" });
-            if dup > 0 {
-                msg += &format!("，略過 {dup} 個重複");
-            }
-            if fail > 0 {
-                msg += &format!("，{fail} 個失敗");
-                if let Some(first) = run.errors.first() {
-                    msg += &format!("\n{first}");
+            } else {
+                let cancelled = run.cancel.load(Ordering::Relaxed);
+                let mut msg = format!("{}：{ok} 個新項目", if cancelled { "匯入已取消" } else { "匯入完成" });
+                if dup > 0 {
+                    msg += &format!("，略過 {dup} 個重複");
+                }
+                if fail > 0 {
+                    msg += &format!("，{fail} 個失敗");
+                    if let Some(first) = run.errors.first() {
+                        msg += &format!("\n{first}");
+                    }
+                }
+                if ok > 0 {
+                    let ids = run.new;
+                    self.toast_with(msg, "查看", Action::SetView(View::Ids { label: "剛匯入的項目".into(), ids, groups: Vec::new(), source: IdsSource::Plain }));
+                } else {
+                    self.toast(msg);
                 }
             }
-            if ok > 0 {
-                let ids = run.new;
-                self.toast_with(msg, "查看", Action::SetView(View::Ids { label: "剛匯入的項目".into(), ids, groups: Vec::new(), source: IdsSource::Plain }));
-            } else {
-                self.toast(msg);
+            if let Some(next) = self.import_queue.pop_front() {
+                let ctx = self.egui_ctx.clone();
+                self.start_import(&ctx, next.paths, next.link, next.folder, next.tags, next.silent);
             }
         }
     }
@@ -3351,6 +3359,15 @@ impl App {
 ///     ▲                         │ cancel: the importer stops early, still sends Finished
 ///     └──── Finished: toast (查看 the new items), or switching library: dropped ────┘
 /// ```
+/// A queued import waiting for the active `ImportRun` to finish.
+struct ImportRequest {
+    paths: Vec<PathBuf>,
+    link: bool,
+    folder: Option<String>,
+    tags: Vec<String>,
+    silent: bool,
+}
+
 struct ImportRun {
     rx: Receiver<ImportEvent>,
     cancel: Arc<AtomicBool>,

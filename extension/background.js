@@ -168,19 +168,33 @@ async function checkSize(res) {
   }
 }
 
+// Clear any leftover session rules if the MV3 service worker was terminated mid-fetch.
+chrome.declarativeNetRequest.getSessionRules((rules) => {
+  if (rules?.length) {
+    chrome.declarativeNetRequest.updateSessionRules({ removeRuleIds: rules.map((r) => r.id) });
+  }
+});
+
 // Many sites refuse image requests without a Referer from their own pages. The
-// rule applies only to this extension's own requests (tabId -1) to that host.
+// rule applies only to this extension's own request (tabId -1) to that exact URL,
+// and strips #fragment / credentials from the Referer header.
 let nextRule = 1;
 async function fetchWithReferer(src, pageUrl) {
-  const host = /^https?:/i.test(src) && /^https?:/i.test(pageUrl) ? new URL(src).hostname : null;
+  let cleanReferer = null;
+  if (/^https?:/i.test(src) && /^https?:/i.test(pageUrl)) {
+    try {
+      const u = new URL(pageUrl);
+      cleanReferer = `${u.origin}${u.pathname}${u.search}`;
+    } catch {}
+  }
   const id = nextRule++;
-  if (host) {
+  if (cleanReferer) {
     await chrome.declarativeNetRequest.updateSessionRules({
       removeRuleIds: [id],
       addRules: [{
         id,
-        action: { type: "modifyHeaders", requestHeaders: [{ header: "Referer", operation: "set", value: pageUrl }] },
-        condition: { requestDomains: [host], tabIds: [-1], resourceTypes: ["xmlhttprequest"] },
+        action: { type: "modifyHeaders", requestHeaders: [{ header: "Referer", operation: "set", value: cleanReferer }] },
+        condition: { urlFilter: `|${src}|`, tabIds: [-1], resourceTypes: ["xmlhttprequest"] },
       }],
     });
   }
@@ -189,7 +203,7 @@ async function fetchWithReferer(src, pageUrl) {
   } catch {
     throw new Error("無法下載這個檔案，網站可能阻擋了連線。");
   } finally {
-    if (host) await chrome.declarativeNetRequest.updateSessionRules({ removeRuleIds: [id] });
+    if (cleanReferer) await chrome.declarativeNetRequest.updateSessionRules({ removeRuleIds: [id] });
   }
 }
 
@@ -201,9 +215,10 @@ async function blobFromPage(tab, frameId, src) {
     target,
     func: async (url) => {
       const blob = await (await fetch(url)).blob();
-      return await new Promise((done) => {
+      return await new Promise((done, fail) => {
         const reader = new FileReader();
         reader.onload = () => done(reader.result);
+        reader.onerror = () => fail(new Error("read failed"));
         reader.readAsDataURL(blob);
       });
     },

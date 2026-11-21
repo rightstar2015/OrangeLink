@@ -147,7 +147,7 @@ fn registry() -> Vec<(Access, Value)> {
               "description": "直播影片的精華訊號：聊天室熱度（需要同名 .live_chat.json）與音量（需先分析，find_highlight_candidates 會做）。回傳最突出的時間點（秒）、分數、原因，以及每 30 秒一格的聊天量與最大音量，讓你自己判斷精華並用 add_clip 標記、命名。",
               "inputSchema": { "type": "object", "properties": { "id": { "type": "string" },
                   "top": { "type": "integer", "minimum": 1, "maximum": 100, "default": 20, "description": "回傳幾個高峰" } }, "required": ["id"] } })),
-        (Write, json!({ "name": "find_highlight_candidates",
+        (Files, json!({ "name": "find_highlight_candidates",
               "description": "排入背景的整場處理：分析音量（已分析過會沿用）、在聊天和音量高峰建立「候選 01」等片段（取代還沒改名的舊候選），沒有字幕時排入語音轉字幕。耗時工作，立即回傳；用 get_status 查看進度，完成後用 get_item 看 clips（note 是被選上的原因）。",
               "inputSchema": { "type": "object", "properties": { "ids": ids_schema() }, "required": ["ids"] } })),
         (Files, json!({ "name": "export_clip",
@@ -703,11 +703,24 @@ impl App {
                 let Some(fields) = args.get("fields").and_then(|f| f.as_object()) else {
                     return ToolOutput::error("需要 fields 物件");
                 };
-                let pairs: Vec<(String, String)> = fields
-                    .iter()
-                    .filter(|(k, _)| !k.trim().is_empty())
-                    .map(|(k, v)| (k.trim().to_string(), v.as_str().map(str::to_string).unwrap_or_else(|| v.to_string()).trim().to_string()))
-                    .collect();
+                let mut pairs = Vec::with_capacity(fields.len());
+                for (k, v) in fields {
+                    let Some(key) = clean_text(k, TAG_MAX) else {
+                        return ToolOutput::error("欄位名稱不能只有空白或控制字元");
+                    };
+                    let Some(raw) = v.as_str() else {
+                        return ToolOutput::error("fields 的每個值都必須是字串");
+                    };
+                    let val = if raw.trim().is_empty() {
+                        String::new()
+                    } else {
+                        let Some(cleaned) = clean_text(raw, NAME_MAX) else {
+                            return ToolOutput::error("欄位值不能只含控制字元");
+                        };
+                        cleaned
+                    };
+                    pairs.push((key, val));
+                }
                 if ids.is_empty() || pairs.is_empty() {
                     return ToolOutput::error("沒有可更新的項目或欄位");
                 }
@@ -731,7 +744,9 @@ impl App {
                 let Some(id) = str_arg(args, "id").filter(|id| lib.items.contains_key(*id)).map(str::to_string) else {
                     return ToolOutput::error("找不到這個 id");
                 };
-                let text = str_arg(args, "text").unwrap_or_default().to_string();
+                let Some(text) = str_arg(args, "text").map(str::to_string) else {
+                    return ToolOutput::error("需要 text 字串");
+                };
                 let append = args.get("append").and_then(|v| v.as_bool()).unwrap_or(false);
                 self.edit_items(&[id], |it| {
                     if append && !it.annotation.is_empty() {
@@ -803,7 +818,9 @@ impl App {
                 ToolOutput::text(format!("已將 {} 個項目{verb}「{fname}」", ids.len()))
             }
             "create_smart_folder" => {
-                let Some(sname) = str_arg(args, "name").map(str::to_string) else { return ToolOutput::error("需要 name") };
+                let Some(sname) = str_arg(args, "name").and_then(|n| clean_text(n, NAME_MAX)) else {
+                    return ToolOutput::error("需要 name（名稱不能只有空白或控制字元）");
+                };
                 let filter = SavedFilter {
                     search: str_arg(args, "query").unwrap_or_default().to_string(),
                     tags: strings(args, "tags"),
@@ -959,7 +976,7 @@ mod tests {
         assert_eq!(access_of("delete_clip"), Some(Access::Write));
         let mut files: Vec<&str> = names.iter().copied().filter(|n| access_of(n) == Some(Access::Files)).collect();
         files.sort_unstable();
-        assert_eq!(files, ["capture_frame", "export_clip", "generate_subtitles", "import_files"]);
+        assert_eq!(files, ["capture_frame", "export_clip", "find_highlight_candidates", "generate_subtitles", "import_files"]);
         assert_eq!(access_of("no_such_tool"), None);
     }
 
@@ -1031,6 +1048,19 @@ mod fuzz_tests {
             for c in &it.clips {
                 assert!(clean(&c.name, NAME_MAX), "{tool} {args}: clip name {:?}", c.name);
             }
+            for (k, v) in &it.fields {
+                assert!(clean(k, TAG_MAX), "{tool} {args}: field key {k:?}");
+                assert!(clean(v, NAME_MAX), "{tool} {args}: field value {v:?}");
+            }
+        }
+        for f in &lib.meta.folders {
+            assert!(clean(&f.name, NAME_MAX), "{tool} {args}: folder {:?}", f.name);
+        }
+        for s in &lib.meta.smart_folders {
+            assert!(clean(&s.name, NAME_MAX), "{tool} {args}: smart folder {:?}", s.name);
+        }
+        for k in &lib.meta.fields {
+            assert!(clean(k, TAG_MAX), "{tool} {args}: meta field {k:?}");
         }
     }
 

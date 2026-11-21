@@ -42,14 +42,20 @@ fn rate(fps: Option<f64>) -> (u32, bool) {
     (rounded.max(1.0) as u32, ntsc)
 }
 
+/// Actual frames per second for `(tb, ntsc)` so NTSC clips don't drift by 0.1%.
+fn exact_fps(tb: u32, ntsc: bool) -> f64 {
+    if ntsc { tb as f64 * 1000.0 / 1001.0 } else { tb as f64 }
+}
+
 fn rate_xml(tb: u32, ntsc: bool) -> String {
     format!("<rate><timebase>{tb}</timebase><ntsc>{}</ntsc></rate>", if ntsc { "TRUE" } else { "FALSE" })
 }
 
 fn clip_xml(out: &mut String, lib: &Library, it: &Item, n: usize) {
     let (tb, ntsc) = rate(it.fps);
+    let fps = exact_fps(tb, ntsc);
     let frames = match (it.kind, it.duration) {
-        (MediaKind::Video | MediaKind::Audio, Some(d)) => ((d * tb as f64).round() as u64).max(1),
+        (MediaKind::Video | MediaKind::Audio, Some(d)) => ((d * fps).round() as u64).max(1),
         _ => 5 * tb as u64, // stills: 5 seconds
     };
     let r = rate_xml(tb, ntsc);
@@ -89,7 +95,7 @@ fn clip_xml(out: &mut String, lib: &Library, it: &Item, n: usize) {
     // `subclipinfo` (frames trimmed from each end) makes them subclips limited to
     // the marked range; an importer that ignores it still gets the in/out points.
     for (k, c) in it.clips.iter().enumerate() {
-        let (i, o) = ((c.start * tb as f64).round() as u64, ((c.end * tb as f64).round() as u64).min(frames));
+        let (i, o) = ((c.start * fps).round() as u64, ((c.end * fps).round() as u64).min(frames));
         if o <= i {
             continue;
         }
@@ -166,18 +172,22 @@ fn sequence_xml(out: &mut String, name: &str, id: &str, clips: &[Placed], gap: f
     let Some(first) = clips.first() else { return };
     let (tb, ntsc) = rate(first.it.fps);
     let r = rate_xml(tb, ntsc);
-    let frames = |secs: f64| (secs * tb as f64).round() as u64;
+    let seq_fps = exact_fps(tb, ntsc);
+    let frames = |secs: f64| (secs.max(0.0) * seq_fps).round() as u64;
     let mut video = String::new();
     let mut audio = String::new();
     let mut markers = String::new();
     let mut at = 0u64;
     for (k, p) in clips.iter().enumerate() {
-        let (ctb, cntsc) = rate(p.it.fps);
-        let cr = rate_xml(ctb, cntsc);
-        let src = |secs: f64| (secs * ctb as f64).round() as u64;
-        let total = p.it.duration.map_or(src(p.clip.end), src);
-        let (i, o) = (src(p.clip.start), src(p.clip.end).min(total.max(1)));
-        let len = frames(p.clip.end - p.clip.start).max(1);
+        // Express clipitem start/end/in/out in the sequence's own timebase so mixed-fps
+        // clips never misalign on the timeline.
+        let total = p.it.duration.map_or(frames(p.clip.end), frames).max(1);
+        let i = frames(p.clip.start);
+        let o = frames(p.clip.end).min(total);
+        if o <= i {
+            continue;
+        }
+        let len = (o - i).max(1);
         let (start, end) = (at, at + len);
         let name = esc(&p.clip.name);
         let file = p.file;
@@ -185,13 +195,13 @@ fn sequence_xml(out: &mut String, name: &str, id: &str, clips: &[Placed], gap: f
             let fx = if vertical { motion(p.it, p.clip.crop_x.unwrap_or(0.5)) } else { String::new() };
             let _ = writeln!(
                 video,
-                "<clipitem id=\"{id}-v{k}\"><name>{name}</name><duration>{total}</duration>{cr}<start>{start}</start><end>{end}</end>\
+                "<clipitem id=\"{id}-v{k}\"><name>{name}</name><duration>{total}</duration>{r}<start>{start}</start><end>{end}</end>\
                  <in>{i}</in><out>{o}</out><file id=\"file-{file}\"/>{fx}</clipitem>"
             );
         }
         let _ = writeln!(
             audio,
-            "<clipitem id=\"{id}-a{k}\"><name>{name}</name><duration>{total}</duration>{cr}<start>{start}</start><end>{end}</end>\
+            "<clipitem id=\"{id}-a{k}\"><name>{name}</name><duration>{total}</duration>{r}<start>{start}</start><end>{end}</end>\
              <in>{i}</in><out>{o}</out><file id=\"file-{file}\"/><sourcetrack><mediatype>audio</mediatype><trackindex>1</trackindex></sourcetrack></clipitem>"
         );
         let comment = p.clip.note.as_deref().map(esc).unwrap_or_default();
@@ -344,5 +354,8 @@ mod tests {
         assert_eq!(rate(Some(29.97)), (30, true));
         assert_eq!(rate(Some(25.0)), (25, false));
         assert_eq!(rate(None), (30, false));
+        // 1 hour at 29.97 fps is 107892 frames, not 108000 (which drifts by 3.6 s).
+        assert_eq!((3600.0 * exact_fps(30, true)).round() as u64, 107_892);
+        assert_eq!((3600.0 * exact_fps(30, false)).round() as u64, 108_000);
     }
 }

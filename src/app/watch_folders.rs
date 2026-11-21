@@ -22,7 +22,11 @@ impl Default for WatchState {
 impl App {
     pub(super) fn start_import(&mut self, ctx: &egui::Context, paths: Vec<PathBuf>, link: bool, folder: Option<String>, tags: Vec<String>, silent: bool) {
         let Some(lib) = &self.lib else { return };
+        if paths.is_empty() {
+            return;
+        }
         if self.import_running() {
+            self.import_queue.push_back(ImportRequest { paths, link, folder, tags, silent });
             return;
         }
         let cancel = Arc::new(AtomicBool::new(false));

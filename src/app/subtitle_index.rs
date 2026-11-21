@@ -58,8 +58,18 @@ impl App {
 
     pub(super) fn poll_subtitle_index(&mut self) {
         let Some(job) = &self.subtitle_index else { return };
-        let found: Vec<(String, String)> = job.rx.try_iter().collect();
-        let finished = job.done.load(Ordering::Relaxed) >= job.total;
+        let mut found = Vec::new();
+        let mut disconnected = false;
+        loop {
+            match job.rx.try_recv() {
+                Ok(entry) => found.push(entry),
+                Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    disconnected = true;
+                    break;
+                }
+            }
+        }
         if let Some(lib) = &mut self.lib {
             for (id, text) in found {
                 // Not through undo: this only fills in what search can see.
@@ -69,7 +79,7 @@ impl App {
                 }
             }
         }
-        if finished {
+        if disconnected {
             self.subtitle_index = None;
         }
     }

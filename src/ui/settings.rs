@@ -465,7 +465,11 @@ impl App {
                         });
                         let url = format!("http://127.0.0.1:{}/mcp", c.mcp_port);
                         let exe = std::env::current_exe().map(|p| p.display().to_string()).unwrap_or_default();
-                        let claude_code = crate::mcp::claude_add_command(crate::mcp::find_claude().as_deref(), &url, &c.mcp_token);
+                        let claude_id = egui::Id::new("orangelink-claude-path");
+                        let claude = ui.ctx().data_mut(|d| {
+                            d.get_temp_mut_or_insert_with(claude_id, crate::mcp::find_claude).clone()
+                        });
+                        let claude_code = crate::mcp::claude_add_command(claude.as_deref(), &url, &c.mcp_token);
                         let stdio_json = serde_json::to_string_pretty(&serde_json::json!({
                             "mcpServers": { "orangelink": { "command": exe, "args": ["--mcp-stdio"] } }
                         }))

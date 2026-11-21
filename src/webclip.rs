@@ -88,8 +88,12 @@ impl WebServer {
         let server = Arc::new(bound.map_err(|e| e.to_string())?);
         // Port 0 lets the system pick one (the tests); report the one we got.
         let port = server.server_addr().to_ip().map_or(port, |a| a.port());
-        // We own the port, so nothing is still using leftovers from a previous run.
-        let _ = fs::remove_dir_all(inbox_dir());
+        // Clean leftovers from a previous process once at first bind (not on
+        // restarts triggered by settings edits while imports may still be queued).
+        static INBOX_CLEANED: std::sync::Once = std::sync::Once::new();
+        INBOX_CLEANED.call_once(|| {
+            let _ = fs::remove_dir_all(inbox_dir());
+        });
         let (tx, rx) = channel();
         let folders = Arc::new(Mutex::new(Vec::new()));
         let max_bytes = Arc::new(AtomicU64::new(DEFAULT_MAX_GB * GB));
@@ -103,15 +107,21 @@ impl WebServer {
                 let Some(req) = admit(req, &t, &who) else { continue };
                 if in_flight.fetch_add(1, Ordering::SeqCst) >= MAX_IN_FLIGHT {
                     in_flight.fetch_sub(1, Ordering::SeqCst);
-                    fail(req, 503, "OrangeLink 正在處理其他檔案，請稍後再試。");
+                    fail_close(req, 503, "OrangeLink 正在處理其他檔案，請稍後再試。");
                     continue;
                 }
                 // Own thread per request: a large upload must not block the others.
                 let (tx, f, ctx, in_flight) = (tx.clone(), f.clone(), ctx.clone(), in_flight.clone());
                 let max = m.load(Ordering::Relaxed);
                 thread::spawn(move || {
+                    struct Guard(Arc<AtomicUsize>);
+                    impl Drop for Guard {
+                        fn drop(&mut self) {
+                            self.0.fetch_sub(1, Ordering::SeqCst);
+                        }
+                    }
+                    let _guard = Guard(in_flight);
                     handle(req, &f, max, &tx, &ctx);
-                    in_flight.fetch_sub(1, Ordering::SeqCst);
                 });
             }
         });
@@ -149,6 +159,8 @@ impl Drop for WebServer {
 
 /// Requests handled at once; more are told to try again.
 const MAX_IN_FLIGHT: usize = 8;
+/// At most this many bytes are drained on a rejected worker request before closing.
+const MAX_DRAIN: u64 = 1 << 20;
 
 pub const GB: u64 = 1 << 30;
 pub const DEFAULT_MAX_GB: u64 = 4;
@@ -175,32 +187,48 @@ fn fail(req: Request, status: u16, msg: &str) {
     reply(req, status, json!({ "error": msg }));
 }
 
+/// Sends an error and closes the connection immediately (without reading the body).
+fn fail_close(req: Request, status: u16, msg: &str) {
+    let ct = Header::from_bytes("Content-Type", "application/json").expect("valid header");
+    let close = Header::from_bytes("Connection", "close").expect("valid header");
+    let _ = req.respond(
+        Response::from_string(json!({ "error": msg }).to_string())
+            .with_status_code(status)
+            .with_header(ct)
+            .with_header(close),
+    );
+}
+
+/// Drains at most `MAX_DRAIN` bytes on a rejected worker request so small uploads
+/// see the HTTP status cleanly without letting huge/stalled uploads tie up workers.
+fn drain_capped(req: &mut Request) {
+    if req.body_length().is_some_and(|n| (n as u64) <= MAX_DRAIN) {
+        let _ = std::io::copy(&mut req.as_reader().take(MAX_DRAIN), &mut std::io::sink());
+    }
+}
+
 fn header_value(req: &Request, name: &'static str) -> Option<String> {
     req.headers().iter().find(|h| h.field.equiv(name)).map(|h| h.value.as_str().to_string())
 }
 
-/// Answers requests from web pages or without the pairing code at once; the rest
-/// are handed back to be served. Uploads from them are drained first, since
-/// replying mid-upload looks like a lost connection.
-fn admit(mut req: Request, token: &str, callers: &Mutex<Callers>) -> Option<Request> {
+/// Answers requests from web pages, non-local hosts, or without the pairing code
+/// immediately without reading the body on the single accept thread (prevents Slowloris DoS).
+fn admit(req: Request, token: &str, callers: &Mutex<Callers>) -> Option<Request> {
+    if header_value(&req, "Host").is_some_and(|h| !crate::mcp::is_local_host(&h)) {
+        fail_close(req, 403, "forbidden host");
+        return None;
+    }
     let origin = header_value(&req, "Origin").unwrap_or_default();
     if !origin.is_empty() && !origin.starts_with("chrome-extension://") {
-        fail(req, 403, "forbidden origin");
+        fail_close(req, 403, "forbidden origin");
         return None;
     }
     if !header_value(&req, "X-OrangeLink-Token").is_some_and(|t| crate::mcp::same_token(&t, token)) {
-        // Small requests only: an unpaired caller isn't worth reading gigabytes for.
-        if req.body_length().is_some_and(|n| n <= 1 << 20) {
-            let _ = std::io::copy(req.as_reader(), &mut std::io::sink());
-        }
-        fail(req, 401, "配對碼不正確");
+        fail_close(req, 401, "配對碼不正確");
         return None;
     }
     if !crate::lock(callers).admit(&origin) {
-        if req.body_length().is_some_and(|n| n <= 1 << 20) {
-            let _ = std::io::copy(req.as_reader(), &mut std::io::sink());
-        }
-        fail(req, 403, "OrangeLink 只允許另一個擴充功能連線；可在 OrangeLink 設定 → 瀏覽器擴充功能 更改。");
+        fail_close(req, 403, "OrangeLink 只允許另一個擴充功能連線；可在 OrangeLink 設定 → 瀏覽器擴充功能 更改。");
         return None;
     }
     Some(req)
@@ -233,22 +261,21 @@ fn handle(mut req: Request, folders: &Mutex<FolderList>, max_bytes: u64, tx: &Se
             let url = query_param(&query, "url").filter(|u| is_web_url(u)).unwrap_or_default();
             let name = file_name(&name, &mime);
             if is_executable(&name) {
-                // Read the body first: replying mid-upload looks like a lost connection.
-                let _ = std::io::copy(req.as_reader(), &mut std::io::sink());
-                return fail(req, 415, &format!("已封鎖可執行檔「{name}」，避免誤開造成危險。"));
+                drain_capped(&mut req);
+                return fail_close(req, 415, &format!("已封鎖可執行檔「{name}」，避免誤開造成危險。"));
             }
             let folder = query_param(&query, "folder").filter(|f| !f.is_empty());
             // The menu can be a moment behind, e.g. right after switching library.
             if folder.as_ref().is_some_and(|f| !crate::lock(folders).iter().any(|(id, ..)| id == f)) {
-                let _ = std::io::copy(req.as_reader(), &mut std::io::sink());
-                return fail(req, 409, "這個資料夾已不存在，選單已更新，請重新選擇。");
+                drain_capped(&mut req);
+                return fail_close(req, 409, "這個資料夾已不存在，選單已更新，請重新選擇。");
             }
             match save_upload(&mut req, &name, max_bytes) {
                 Ok(path) => {
                     mark_from_web(&path, &url);
                     WebMsg::File { path, url, folder }
                 }
-                Err((status, e)) => return fail(req, status, &e),
+                Err((status, e)) => return fail_close(req, status, &e),
             }
         }
         _ => return fail(req, 404, "not found"),
@@ -266,8 +293,7 @@ fn save_upload(req: &mut Request, name: &str, max_bytes: u64) -> Result<PathBuf,
     let too_large = || (413, format!("檔案超過 {:.1} GB 的上限，可在 OrangeLink 設定調整。", max_bytes as f64 / GB as f64));
     let expected = req.body_length();
     if expected.is_some_and(|n| n as u64 > max_bytes) {
-        // Read the body first: replying mid-upload looks like a lost connection.
-        let _ = std::io::copy(req.as_reader(), &mut std::io::sink());
+        drain_capped(req);
         return Err(too_large());
     }
     let dir = inbox_dir().join(crate::model::new_id());
@@ -302,10 +328,12 @@ fn save_upload(req: &mut Request, name: &str, max_bytes: u64) -> Result<PathBuf,
 /// Office opens it in Protected View, when it is opened from the library later.
 /// The import copies it with the file. A drive without such streams (FAT, exFAT)
 /// just goes without.
+#[cfg(windows)]
 fn mark_from_web(path: &Path, page: &str) {
+    let clean: String = page.chars().filter(|c| !c.is_control()).collect();
     let mut zone = String::from("[ZoneTransfer]\r\nZoneId=3\r\n");
-    if !page.is_empty() {
-        zone.push_str(&format!("ReferrerUrl={page}\r\n"));
+    if !clean.is_empty() {
+        zone.push_str(&format!("ReferrerUrl={clean}\r\n"));
     }
     let mut stream = path.as_os_str().to_owned();
     stream.push(":Zone.Identifier");
@@ -314,6 +342,9 @@ fn mark_from_web(path: &Path, page: &str) {
     }
 }
 
+#[cfg(not(windows))]
+fn mark_from_web(_path: &Path, _page: &str) {}
+
 /// Removes a received file and its inbox folder. Refuses anything outside the inbox.
 pub fn remove_received(path: &Path) {
     if let Some(dir) = path.parent().filter(|d| d.parent() == Some(inbox_dir().as_path())) {
@@ -321,8 +352,12 @@ pub fn remove_received(path: &Path) {
     }
 }
 
-/// Only http(s): the value ends up as a yt-dlp argument and an "open in browser" link.
+/// Only http(s) without control characters or newlines (which could inject INI
+/// lines into Zone.Identifier or break external tools).
 fn is_web_url(url: &str) -> bool {
+    if url.chars().any(|c| c.is_control()) {
+        return false;
+    }
     let lower = url.to_ascii_lowercase();
     lower.starts_with("http://") || lower.starts_with("https://")
 }
@@ -652,6 +687,14 @@ mod tests {
         remove_received(&f);
         assert!(f.exists());
         fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn web_url_rejects_control_chars_and_crlf() {
+        assert!(is_web_url("https://example.com/a?b=1"));
+        assert!(!is_web_url("https://example.com/a\r\nZoneId=0"));
+        assert!(!is_web_url("https://example.com/a\nZoneId=0"));
+        assert!(!is_web_url("https://example.com/\0bad"));
     }
 }
 

@@ -83,7 +83,11 @@ pub fn download_model(name: &str) -> Result<(), String> {
                 return Err(format!("下載的 {file} 和 Hugging Face 公布的 SHA-256 不符，已刪除，請重試"));
             }
         }
-        None => crate::log::error("whisper", format!("讀不到 {file} 公布的 SHA-256，沒有確認下載的檔案")),
+        None => {
+            let _ = std::fs::remove_file(&part);
+            crate::log::error("whisper", format!("讀不到 {file} 公布的 SHA-256，已拒絕使用未驗證的檔案"));
+            return Err(format!("無法取得 Hugging Face 公布的 {file} SHA-256，基於安全已刪除暫存檔，請稍後重試"));
+        }
     }
     std::fs::rename(&part, dir.join(file)).map_err(|e| e.to_string())
 }

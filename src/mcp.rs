@@ -83,8 +83,14 @@ impl McpServer {
                 }
                 let (tx, ctx, tools, in_flight) = (tx.clone(), ctx.clone(), tools.clone(), in_flight.clone());
                 thread::spawn(move || {
+                    struct Guard(Arc<AtomicUsize>);
+                    impl Drop for Guard {
+                        fn drop(&mut self) {
+                            self.0.fetch_sub(1, Ordering::SeqCst);
+                        }
+                    }
+                    let _guard = Guard(in_flight);
                     serve(req, &tx, &ctx, &tools);
-                    in_flight.fetch_sub(1, Ordering::SeqCst);
                 });
             }
         });
@@ -102,13 +108,17 @@ impl Drop for McpServer {
     }
 }
 
+/// Largest JSON-RPC request body accepted on `/mcp` (16 MiB).
+const MAX_BODY: usize = 16 << 20;
+
 fn header(name: &str, value: &str) -> tiny_http::Header {
     tiny_http::Header::from_bytes(name.as_bytes(), value.as_bytes()).expect("valid header")
 }
 
 /// Compares without stopping at the first differing byte.
 pub(crate) fn same_token(a: &str, b: &str) -> bool {
-    a.len() == b.len() && a.bytes().zip(b.bytes()).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
+    let diff = a.bytes().zip(b.bytes()).fold(0u8, |acc, (x, y)| acc | (x ^ y));
+    a.len() == b.len() && std::hint::black_box(diff) == 0
 }
 
 /// True when the request carries the token as `Authorization: Bearer <token>`. (Not in
@@ -126,7 +136,7 @@ fn authorized(req: &tiny_http::Request, token: &str) -> bool {
 }
 
 /// `localhost`, `127.0.0.1` or `[::1]`, with or without a port.
-fn is_local_host(host_port: &str) -> bool {
+pub(crate) fn is_local_host(host_port: &str) -> bool {
     let host_port = host_port.trim();
     let host = match host_port.rsplit_once(':') {
         Some((h, p)) if !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()) && !h.is_empty() => h,
@@ -179,11 +189,23 @@ fn serve(mut req: tiny_http::Request, tx: &Sender<McpCall>, ctx: &egui::Context,
         let _ = req.respond(Response::from_string("").with_status_code(405).with_header(header("Allow", "POST")));
         return;
     }
-    let mut body = String::new();
-    if req.as_reader().read_to_string(&mut body).is_err() {
+    if req.body_length().is_some_and(|n| n > MAX_BODY) {
+        let _ = req.respond(Response::from_string("body too large").with_status_code(413).with_header(header("Connection", "close")));
+        return;
+    }
+    let mut raw = Vec::new();
+    if std::io::Read::take(req.as_reader(), (MAX_BODY + 1) as u64).read_to_end(&mut raw).is_err() {
         let _ = req.respond(Response::from_string("bad body").with_status_code(400));
         return;
     }
+    if raw.len() > MAX_BODY {
+        let _ = req.respond(Response::from_string("body too large").with_status_code(413).with_header(header("Connection", "close")));
+        return;
+    }
+    let Ok(body) = String::from_utf8(raw) else {
+        let _ = req.respond(Response::from_string("bad body").with_status_code(400));
+        return;
+    };
     let reply = match serde_json::from_str::<Value>(&body) {
         Ok(Value::Array(batch)) => {
             let out: Vec<Value> = batch.iter().filter_map(|m| dispatch(m, tx, ctx, tools)).collect();

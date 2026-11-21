@@ -757,13 +757,11 @@ impl App {
                     self.record_cell(&it.id, rect);
                     // Clicks anywhere on the row; dragging the thumbnail/name drags the files out,
                     // dragging the other columns falls through to the background's selection box.
-                    let resp = ui.interact(rect, egui::Id::new(("item", &it.id)), Sense::click());
+                    let row = ui.interact(rect, egui::Id::new(("item", &it.id)), Sense::click());
                     let grab_rect = Rect::from_min_size(rect.min, vec2(44.0 + name_w, row_h));
-                    let grab = ui.interact(grab_rect, egui::Id::new(("item-grab", &it.id)), Sense::drag());
-                    if grab.drag_started() {
-                        let ids = if self.selected.contains(&it.id) { self.selected_ids() } else { vec![it.id.clone()] };
-                        egui::DragAndDrop::set_payload(ui.ctx(), DragIds(ids));
-                    }
+                    // One response for both, so clicks on the thumbnail and name reach the row
+                    // (`item_interactions` starts the drag out from it).
+                    let (resp, _) = hits::with_handle(ui, row, grab_rect, egui::Id::new(("item-grab", &it.id)));
                     let selected = self.selected.contains(&it.id);
                     let missing = lib.missing.contains(&it.id);
                     let v = ui.visuals();

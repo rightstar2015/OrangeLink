@@ -1,5 +1,6 @@
 mod cell;
 mod grid;
+mod hits;
 mod inspector;
 mod preview;
 mod settings;

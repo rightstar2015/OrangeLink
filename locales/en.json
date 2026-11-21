@@ -1342,5 +1342,9 @@
  "Ctrl + ← / →、PageUp / PageDown": "Ctrl + ← / →, PageUp / PageDown",
  "↑ / ↓、[ / ]": "↑ / ↓, [ / ]",
  "上一個 / 下一個片段（選取並播放）": "Previous / next clip (selected and played)",
- "保留 / 刪除選取的片段，再跳到下一個（可復原）": "Keep / delete the selected clip, then go to the next (can be undone)"
+ "保留 / 刪除選取的片段，再跳到下一個（可復原）": "Keep / delete the selected clip, then go to the next (can be undone)",
+ "入點 {at}": "In {at}",
+ "出點 {at}": "Out {at}",
+ "已加入片段": "Clip added",
+ "用「{name}」輸出（上次用的預設組；其他預設組在「…」→「輸出」）": "Export with \"{name}\" (the preset used last; other presets are under \"…\" → \"Export\")"
 }

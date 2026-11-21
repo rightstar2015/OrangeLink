@@ -2190,15 +2190,19 @@ impl App {
         }
         let pos = p.position();
         let (id, duration, landscape) = (p.id.clone(), p.duration, p.has_frames() && p.is_landscape());
+        // Each mark says so in the middle of the picture, so a press is seen to land.
         if plain && k(Key::I) {
             self.mark.0 = Some(pos);
+            jumped = Some(t!("入點 {at}", at = crate::media::fmt_precise(pos)));
         }
         if plain && k(Key::O) {
             self.mark.1 = Some(pos);
+            jumped = Some(t!("出點 {at}", at = crate::media::fmt_precise(pos)));
         }
         if plain && k(Key::Enter) && (self.mark.0.is_some() || self.mark.1.is_some()) {
             let (start, end) = clip_from_marks(self.mark, pos, duration);
             self.act(Action::AddClip(id, start, end, None));
+            jumped = Some(t!("已加入片段").into());
         }
         if plain && k(Key::V) && landscape {
             self.crop_frame = if self.crop_frame.is_some() { None } else { Some(0.5) };
@@ -2318,6 +2322,13 @@ impl App {
     /// The export preset at `index` in the settings.
     pub(super) fn export_preset(&self, index: usize) -> Option<crate::config::ExportPreset> {
         self.config.export_presets.get(index).cloned()
+    }
+
+    pub(super) fn remember_export_preset(&mut self, name: &str) {
+        if self.config.last_export_preset.as_deref() != Some(name) {
+            self.config.last_export_preset = Some(name.to_string());
+            self.config.save();
+        }
     }
 
     fn export_clip(&mut self, id: &str, cid: &str, preset: crate::config::ExportPreset) {

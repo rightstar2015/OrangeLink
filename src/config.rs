@@ -174,6 +174,13 @@ impl Default for ExportPreset {
     }
 }
 
+/// The preset the one-press export button uses: the last one used (by name)
+/// if it is still there and fits (no 9:16 for audio), else the first that fits.
+pub fn last_preset_index(presets: &[ExportPreset], last: Option<&str>, video: bool) -> Option<usize> {
+    let fits = |p: &ExportPreset| video || p.shape != ExportShape::Vertical;
+    last.and_then(|name| presets.iter().position(|p| p.name == name && fits(p))).or_else(|| presets.iter().position(fits))
+}
+
 pub fn default_export_presets() -> Vec<ExportPreset> {
     vec![
         ExportPreset { name: t!("原比例").into(), ..Default::default() },
@@ -304,6 +311,9 @@ pub struct Config {
     /// Clip exports: the video encoder and the presets in the clip menu.
     pub video_encoder: VideoEncoder,
     pub export_presets: Vec<ExportPreset>,
+    /// The preset a clip was last written with (its name), for the one-press
+    /// export button on each clip.
+    pub last_export_preset: Option<String>,
     /// 匯出 Premiere XML: also lay the clips out on a sequence, a vertical one,
     /// and the seconds between clips.
     pub premiere_sequence: bool,
@@ -382,6 +392,7 @@ impl Config {
                 self.highlight_merge = d.highlight_merge;
                 self.video_encoder = d.video_encoder;
                 self.export_presets = d.export_presets;
+                self.last_export_preset = d.last_export_preset;
                 self.premiere_sequence = d.premiere_sequence;
                 self.premiere_vertical = d.premiere_vertical;
                 self.premiere_gap = d.premiere_gap;
@@ -519,6 +530,7 @@ impl Default for Config {
             import_preview_min: 20,
             video_encoder: VideoEncoder::Auto,
             export_presets: default_export_presets(),
+            last_export_preset: None,
             whisper_model: "small".into(),
             whisper_language: "auto".into(),
             unread_file: false,
@@ -659,6 +671,18 @@ impl Config {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_one_press_export_uses_the_last_preset_that_still_fits() {
+        let presets = default_export_presets();
+        let vertical = presets.iter().position(|p| p.shape == ExportShape::Vertical).unwrap();
+        let name = presets[vertical].name.clone();
+        assert_eq!(last_preset_index(&presets, Some(&name), true), Some(vertical));
+        assert_ne!(last_preset_index(&presets, Some(&name), false), Some(vertical), "no 9:16 for audio");
+        assert_eq!(last_preset_index(&presets, Some("刪掉的預設組"), true), Some(0), "a removed one: the first");
+        assert_eq!(last_preset_index(&presets, None, true), Some(0));
+        assert_eq!(last_preset_index(&[], None, true), None);
+    }
 
     #[test]
     fn resetting_a_category_leaves_the_others_and_the_tokens() {

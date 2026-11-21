@@ -208,6 +208,12 @@ fn clean_text(s: &str, max: usize) -> Option<String> {
     (!s.is_empty()).then(|| s.to_string())
 }
 
+/// The media's length for checking times against: f64::MAX when unknown, or when
+/// the stored length is negative or not a number (clamp to it would panic).
+fn known_length(duration: Option<f64>) -> f64 {
+    duration.filter(|d| d.is_finite() && *d >= 0.0).unwrap_or(f64::MAX)
+}
+
 /// `rating`: a whole number from 0 to 5 (3.0 counts). A string, a fraction or
 /// anything out of range is refused rather than read as 0 or 5.
 fn rating_arg(v: Option<&Value>) -> Result<u8, String> {
@@ -648,7 +654,7 @@ impl App {
                 let (Some(a), Some(b)) = (num("start"), num("end")) else {
                     return ToolOutput::error("需要 start 與 end（秒）");
                 };
-                let max = it.duration.unwrap_or(f64::MAX);
+                let max = known_length(it.duration);
                 let (start, end) = (a.min(b).clamp(0.0, max), a.max(b).clamp(0.0, max));
                 if end - start < 0.05 {
                     return ToolOutput::error("片段太短");
@@ -672,7 +678,7 @@ impl App {
                 if it.kind != MediaKind::Video {
                     return ToolOutput::error("只有影片可以擷取畫面");
                 }
-                let max = it.duration.unwrap_or(f64::MAX);
+                let max = known_length(it.duration);
                 let time = args.get("time").and_then(|v| v.as_f64()).unwrap_or(0.0).clamp(0.0, max);
                 let id = it.id.clone();
                 match self.capture_frame(&id, time) {
@@ -940,6 +946,24 @@ mod tests {
         }
         // Ordinary text, emoji and joiners stay.
         assert_eq!(clean_text("Vtuber 精華 🎉 👨‍👩‍👧", TAG_MAX).as_deref(), Some("Vtuber 精華 🎉 👨‍👩‍👧"));
+    }
+
+    #[test]
+    fn clips_and_frames_on_an_item_with_a_damaged_length_do_not_panic() {
+        let root = std::env::temp_dir().join(format!("orangelink-mcp-len-{}", crate::model::new_id()));
+        let mut lib = Library::create(&root).unwrap();
+        let it: Item = serde_json::from_value(json!({
+            "id": "v", "name": "v", "file_name": "v.mp4", "ext": "mp4", "kind": "video", "size": 1, "duration": -1.0, "added_at": 0, "modified_at": 0
+        }))
+        .unwrap();
+        lib.insert_item(it);
+        let config = crate::config::Config { mcp_allow_write: true, mcp_allow_files: true, ..Default::default() };
+        let mut app = App::with_config(&eframe::egui::Context::default(), config);
+        app.lib = Some(lib);
+        app.mcp_call("add_clip", &json!({ "id": "v", "start": 1, "end": 5 }));
+        app.mcp_call("capture_frame", &json!({ "id": "v", "time": 1 }));
+        drop(app);
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

@@ -86,15 +86,21 @@ pub struct Probe {
 
 pub fn probe(ffmpeg_dir: &Path, path: &Path) -> Option<Probe> {
     let out = tool(ffmpeg_dir, "ffprobe")
-        .args(["-v", "error", "-show_entries", "stream=codec_type,codec_name,width,height,avg_frame_rate:format=duration"])
+        .args(["-v", "error", "-show_entries", "stream=codec_type,codec_name,width,height,avg_frame_rate:stream_disposition=attached_pic:format=duration"])
         .args(["-of", "json"])
         .arg(path)
         .output()
         .ok()?;
-    let json: serde_json::Value = serde_json::from_slice(&out.stdout).ok()?;
+    parse_probe(&serde_json::from_slice(&out.stdout).ok()?)
+}
+
+/// ffprobe's JSON (see `probe`) as a `Probe`.
+fn parse_probe(json: &serde_json::Value) -> Option<Probe> {
     let streams = json.get("streams").and_then(|s| s.as_array()).cloned().unwrap_or_default();
-    let of_type = |t: &str| streams.iter().find(|s| s.get("codec_type").and_then(|v| v.as_str()) == Some(t));
-    // Cover art in audio files shows up as a 1-frame "video" stream; prefer real video.
+    // Cover art in an MP3 or M4A is a 1-frame "video" stream marked attached_pic:
+    // it is not the file's video, and its codec and size aren't the file's.
+    let cover = |s: &serde_json::Value| s.get("disposition").and_then(|d| d.get("attached_pic")).and_then(|v| v.as_u64()) == Some(1);
+    let of_type = |t: &str| streams.iter().find(|s| s.get("codec_type").and_then(|v| v.as_str()) == Some(t) && !cover(s));
     let video = of_type("video");
     let main = video.or_else(|| of_type("audio"));
     let dim = |k: &str| video.and_then(|s| s.get(k)).and_then(|v| v.as_u64()).unwrap_or(0) as u32;
@@ -315,6 +321,27 @@ pub fn fmt_precise(secs: f64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cover_art_in_an_audio_file_is_not_taken_for_its_video() {
+        let json = serde_json::json!({
+            "streams": [
+                { "codec_type": "audio", "codec_name": "mp3" },
+                { "codec_type": "video", "codec_name": "mjpeg", "width": 600, "height": 600, "avg_frame_rate": "0/0", "disposition": { "attached_pic": 1 } }
+            ],
+            "format": { "duration": "215.5" }
+        });
+        let p = parse_probe(&json).unwrap();
+        assert_eq!((p.width, p.height, p.codec.as_deref()), (0, 0, Some("mp3")));
+        assert_eq!(p.duration, Some(215.5));
+
+        let json = serde_json::json!({ "streams": [
+            { "codec_type": "video", "codec_name": "h264", "width": 1920, "height": 1080, "avg_frame_rate": "30/1", "disposition": { "attached_pic": 0 } },
+            { "codec_type": "audio", "codec_name": "aac" }
+        ] });
+        let p = parse_probe(&json).unwrap();
+        assert_eq!((p.width, p.height, p.codec.as_deref(), p.fps), (1920, 1080, Some("h264"), Some(30.0)));
+    }
 
     #[test]
     fn parses_srt_and_vtt() {

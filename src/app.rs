@@ -2754,6 +2754,13 @@ impl App {
         originals_policy(&self.config)
     }
 
+    /// Items `delete_forever` left because their metadata.json couldn't go.
+    fn report_kept_items(&mut self, kept: usize) {
+        if kept > 0 {
+            self.toast_error(format!("{kept} 個項目無法刪除（檔案可能正被其他程式使用），仍留在原處；關閉那個程式後再試一次"));
+        }
+    }
+
     fn report_delete_failures(&mut self, failed: Vec<PathBuf>) {
         if let Some(first) = failed.first() {
             self.toast(format!("{} 個原始檔案無法刪除（可能正被其他程式使用）：\n{}", failed.len(), first.display()));
@@ -2967,22 +2974,26 @@ impl App {
         match c {
             Confirmed::DeleteForever(ids) => {
                 let failed = lib.delete_forever(&ids, policy);
+                let kept = ids.iter().filter(|id| lib.items.contains_key(*id)).count();
                 for id in &ids {
                     self.thumbs.tex.remove(id);
                     self.selected.remove(id);
                 }
-                self.toast(format!("已永久刪除 {} 個項目", ids.len()));
+                self.toast(format!("已永久刪除 {} 個項目", ids.len() - kept));
                 self.report_delete_failures(failed);
+                self.report_kept_items(kept);
             }
             Confirmed::EmptyTrash => {
                 let ids: Vec<String> = lib.items.values().filter(|i| i.deleted).map(|i| i.id.clone()).collect();
                 let failed = lib.delete_forever(&ids, policy);
+                let kept = ids.iter().filter(|id| lib.items.contains_key(*id)).count();
                 self.report_delete_failures(failed);
                 for id in &ids {
                     self.thumbs.tex.remove(id);
                 }
                 self.selected.clear();
-                self.toast(format!("已清空垃圾桶（{} 個項目）", ids.len()));
+                self.toast(format!("已清空垃圾桶（{} 個項目）", ids.len() - kept));
+                self.report_kept_items(kept);
             }
             Confirmed::DeleteFolder(id) => {
                 lib.delete_folder(&id);

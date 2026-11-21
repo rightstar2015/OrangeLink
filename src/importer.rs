@@ -732,6 +732,38 @@ mod library_tests {
         fs::remove_dir_all(&root).unwrap();
     }
 
+    #[test]
+    fn an_item_deleted_while_its_file_is_open_elsewhere_does_not_come_back() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let root = std::env::temp_dir().join(format!("orangelink-test-{}", new_id()));
+        fs::create_dir_all(&root).unwrap();
+        // Sorts before metadata.json, so a delete that stops at it never gets there.
+        fs::write(root.join("a.txt"), "x").unwrap();
+        let mut lib = Library::create(&root.join("lib")).unwrap();
+        assert_eq!(import(&mut lib, vec![root.join("a.txt")], false, false), 1);
+        let id = lib.items.keys().next().unwrap().clone();
+        let dir = crate::library::item_dir(&lib.root, &id);
+        // Another program has the copy open without sharing (a video player, say).
+        let held = fs::OpenOptions::new().read(true).share_mode(0).open(dir.join("a.txt")).unwrap();
+        lib.delete_forever(std::slice::from_ref(&id), Originals::Keep);
+        lib.flush().unwrap();
+        drop(held);
+        let lib = Library::open(&lib.root).unwrap();
+        assert!(!lib.items.contains_key(&id), "the deleted item is back");
+
+        // metadata.json itself held open: the item stays rather than half-going.
+        let mut lib = lib;
+        fs::write(root.join("b.txt"), "y").unwrap();
+        assert_eq!(import(&mut lib, vec![root.join("b.txt")], false, false), 1);
+        let id = lib.items.keys().next().unwrap().clone();
+        let meta = crate::library::item_dir(&lib.root, &id).join(crate::library::META_FILE);
+        let held = fs::OpenOptions::new().read(true).share_mode(0).open(&meta).unwrap();
+        lib.delete_forever(std::slice::from_ref(&id), Originals::Keep);
+        drop(held);
+        assert!(lib.items.contains_key(&id), "still listed, as it would be on the next open");
+        fs::remove_dir_all(&root).unwrap();
+    }
+
     /// Sends a real file to the Recycle Bin, so it only runs when asked for.
     #[test]
     #[ignore]

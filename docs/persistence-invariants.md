@@ -49,6 +49,7 @@ cargo test --locked -- library:: importer:: config:: app::integrity:: app::tests
 | D3 | 重新連結時,不會連到同名但大小不同的檔案;同大小的多個候選用雜湊分辨 | `importer::tests::relinking_a_moved_original` |
 | D4 | 只有內容真的相同才算重複;大小、開頭、結尾都一樣但中間不同的大檔案不算 | `importer::tests::large_files_differing_in_the_middle_are_not_duplicates`、`app::tests::split_by_contents_keeps_only_true_copies` |
 | D5 | 「檢查資源庫」只把真正的殘留資料夾當殘留,項目和讀不懂的項目資料夾都不算 | `library::tests::the_check_finds_leftovers_and_changed_files`、`app::integrity::tests::leftovers_that_became_items_stay` |
+| D6 | 永久刪除時檔案被其他程式開著,刪掉的項目下次開啟不會回來;連 metadata.json 都刪不掉時,項目留在原處並告訴使用者 | `importer::tests::an_item_deleted_while_its_file_is_open_elsewhere_does_not_come_back` |
 
 ## 存取
 

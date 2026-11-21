@@ -451,20 +451,66 @@ fn import_one(
 }
 
 /// Absolute path without the `\\?\` prefix that `canonicalize` adds on Windows
-/// (other apps such as Premiere don't understand it).
+/// (other apps such as Premiere don't understand it), when the path means the
+/// same without it.
 pub(crate) fn dunce_abs(path: &Path) -> Result<PathBuf> {
     let abs = fs::canonicalize(path)?;
-    let s = abs.to_string_lossy();
-    Ok(match s.strip_prefix(r"\\?\") {
-        Some(rest) if !rest.starts_with("UNC\\") => PathBuf::from(rest),
-        Some(rest) => PathBuf::from(format!(r"\\{}", &rest[4..])),
+    Ok(match strip_verbatim(&abs.to_string_lossy()) {
+        Some(plain) => PathBuf::from(plain),
         None => abs,
     })
+}
+
+/// `\\?\C:\…` or `\\?\UNC\server\…` as an ordinary path, or None when the
+/// ordinary spelling would name something else or nothing: a volume GUID path, a
+/// name Windows trims (ending in a dot or space), a device name such as `CON`,
+/// or a path too long without the prefix.
+fn strip_verbatim(s: &str) -> Option<String> {
+    let rest = s.strip_prefix(r"\\?\")?;
+    let plain = match rest.strip_prefix(r"UNC\") {
+        Some(unc) => format!(r"\\{unc}"),
+        None => {
+            let b = rest.as_bytes();
+            if !(b.len() >= 3 && b[0].is_ascii_alphabetic() && b[1] == b':' && b[2] == b'\\') {
+                return None;
+            }
+            rest.to_string()
+        }
+    };
+    let parts = plain.trim_start_matches('\\').split('\\').skip(1);
+    let ok = |p: &str| {
+        let device = p.split('.').next().unwrap_or("").trim_end().to_ascii_uppercase();
+        let reserved = matches!(device.as_str(), "CON" | "PRN" | "AUX" | "NUL")
+            || (device.len() == 4 && (device.starts_with("COM") || device.starts_with("LPT")) && device.as_bytes()[3].is_ascii_digit());
+        !p.ends_with(['.', ' ']) && !reserved
+    };
+    (plain.chars().count() < 260 && parts.into_iter().all(|p| p.is_empty() || ok(p))).then_some(plain)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_verbatim_prefix_goes_only_where_the_path_means_the_same_without_it() {
+        assert_eq!(strip_verbatim(r"\\?\C:\Users\me\a.png").as_deref(), Some(r"C:\Users\me\a.png"));
+        assert_eq!(strip_verbatim(r"\\?\C:\").as_deref(), Some(r"C:\"));
+        assert_eq!(strip_verbatim(r"\\?\UNC\nas\share\v.mp4").as_deref(), Some(r"\\nas\share\v.mp4"));
+        assert_eq!(strip_verbatim(r"C:\plain"), None, "no prefix");
+        for kept in [
+            r"\\?\Volume{0c1e2b3a-0000-0000-0000-100000000000}\clips",
+            r"\\?\C:\clips\trailing.",
+            r"\\?\C:\clips\trailing \a.png",
+            r"\\?\C:\clips\CON",
+            r"\\?\C:\clips\aux.txt",
+            r"\\?\C:\clips\com1 .png",
+            r"\\?\UNC\nas\share\nul",
+        ] {
+            assert_eq!(strip_verbatim(kept), None, "{kept}");
+        }
+        let long = format!(r"\\?\C:\{}", "a\\".repeat(140));
+        assert_eq!(strip_verbatim(&long), None, "too long without the prefix");
+    }
 
     #[test]
     fn a_panic_becomes_a_failed_file() {

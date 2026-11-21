@@ -9,6 +9,7 @@ mod history;
 pub mod jobs;
 mod mcp_tools;
 mod palette;
+pub mod tools_check;
 mod pdf_view;
 mod scrub;
 mod undo;
@@ -811,6 +812,8 @@ pub struct App {
     pub folder_search: String,
     /// Ctrl+K's box, while open.
     pub palette: Option<palette::Palette>,
+    /// 設定 →「工具」's check of FFmpeg, Whisper, yt-dlp and deno.
+    pub tools_check: tools_check::ToolsCheck,
     /// Custom field values typed in the multi-selection panel, by field name.
     pub field_drafts: HashMap<String, String>,
     pub last_flush: f64,
@@ -1070,6 +1073,7 @@ impl App {
             tag_search: String::new(),
             folder_search: String::new(),
             palette: None,
+            tools_check: Default::default(),
             field_drafts: HashMap::new(),
             last_flush: 0.0,
             acts: RefCell::new(Vec::new()),
@@ -3513,6 +3517,7 @@ impl eframe::App for App {
         self.poll_exact_duplicates();
         self.poll_file_copy();
         self.poll_captures(ctx);
+        self.poll_tools_check();
         self.poll_integrity();
         self.poll_clip_export(ctx);
         self.poll_ytdlp(ctx);

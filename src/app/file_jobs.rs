@@ -263,6 +263,8 @@ impl App {
                     self.toast_with(msg, "在檔案總管中顯示", Action::RevealPath(cap.out.clone()));
                     self.start_import(ctx, vec![cap.out], false, None, Vec::new(), false);
                 }
+                // Cancelled from the jobs list: not a failure.
+                Err(_) if cap.cancel.load(Ordering::Relaxed) => self.toast("已取消擷取畫面"),
                 Err(e) => {
                     crate::log::error("capture", format!("{} 的 {}：{e}", cap.out.display(), crate::media::fmt_precise(cap.pos)));
                     self.toast(format!("擷取畫面失敗：{e}"));
@@ -297,6 +299,21 @@ impl App {
 mod tests {
     use super::*;
     use std::fs;
+
+    #[test]
+    fn a_cancelled_capture_is_not_reported_as_failed() {
+        let ctx = egui::Context::default();
+        let mut app = App::with_config(&ctx, crate::config::Config::default());
+        let (tx, rx) = std::sync::mpsc::channel();
+        let cancel = Arc::new(AtomicBool::new(false));
+        app.files.captures.push(Capture { id: "v".into(), pos: 1.0, out: std::env::temp_dir().join("never.png"), rx, cancel });
+        app.cancel_file_jobs(jobs::JobKind::Capture);
+        tx.send(Err("已取消".into())).unwrap();
+        app.poll_captures(&ctx);
+        assert!(app.files.captures.is_empty());
+        let msgs: Vec<&str> = app.toast.list.iter().map(|t| t.msg.as_str()).collect();
+        assert!(msgs.iter().all(|m| !m.contains("失敗")), "{msgs:?}");
+    }
 
     /// A time at or past the end still gives a picture: the last frame.
     #[test]

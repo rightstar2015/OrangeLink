@@ -61,6 +61,57 @@ impl SignalPlotCache {
 }
 
 impl App {
+    /// An audio file in the viewer: its name and format over a full-width
+    /// waveform that shows what has played and seeks where clicked; or its
+    /// cover art beside the name, when it has one.
+    fn audio_face(&mut self, ui: &Ui, resp: &egui::Response, rect: Rect, id: &str, (tex, size): (egui::TextureId, egui::Vec2)) {
+        let Some((name, ext, bytes, cover)) = self.lib.as_ref().and_then(|l| l.items.get(id)).map(|it| (it.name.clone(), it.ext.clone(), it.size, !it.palette.is_empty())) else { return };
+        let Some(p) = self.player.as_mut().filter(|p| p.id == id) else { return };
+        let (pos, dur) = (p.position(), p.duration);
+        let painter = ui.painter_at(rect);
+        let area = rect.shrink2(vec2((rect.width() * 0.06).max(24.0), 24.0));
+        let mut info = vec![ext.to_uppercase()];
+        if dur > 0.0 {
+            info.push(fmt_duration(dur));
+        }
+        info.push(super::human_size(bytes));
+        if let Some(kbps) = audio_kbps(bytes, dur) {
+            info.push(format!("{kbps} kbps"));
+        }
+        let info = info.join("  ·  ");
+        let text_w = if cover { area.width() * 0.55 } else { area.width() };
+        let title = |at: egui::Pos2, align: Align2| {
+            let mut job = egui::text::LayoutJob::simple(name.clone(), FontId::proportional(24.0), tokens().text, text_w);
+            job.wrap.max_rows = 2;
+            let g = painter.layout_job(job);
+            let r = align.anchor_size(at, g.size());
+            painter.galley(r.min, g, tokens().text);
+            painter.text(pos2(r.left(), r.bottom() + 8.0), Align2::LEFT_TOP, &info, FontId::proportional(14.0), tokens().text_muted);
+        };
+        if cover {
+            let side = area.height().min(area.width() * 0.4).min(360.0);
+            let art = Rect::from_min_size(pos2(area.left(), area.center().y - side / 2.0), vec2(side, side));
+            painter.image(tex, fit_rect(art, size), UV, Color32::WHITE);
+            title(pos2(art.right() + 28.0, area.center().y - 20.0), Align2::LEFT_BOTTOM);
+            return;
+        }
+        let wave_h = (area.height() * 0.45).clamp(60.0, 240.0);
+        let wave = Rect::from_center_size(area.center() + vec2(0.0, 30.0), vec2(area.width(), wave_h));
+        title(pos2(wave.left(), wave.top() - 44.0), Align2::LEFT_BOTTOM);
+        painter.image(tex, wave, UV, Color32::WHITE);
+        if dur > 0.0 {
+            let x = wave.left() + ((pos / dur).clamp(0.0, 1.0) as f32) * wave.width();
+            painter.rect_filled(Rect::from_x_y_ranges(wave.left()..=x, wave.y_range()), 0.0, accent().gamma_multiply(0.18));
+            painter.line_segment([pos2(x, wave.top()), pos2(x, wave.bottom())], Stroke::new(2.0_f32, Color32::WHITE));
+            if let Some(at) = resp.interact_pointer_pos().filter(|at| resp.clicked() && wave.contains(*at)) {
+                p.seek(((at.x - wave.left()) / wave.width()).clamp(0.0, 1.0) as f64 * dur);
+            }
+            if resp.hovered() && ui.rect_contains_pointer(wave) {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+            }
+        }
+    }
+
     pub fn viewer_ui(&mut self, ui: &mut Ui) {
         let Some(v) = &self.viewer else { return };
         let id = v.id.clone();
@@ -397,6 +448,9 @@ impl App {
                 ScrollArea::vertical().id_salt("viewer-text").show(&mut child, |ui| {
                     ui.add(egui::Label::new(RichText::new(shown).size(15.0).color(tokens().text)).wrap());
                 });
+            }
+            Some((t, size)) if kind == MediaKind::Audio && has_player && !has_frames => {
+                self.audio_face(ui, &resp, rect, &id, (t, size));
             }
             Some((t, _)) => {
                 painter.image(t, draw, UV, Color32::WHITE);
@@ -1425,6 +1479,11 @@ fn activity_strip(ui: &mut Ui, cache: &SignalPlotCache, map: &TimeMap, pos: f64,
     resp.clicked().then(|| resp.interact_pointer_pos()).flatten().map(|p| map.t(p.x))
 }
 
+/// An audio file's average bitrate, from its size and length.
+fn audio_kbps(bytes: u64, secs: f64) -> Option<u64> {
+    (secs.is_finite() && secs >= 1.0 && bytes > 0).then(|| (bytes as f64 * 8.0 / secs / 1000.0).round() as u64)
+}
+
 /// Time marks over the bar, as far apart as the zoom allows.
 fn ruler(ui: &mut Ui, map: &TimeMap) {
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width().max(1.0), 14.0), Sense::hover());
@@ -1655,6 +1714,14 @@ mod tests {
         assert_eq!(v.follow(1000.0, 150.0), v);
         assert_eq!(v.follow(1000.0, 201.0), TimeView { t0: 191.0, t1: 291.0 });
         assert_eq!(v.follow(1000.0, 990.0), TimeView { t0: 900.0, t1: 1000.0 });
+    }
+
+    #[test]
+    fn an_audio_files_bitrate_comes_from_its_size_and_length() {
+        assert_eq!(audio_kbps(4_000_000, 100.0), Some(320), "a 320 kbps MP3");
+        assert_eq!(audio_kbps(1_000, 0.2), None, "too short to say");
+        assert_eq!(audio_kbps(0, 10.0), None);
+        assert_eq!(audio_kbps(1_000, f64::NAN), None);
     }
 
     #[test]

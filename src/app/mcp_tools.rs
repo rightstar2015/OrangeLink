@@ -553,8 +553,7 @@ impl App {
                 }
                 let duration = it.duration.unwrap_or(0.0);
                 let chat = it
-                    .imported_from()
-                    .and_then(|p| crate::signals::chat_file_for(p))
+                    .chat_file()
                     .and_then(|f| crate::signals::read_chat(&f, &self.config.chat_keywords, duration));
                 let loud: Option<Vec<f32>> = std::fs::read(crate::library::item_dir(&lib.root, &it.id).join("loudness.json")).ok().and_then(|b| serde_json::from_slice(&b).ok());
                 if chat.is_none() && loud.is_none() {

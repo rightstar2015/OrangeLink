@@ -388,6 +388,8 @@ pub enum Action {
     DeleteCandidates(String),
     /// A candidate becomes an ordinary clip.
     KeepClip(String, String),
+    /// Choose the live chat record of an item by hand.
+    PickChat(String),
     RenameClip(String, String, String),
     /// (item, clip, start, end): new in and out points.
     SetClipRange(String, String, f64, f64),

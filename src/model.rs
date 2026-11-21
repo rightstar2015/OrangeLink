@@ -102,6 +102,10 @@ pub struct Item {
     /// Subtitle file chosen by hand; otherwise one with the same name is looked up.
     #[serde(default)]
     pub subtitle: Option<PathBuf>,
+    /// Live chat record (yt-dlp's `.live_chat.json`) chosen by hand; otherwise
+    /// one with the same name next to the original is looked up.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chat: Option<PathBuf>,
     /// Related items, both ways: a clip exported from a stream and the stream,
     /// a captured frame and its video, files from one download, or linked by hand.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -127,6 +131,12 @@ pub struct Clip {
 }
 
 impl Item {
+    /// The live chat record for the highlight curves: the one picked by hand
+    /// while it is there, else `<video>.live_chat.json` next to the original.
+    pub fn chat_file(&self) -> Option<PathBuf> {
+        self.chat.clone().filter(|p| p.is_file()).or_else(|| self.imported_from().and_then(|p| crate::signals::chat_file_for(p)))
+    }
+
     /// The path this item was imported from, if known.
     pub fn imported_from(&self) -> Option<&PathBuf> {
         self.source.as_ref().or(self.origin.as_ref())
@@ -350,6 +360,25 @@ mod tests {
             "added_at": 0, "modified_at": 0
         }))
         .unwrap()
+    }
+
+    #[test]
+    fn a_chat_record_picked_by_hand_is_used_and_the_same_name_one_otherwise() {
+        let dir = std::env::temp_dir().join(format!("orangelink-chat-{}", new_id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let video = dir.join("stream.mp4");
+        let (same_name, renamed) = (dir.join("stream.live_chat.json"), dir.join("chat 改過名.json"));
+        for f in [&video, &same_name, &renamed] {
+            std::fs::write(f, "{}").unwrap();
+        }
+        let mut it = item("a");
+        it.source = Some(video);
+        assert_eq!(it.chat_file(), Some(same_name.clone()));
+        it.chat = Some(renamed.clone());
+        assert_eq!(it.chat_file(), Some(renamed.clone()));
+        std::fs::remove_file(&renamed).unwrap();
+        assert_eq!(it.chat_file(), Some(same_name), "the picked one is gone: back to the same name");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

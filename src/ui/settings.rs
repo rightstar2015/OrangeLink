@@ -43,6 +43,8 @@ struct PageOut {
     open_extension: bool,
     reset: Option<SettingsPage>,
     then: Option<Action>,
+    /// Run the tools check (first look at the page, or 重新檢查).
+    check_tools: bool,
 }
 
 fn group(ui: &mut Ui, title: &str) {
@@ -152,6 +154,9 @@ impl App {
         }
         if let Some(a) = out.then.take() {
             self.act(a);
+        }
+        if out.check_tools {
+            self.check_tools();
         }
         if out.open_extension {
             match crate::webclip::write_extension() {
@@ -619,6 +624,26 @@ impl App {
                 }
             }
             SettingsPage::Tools => {
+                if f.show(ui, t!("工具檢查 ffmpeg whisper yt-dlp deno")) {
+                    group(ui, t!("工具檢查"));
+                    if self.tools_check.result.is_none() && !self.tools_check.checking() {
+                        out.check_tools = true;
+                    }
+                    if let Some(s) = &self.tools_check.result {
+                        for (ok, line) in s.lines() {
+                            let text = RichText::new(format!("{} {line}", if ok { "✔" } else { "✖" })).small().color(if ok { good() } else { danger() });
+                            ui.add(egui::Label::new(text).wrap());
+                        }
+                    }
+                    ui.horizontal(|ui| {
+                        if self.tools_check.checking() {
+                            ui.spinner();
+                            ui.label(RichText::new(t!("檢查中…")).small().weak());
+                        } else if ui.button(t!("重新檢查")).clicked() {
+                            out.check_tools = true;
+                        }
+                    });
+                }
                 if f.show(ui, t!("ffmpeg 影片縮圖 長度 播放")) {
                     group(ui, t!("FFmpeg（影片 / 音訊縮圖、長度與播放）"));
                     let status = match &self.ffmpeg_dir {

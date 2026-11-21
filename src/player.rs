@@ -734,6 +734,9 @@ impl Player {
         let (pos, playing) = (self.position(), self.is_playing());
         let mut ff = FfmpegPlayer::new(dir, self.path.clone(), self.duration, self.fps, self.frame_size, self.volume);
         self.fall_back = false;
+        // FFmpeg plays at normal speed only; 2x or reverse would be shown but not done.
+        self.rate = 1.0;
+        self.reverse = None;
         ff.base = pos;
         if playing {
             ff.play();

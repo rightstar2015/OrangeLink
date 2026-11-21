@@ -141,7 +141,9 @@ impl App {
         let lib = self.lib.as_ref();
         self.selected = entry.selected.iter().filter(|id| lib.is_some_and(|l| l.items.contains_key(*id))).cloned().collect();
         self.anchor = entry.selected.last().cloned();
-        self.viewer = None;
+        self.caret = self.anchor.clone();
+        // Through close_viewer: it stops the player, which would play on unseen.
+        self.close_viewer(false);
         self.restore_scroll = Some(entry.scroll);
         let h = &mut self.history;
         h.current = Some(f);
@@ -153,5 +155,24 @@ impl App {
     /// A new library starts with no history.
     pub(super) fn clear_history(&mut self) {
         self.history = History::default();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn going_back_from_a_preview_closes_it_with_its_player() {
+        let mut app = App::with_config(&egui::Context::default(), Config::default());
+        let filter = app.nav_filter();
+        app.history.back.push(NavEntry { filter, scroll: 0.0, selected: Vec::new() });
+        app.viewer = Some(Viewer { id: "a".into(), zoom: 1.0, pan: egui::Vec2::ZERO });
+        // What close_viewer clears along with the player: the I/O marks of the video.
+        app.mark = (Some(3.0), Some(5.0));
+        app.go_back();
+        assert!(app.viewer.is_none());
+        assert_eq!(app.mark, (None, None), "the preview was closed, not just hidden");
+        assert!(app.player.is_none());
     }
 }

@@ -486,10 +486,7 @@ pub struct Job {
 /// trusted one, writes the request, runs the program, reads its answer.
 /// `Ok(None)` when cancelled.
 pub fn run(job: &Job, cancel: &AtomicBool, progress: &std::sync::Arc<std::sync::Mutex<Progress>>) -> Result<Option<Answer>, String> {
-    let (manifest, hash) = load(&job.dir)?;
-    if hash != job.trusted {
-        return Err(t!("擴充的設定檔改過了，請到設定 →「擴充套件」重新確認").to_string());
-    }
+    let manifest = trusted(&job.dir, &job.trusted)?;
     let action = manifest.action(&job.action).ok_or_else(|| t!("擴充沒有「{action}」這個動作了", action = job.action))?;
     let tmp = std::env::temp_dir().join(format!("orangelink-ext-{}", crate::model::new_id()));
     std::fs::create_dir_all(&tmp).map_err(|e| t!("無法建立暫存資料夾：{e}", e))?;
@@ -537,8 +534,21 @@ pub fn run(job: &Job, cancel: &AtomicBool, progress: &std::sync::Arc<std::sync::
     result
 }
 
-/// Runs the manifest's `check` and returns what it printed (last lines).
-pub fn run_check(dir: &Path, run: &[String], cancel: &AtomicBool) -> Result<(bool, String), String> {
+/// The manifest in `dir`, read now, if it is still the one trusted (`hash`).
+/// Checked right before anything runs: the file may have changed since it was read.
+pub fn trusted(dir: &Path, hash: &str) -> Result<Manifest, String> {
+    let (manifest, now) = load(dir)?;
+    if now != hash {
+        return Err(t!("擴充的設定檔改過了，請到設定 →「擴充套件」重新確認").to_string());
+    }
+    Ok(manifest)
+}
+
+/// Runs the trusted manifest's `check` and returns whether it passed and what it printed.
+pub fn run_check(dir: &Path, hash: &str, cancel: &AtomicBool) -> Result<(bool, String), String> {
+    let manifest = trusted(dir, hash)?;
+    let Some(run) = manifest.check else { return Ok((true, String::new())) };
+    let run = &run[..];
     let mut cmd = command(dir, run, &[], false)?;
     let lines = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
     let l = lines.clone();
@@ -702,6 +712,9 @@ mod tests {
         let item = RequestItem { id: "i".into(), name: "n".into(), kind: MediaKind::Video, path: dir.join("v.mp4"), original: None, duration: Some(4000.0), width: None, height: None, chat_file: None, subtitles: None };
         let job = Job { dir: dir.clone(), trusted, action: "find".into(), request: Request { protocol: PROTOCOL, action: "find".into(), options: Default::default(), item, workdir: dir.clone() } };
         let err = run(&job, &AtomicBool::new(false), &Default::default()).unwrap_err();
+        assert!(err.contains("改過"), "{err}");
+        // Nor does its environment check.
+        let err = run_check(&dir, &job.trusted, &AtomicBool::new(false)).unwrap_err();
         assert!(err.contains("改過"), "{err}");
         let _ = std::fs::remove_dir_all(&dir);
     }

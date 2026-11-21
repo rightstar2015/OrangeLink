@@ -1509,5 +1509,6 @@
  "時間不對（要 0 ≤ start < end）": "invalid times (0 ≤ start < end is required)",
  "score 不對": "invalid score",
  "crop_x 要在 0 到 1 之間": "crop_x must be between 0 and 1",
- "名稱超過 {CLIP_NAME_MAX} 字或註解超過 {CLIP_NOTE_MAX} 字": "name over {CLIP_NAME_MAX} characters or note over {CLIP_NOTE_MAX} characters"
+ "名稱超過 {CLIP_NAME_MAX} 字或註解超過 {CLIP_NOTE_MAX} 字": "name over {CLIP_NAME_MAX} characters or note over {CLIP_NOTE_MAX} characters",
+ "這個擴充沒有介面": "This extension has no window of its own"
 }

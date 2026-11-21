@@ -341,12 +341,16 @@ impl App {
 
     /// Runs the manifest's `check` in the background; the settings show the answer.
     pub(super) fn check_extension(&mut self, dir: PathBuf) {
-        let Some(run) = self.ext.list.iter().find(|i| i.dir == dir).and_then(|i| i.manifest.as_ref().ok()).and_then(|(m, _)| m.check.clone()) else { return };
+        // Only a trusted extension's check runs: it is the extension's own code too.
+        if !self.ext.list.iter().find(|i| i.dir == dir).is_some_and(|i| usable(&self.config, i).is_some()) {
+            return;
+        }
+        let Some(hash) = self.config.extensions.iter().find(|e| e.dir == dir).and_then(|e| e.trusted.clone()) else { return };
         let (tx, rx) = channel();
         let cancel = Arc::new(AtomicBool::new(false));
         let (c, d, ctx) = (cancel.clone(), dir.clone(), self.egui_ctx.clone());
         std::thread::spawn(move || {
-            let _ = tx.send(extension::run_check(&d, &run, &c));
+            let _ = tx.send(extension::run_check(&d, &hash, &c));
             ctx.request_repaint();
         });
         self.ext.check_result = None;
@@ -370,8 +374,15 @@ impl App {
 
     /// Opens the extension's own window (a console the user closes to stop it).
     pub(super) fn open_extension_ui(&mut self, dir: PathBuf) {
-        let Some((_, run)) = self.ext.list.iter().find(|i| i.dir == dir).and_then(|i| usable(&self.config, i)).and_then(|m| m.ui.clone()) else { return };
-        match extension::command(&dir, &run, &[], true).and_then(|mut cmd| cmd.spawn().map(|_| ()).map_err(|e| e.to_string())) {
+        if !self.ext.list.iter().find(|i| i.dir == dir).is_some_and(|i| usable(&self.config, i).is_some()) {
+            return;
+        }
+        let Some(hash) = self.config.extensions.iter().find(|e| e.dir == dir).and_then(|e| e.trusted.clone()) else { return };
+        let started = extension::trusted(&dir, &hash).and_then(|m| {
+            let (_, run) = m.ui.ok_or_else(|| t!("這個擴充沒有介面").to_string())?;
+            extension::command(&dir, &run, &[], true)?.spawn().map(|_| ()).map_err(|e| e.to_string())
+        });
+        match started {
             Ok(()) => {}
             Err(e) => self.toast_error(t!("無法開啟：{e}", e)),
         }

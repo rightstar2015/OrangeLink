@@ -208,4 +208,28 @@ mod tests {
         assert_eq!(state(&[1, 4], Some((2, 3))), "gone", "already undone");
         assert_eq!(state(&[1, 2, 3], None), "gone", "never undoable (files)");
     }
+
+    #[test]
+    fn an_ai_change_in_the_last_library_cannot_undo_a_change_in_the_next() {
+        let mut app = App::with_config(&egui::Context::default(), Config::default());
+        let step = || super::super::undo::UndoStep { seq: 0, time: 0.0, items: Vec::new(), meta: None };
+        app.push_undo(step());
+        app.log_ai("set_rating", "評分", 0);
+        let steps = app.ai_log.last().and_then(|e| e.steps);
+        assert!(matches!(app.ai_undo_state(steps), AiUndo::Now));
+
+        let root = std::env::temp_dir().join(format!("orangelink-ailog-{}", crate::model::new_id()));
+        Library::create(&root).unwrap();
+        let (tx, rx) = std::sync::mpsc::channel();
+        tx.send(Ok((Library::open(&root).unwrap(), None))).unwrap();
+        app.lib_loading = Some((root.clone(), rx));
+        app.poll_library_loading();
+        assert!(app.lib.is_some(), "switched");
+        assert!(app.ai_log.is_empty(), "the log was about the other library");
+
+        app.push_undo(step());
+        assert!(matches!(app.ai_undo_state(steps), AiUndo::Unavailable), "a 復原 left on a toast from the last library");
+        drop(app);
+        let _ = std::fs::remove_dir_all(&root);
+    }
 }

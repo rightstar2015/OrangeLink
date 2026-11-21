@@ -972,7 +972,7 @@ mod tests {
         let root = std::env::temp_dir().join(format!("orangelink-mcp-len-{}", crate::model::new_id()));
         let mut lib = Library::create(&root).unwrap();
         let it: Item = serde_json::from_value(json!({
-            "id": "v", "name": "v", "file_name": "v.mp4", "ext": "mp4", "kind": "video", "size": 1, "duration": -1.0, "added_at": 0, "modified_at": 0
+            "id": "v", "name": "v", "file_name": "v.mp4", "ext": "mp4", "kind": "video", "size": 1, "width": 1, "height": 1, "duration": -1.0, "added_at": 0, "modified_at": 0
         }))
         .unwrap();
         lib.insert_item(it);

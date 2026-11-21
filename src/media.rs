@@ -543,6 +543,22 @@ fn frame_spread(img: &image::DynamicImage) -> f32 {
     (small.pixels().map(|p| (p.0[0] as f32 - mean).powi(2)).sum::<f32>() / n).sqrt()
 }
 
+/// A video's clips as YouTube chapters (`0:00 開頭`, `12:34 名稱`…), by start
+/// time, with a first one at 0:00 when no clip starts there. Also whether
+/// YouTube will take them: at least 3, each at least 10 s long.
+pub fn youtube_chapters(clips: &[(f64, String)], intro: &str) -> (String, bool) {
+    let mut marks: Vec<(u64, String)> = clips.iter().filter(|(t, _)| t.is_finite() && *t >= 0.0).map(|(t, name)| (t.floor() as u64, name.replace(['\n', '\r'], " ").trim().to_string())).collect();
+    marks.sort_by_key(|m| m.0);
+    marks.dedup_by_key(|m| m.0);
+    if marks.first().is_none_or(|m| m.0 > 0) {
+        marks.insert(0, (0, intro.to_string()));
+    }
+    let stamp = |s: u64| if s >= 3600 { format!("{}:{:02}:{:02}", s / 3600, s / 60 % 60, s % 60) } else { format!("{}:{:02}", s / 60, s % 60) };
+    let text = marks.iter().map(|(s, name)| format!("{} {name}", stamp(*s))).collect::<Vec<_>>().join("\n");
+    let long_enough = marks.windows(2).all(|w| w[1].0 - w[0].0 >= 10);
+    (text, marks.len() >= 3 && long_enough)
+}
+
 pub fn fmt_duration(secs: f64) -> String {
     let s = secs.round() as u64;
     if s >= 3600 {
@@ -612,6 +628,18 @@ mod tests {
         assert!(crate::process::hidden(ff.join("ffmpeg")).args(["-v", "error", "-y", "-f", "lavfi", "-i", "anullsrc=d=2"]).arg(&silent).status().unwrap().success());
         assert!(!thumbnail(&ff, &silent, &dir.join("a.png"), Some(2.0), 256), "audio without a cover has no frame");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn clips_become_youtube_chapters_from_zero() {
+        let c = |t: f64, n: &str| (t, n.to_string());
+        let (text, ok) = youtube_chapters(&[c(754.9, "BOSS 戰"), c(65.0, "開場聊天"), c(3725.0, "結尾\n抽獎")], "開頭");
+        assert_eq!(text, "0:00 開頭\n1:05 開場聊天\n12:34 BOSS 戰\n1:02:05 結尾 抽獎");
+        assert!(ok);
+        let (text, ok) = youtube_chapters(&[c(0.0, "A"), c(5.0, "B"), c(30.0, "C")], "開頭");
+        assert_eq!(text, "0:00 A\n0:05 B\n0:30 C", "a clip at 0:00 is the first chapter");
+        assert!(!ok, "a chapter under 10 s: YouTube ignores them all");
+        assert!(!youtube_chapters(&[c(100.0, "A")], "開頭").1, "fewer than 3");
     }
 
     #[test]

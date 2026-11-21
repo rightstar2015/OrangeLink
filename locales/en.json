@@ -1415,5 +1415,9 @@
  "deno：{p}": "deno: {p}",
  "deno：找不到（部分 YouTube 影片需要）": "deno: not found (some YouTube videos need it)",
  "全部": "All",
- "垃圾桶": "Trash"
+ "垃圾桶": "Trash",
+ "📋 複製為 YouTube 章節": "📋 Copy as YouTube chapters",
+ "把保留的片段依開始時間寫成章節（第一個是 0:00），貼到影片說明": "Kept clips as chapters by start time (the first at 0:00), to paste into the video description",
+ "已複製 YouTube 章節": "YouTube chapters copied",
+ "已複製，但 YouTube 需要至少 3 個章節、每段至少 10 秒才會顯示": "Copied, but YouTube shows chapters only with at least 3, each 10 s or longer"
 }

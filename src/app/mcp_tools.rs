@@ -876,9 +876,7 @@ impl App {
         let update = match &self.update {
             UpdateState::Checking(_) => json!({ "state": "checking" }),
             UpdateState::Latest => json!({ "state": "latest" }),
-            UpdateState::Available { release, failed } => json!({ "state": "available", "version": release.tag, "failed": failed }),
-            UpdateState::Downloading { release, .. } => json!({ "state": "downloading", "version": release.tag }),
-            UpdateState::Ready { tag, .. } => json!({ "state": "ready", "version": tag }),
+            UpdateState::Available { release } => json!({ "state": "available", "version": release.tag }),
         };
         const SHOWN: usize = 50;
         let selected = self.selected_ids();
@@ -999,7 +997,7 @@ mod tests {
     #[test]
     fn every_job_kind_has_its_own_key_for_get_status() {
         use super::super::jobs::JobKind as K;
-        let kinds = [K::Import, K::Ytdlp, K::Whisper, K::SubtitleIndex, K::Loudness, K::Thumbnails, K::ClipExport, K::Stream, K::Update, K::FileCopy, K::Capture];
+        let kinds = [K::Import, K::Ytdlp, K::Whisper, K::SubtitleIndex, K::Loudness, K::Thumbnails, K::ClipExport, K::Stream, K::FileCopy, K::Capture, K::Integrity];
         let keys: std::collections::HashSet<&str> = kinds.iter().map(|k| k.key()).collect();
         assert_eq!(keys.len(), kinds.len());
     }

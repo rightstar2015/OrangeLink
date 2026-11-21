@@ -13,9 +13,12 @@
 
 use std::{
     path::{Path, PathBuf},
+    time::{Duration, Instant},
+};
+#[cfg(test)]
+use std::{
     process::Stdio,
     sync::atomic::{AtomicBool, Ordering},
-    time::{Duration, Instant},
 };
 
 /// This build's version, kept in the exe where `tools/sign_release` finds it:
@@ -31,11 +34,6 @@ const WAIT_FOR_EXIT: Duration = Duration::from_secs(60);
 /// A development build: the exe sits under a `target` folder.
 pub fn is_dev_build(exe: &Path) -> bool {
     exe.components().any(|c| c.as_os_str().eq_ignore_ascii_case("target"))
-}
-
-/// This copy may replace itself.
-pub fn can_self_update() -> bool {
-    std::env::current_exe().is_ok_and(|exe| !is_dev_build(&exe))
 }
 
 fn staging_root() -> Option<PathBuf> {
@@ -62,15 +60,18 @@ pub fn clean_up() {
 /// Shown when a release's signature does not check. Whoever made `latest.json`
 /// fail may also have replaced the zip on the download page, so this never
 /// suggests installing by hand.
+#[cfg(test)]
 const SIGNATURE_FAILED: &str = "新版的簽章驗證失敗，請勿安裝，並請回報（「說明」→「回報問題」）";
 
 /// Shown when `latest.json` names something that is not a zip asset.
+#[cfg(test)]
 const BAD_RELEASE_INFO: &str = "新版的更新資訊不正確（檔名不合法），請勿安裝，並請回報（「說明」→「回報問題」）";
 
 /// Downloads, checks and unpacks `tag`'s zip (release asset `asset` on this
 /// repository's GitHub Releases, SHA-256 `sha256`, release signature `sig`).
-/// Returns the new exe, ready for `install_on_exit`. A release whose asset name or
-/// signature doesn't check is not downloaded; a zip that does not match is deleted.
+/// Kept under `#[cfg(test)]` to verify signature and zip integrity guarantees
+/// while the app directs users to download new releases manually from GitHub.
+#[cfg(test)]
 pub fn download(tag: &str, asset: &str, sha256: &str, sig: &str, cancel: &AtomicBool) -> Result<PathBuf, String> {
     if !crate::update::is_asset_name(asset) {
         return Err(BAD_RELEASE_INFO.into());
@@ -131,22 +132,6 @@ pub fn download(tag: &str, asset: &str, sha256: &str, sig: &str, cancel: &Atomic
         .ok_or_else(|| "更新檔裡沒有 OrangeLink.exe".to_string())
 }
 
-/// Starts the downloaded exe to replace this one once it has exited; with
-/// `relaunch`, the replaced exe is started again afterwards.
-pub fn install_on_exit(new_exe: &Path, relaunch: bool) -> Result<(), String> {
-    let target = std::env::current_exe().map_err(|e| e.to_string())?;
-    if is_dev_build(&target) {
-        return Err("開發版不會自動更新".into());
-    }
-    let mut cmd = crate::process::hidden(new_exe);
-    cmd.arg("--apply-update").arg(&target);
-    if relaunch {
-        cmd.arg("--relaunch");
-    }
-    cmd.stdout(Stdio::null()).stderr(Stdio::null());
-    cmd.spawn().map(|_| ()).map_err(|e| format!("無法啟動更新程式：{e}"))
-}
-
 /// `--apply-update <target> [--relaunch]`, run by the new exe from the staging
 /// folder: puts itself in place of `target`.
 pub fn apply(target: &Path, relaunch: bool) -> Result<(), String> {
@@ -205,6 +190,7 @@ fn hex(bytes: &[u8]) -> String {
 /// Waits for `child`, polling `cancel`. On cancel, or when the wait itself
 /// fails, the child is killed and waited for: a process that is still exiting
 /// keeps its files open, and Windows then refuses to delete them.
+#[cfg(test)]
 fn wait_or_cancel(child: &mut std::process::Child, cancel: &AtomicBool) -> Result<std::process::ExitStatus, String> {
     loop {
         if cancel.load(Ordering::Relaxed) {
@@ -242,6 +228,7 @@ fn system_tool_in(system_root: Option<&std::ffi::OsStr>, name: &str) -> Result<P
 pub const HTTPS_ONLY: [&str; 4] = ["--proto", "=https", "--proto-redir", "=https"];
 
 /// Largest update zip that is downloaded (a release is about 15 MB).
+#[cfg(test)]
 const ZIP_MAX: u64 = 200 * 1024 * 1024;
 
 /// Windows' curl, ready for a download of at most `max_bytes`: `-q` (which only

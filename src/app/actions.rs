@@ -249,8 +249,11 @@ impl App {
             }
             Action::OpenSettings => self.show_settings = true,
             Action::ShowShortcuts => self.show_shortcuts = true,
-            Action::RestartToUpdate => self.restart_to_update(ctx),
-            Action::RetryUpdate => self.retry_update(),
+            Action::ShowUpdatePrompt => {
+                if let Some(tag) = self.update.new_version().map(str::to_string) {
+                    self.dialog = Some(Dialog::UpdatePrompt { tag });
+                }
+            }
             Action::OpenSettingsAt(page) => {
                 self.config.settings_page = page;
                 self.settings_search.clear();

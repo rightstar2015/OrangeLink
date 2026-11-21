@@ -15,7 +15,6 @@ pub enum JobKind {
     Thumbnails,
     ClipExport,
     Stream,
-    Update,
     FileCopy,
     Capture,
     Integrity,
@@ -33,7 +32,6 @@ impl JobKind {
             JobKind::Thumbnails => "thumbnails",
             JobKind::ClipExport => "clip_export",
             JobKind::Stream => "stream_processing",
-            JobKind::Update => "update",
             JobKind::FileCopy => "file_export",
             JobKind::Capture => "frame_capture",
             JobKind::Integrity => "library_check",
@@ -88,7 +86,6 @@ impl App {
         jobs.extend(self.file_copy_job());
         jobs.extend(self.capture_job());
         jobs.extend(self.integrity_job());
-        jobs.extend(self.update_job());
         let now = self.now;
         if self.thumbs.pending.is_empty() {
             self.thumbs.busy_since = None;
@@ -129,7 +126,6 @@ impl App {
             JobKind::Loudness => self.cancel_loudness(),
             JobKind::ClipExport => self.cancel_clip_queue(),
             JobKind::Stream => self.cancel_stream(),
-            JobKind::Update => self.cancel_update(),
             JobKind::FileCopy | JobKind::Capture => self.cancel_file_jobs(kind),
             JobKind::Integrity => self.cancel_integrity(),
             JobKind::Thumbnails => {}

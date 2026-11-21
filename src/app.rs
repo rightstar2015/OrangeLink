@@ -236,10 +236,8 @@ pub enum Action {
     InstallFfmpeg,
     /// The shortcuts window (? or F1).
     ShowShortcuts,
-    /// Close and start again in the downloaded version.
-    RestartToUpdate,
-    /// Download the new version again after a failed or cancelled download.
-    RetryUpdate,
+    /// Open the prompt dialog offering the newer GitHub release link.
+    ShowUpdatePrompt,
     /// Ctrl+C: selected files to the clipboard.
     CopyFiles,
     /// Ctrl+V: import files or an image from the clipboard.
@@ -353,6 +351,8 @@ pub enum Dialog {
     FieldName { rename: Option<String>, name: String },
     /// What 「檢查資源庫」 found; fixes take their part out.
     Integrity(crate::library::Integrity),
+    /// A newer signed release was found on GitHub; asks whether to open the download page.
+    UpdatePrompt { tag: String },
 }
 
 /// Thumbnail textures and the bookkeeping around loading them.
@@ -780,12 +780,9 @@ pub struct App {
     pub clip_ui: ClipUi,
     pub yt: ytdlp_ui::YtState,
     whisper: whisper_ui::WhisperState,
-    /// Checking for, downloading and installing a newer version (see `UpdateState`).
+    /// Checking for a newer signed release on GitHub (see `UpdateState`).
     pub update: UpdateState,
-    /// Start the downloaded version again after installing it on exit.
-    update_relaunch: bool,
-    /// The user chose to close despite a failed save: let the close through
-    /// and leave the downloaded update uninstalled.
+    /// The user chose to close despite a failed save: let the close through.
     force_close: bool,
     /// New items not yet offered to the AI assistant.
     pub ai_hint: usize,
@@ -975,7 +972,6 @@ impl App {
             yt: Default::default(),
             whisper: Default::default(),
             update: UpdateState::Latest,
-            update_relaunch: false,
             force_close: false,
             ai_hint: 0,
             title_bar_dark: None,
@@ -3129,7 +3125,6 @@ impl eframe::App for App {
         self.run_pending_media();
         self.poll_scrub();
         self.poll_update_check();
-        self.poll_update_download();
         if let Some(p) = &mut self.player {
             p.looping = self.clip_loop;
             p.update(ctx);
@@ -3261,11 +3256,9 @@ impl App {
         if let Err(e) = lib.flush() {
             crate::log::error("save", format!("關閉前儲存失敗：{e:#}"));
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
-            self.update_relaunch = false;
-            let update = if self.update_ready().is_some() { "，下載好的更新也不會安裝" } else { "" };
             self.dialog = Some(Dialog::Confirm {
                 message: format!(
-                    "有修改沒能儲存：\n{e:#}\n\n按「確定」仍要關閉，沒存到的修改會遺失{update}。\n按「取消」留在程式中，處理好問題（例如關掉鎖住檔案的程式、清出磁碟空間）後再關閉一次即可重試。"
+                    "有修改沒能儲存：\n{e:#}\n\n按「確定」仍要關閉，沒存到的修改會遺失。\n按「取消」留在程式中，處理好問題（例如關掉鎖住檔案的程式、清出磁碟空間）後再關閉一次即可重試。"
                 ),
                 on_yes: Confirmed::CloseUnsaved,
             });
@@ -3302,70 +3295,31 @@ impl App {
     }
 }
 
-/// Checking for a newer version and installing it.
+/// Checking for a newer signed version on GitHub Releases.
 ///
 /// ```text
 ///   Checking ──nothing newer, or no answer──▶ Latest
-///      └──newer──▶ Available ──auto update on, zip and hash known──▶ Downloading ──ok──▶ Ready
-///                     ▲                                                │                  │
-///                     └──── failed or cancelled (why kept; 重試下載) ◀──┘     installed on exit,
-///                                                                        unless saving failed
+///      └──newer signed release──▶ Available (asks user to open GitHub Releases)
 /// ```
 pub enum UpdateState {
     Checking(Receiver<Option<crate::update::Release>>),
     /// This is the newest version (or the check could not tell).
     Latest,
-    /// A newer version, not being downloaded: auto update is off, it cannot be
-    /// downloaded here, or the last try failed or was cancelled (`failed` says why).
-    Available { release: crate::update::Release, failed: Option<String> },
-    Downloading { release: crate::update::Release, rx: Receiver<Result<PathBuf, String>>, cancel: Arc<AtomicBool> },
-    /// Downloaded and checked; installed when OrangeLink closes.
-    Ready { tag: String, exe: PathBuf },
+    /// A newer signed release is published on GitHub Releases for manual download.
+    Available { release: crate::update::Release },
 }
 
 impl UpdateState {
-    /// The newer version's tag, whatever is happening to it.
+    /// The newer version's tag, when one is available.
     pub fn new_version(&self) -> Option<&str> {
         match self {
-            UpdateState::Available { release, .. } | UpdateState::Downloading { release, .. } => Some(&release.tag),
-            UpdateState::Ready { tag, .. } => Some(tag),
+            UpdateState::Available { release } => Some(&release.tag),
             UpdateState::Checking(_) | UpdateState::Latest => None,
         }
-    }
-
-    /// The tag of the version downloaded and waiting to be installed.
-    pub fn ready(&self) -> Option<&str> {
-        match self {
-            UpdateState::Ready { tag, .. } => Some(tag),
-            _ => None,
-        }
-    }
-
-    /// Why the last download did not finish, while the newer version waits.
-    pub fn failed(&self) -> Option<&str> {
-        match self {
-            UpdateState::Available { failed, .. } => failed.as_deref(),
-            _ => None,
-        }
-    }
-
-    pub fn is_downloading(&self) -> bool {
-        matches!(self, UpdateState::Downloading { .. })
-    }
-
-    /// The newer version can be downloaded and installed by this copy: the release
-    /// names its zip asset, hash and signature, and this is not a development build.
-    pub fn can_download(&self) -> bool {
-        matches!(self, UpdateState::Available { release, .. } if release.asset.is_some() && release.sha256.is_some() && release.sig.is_some())
-            && crate::self_update::can_self_update()
     }
 }
 
 impl App {
-    pub fn update_ready(&self) -> Option<&str> {
-        self.update.ready()
-    }
-
     /// The check started with the app came back.
     fn poll_update_check(&mut self) {
         let UpdateState::Checking(rx) = &self.update else { return };
@@ -3375,85 +3329,17 @@ impl App {
             // The checking thread ended without an answer: nothing to offer.
             Reply::Lost => None,
         };
+        let prompt_tag = found.as_ref().map(|r| r.tag.clone());
         self.update = match found {
-            Some(release) => UpdateState::Available { release, failed: None },
+            Some(release) => UpdateState::Available { release },
             None => UpdateState::Latest,
         };
-        if self.config.auto_update {
-            self.start_update_download();
-        }
-    }
-
-    /// Downloads and checks the available version when it names its zip and hash
-    /// and this copy may replace itself; otherwise the badge only points to the
-    /// download page.
-    fn start_update_download(&mut self) {
-        if !self.update.can_download() {
-            return;
-        }
-        let UpdateState::Available { release, .. } = std::mem::replace(&mut self.update, UpdateState::Latest) else { return };
-        let (Some(asset), Some(sha), Some(sig)) = (release.asset.clone(), release.sha256.clone(), release.sig.clone()) else { return };
-        let (tx, rx) = std::sync::mpsc::channel();
-        let cancel = Arc::new(AtomicBool::new(false));
-        let (tag, c, ctx) = (release.tag.clone(), cancel.clone(), self.egui_ctx.clone());
-        std::thread::spawn(move || {
-            let _ = tx.send(crate::self_update::download(&tag, &asset, &sha, &sig, &c));
-            ctx.request_repaint();
-        });
-        self.update = UpdateState::Downloading { release, rx, cancel };
-    }
-
-    fn poll_update_download(&mut self) {
-        let UpdateState::Downloading { rx, .. } = &self.update else { return };
-        let result = match state::poll(rx) {
-            Reply::Pending => return,
-            Reply::Done(result) => result,
-            Reply::Lost => Err(state::LOST.to_string()),
-        };
-        let UpdateState::Downloading { release, .. } = std::mem::replace(&mut self.update, UpdateState::Latest) else { return };
-        let tag = release.tag.clone();
-        match result {
-            Ok(exe) => {
-                crate::log::info("update", format!("{tag} 已下載並通過 SHA-256 檢查"));
-                self.update = UpdateState::Ready { tag: tag.clone(), exe };
-                self.toast_with(format!("新版 {tag} 已下載，關閉 OrangeLink 時會自動安裝"), "立即重新啟動", Action::RestartToUpdate);
+        if let Some(tag) = prompt_tag.filter(|_| self.config.auto_update) {
+            if self.dialog.is_none() {
+                self.dialog = Some(Dialog::UpdatePrompt { tag });
+            } else {
+                self.toast_with(format!("偵測到 GitHub 上有新版本 {tag}"), "查看更新", Action::ShowUpdatePrompt);
             }
-            Err(e) => {
-                crate::log::error("update", &e);
-                self.update = UpdateState::Available { release, failed: Some(e.clone()) };
-                // An error (red, stays longer) that can be retried from the toast.
-                self.push_toast(format!("自動更新失敗：{e}"), true, Some(("重試".to_string(), Action::RetryUpdate)));
-            }
-        }
-    }
-
-    /// The update download, for the status bar's jobs list.
-    pub(super) fn update_job(&self) -> Option<jobs::BgJob> {
-        let UpdateState::Downloading { release, .. } = &self.update else { return None };
-        Some(jobs::BgJob::new(jobs::JobKind::Update, format!("下載新版 {}", release.tag), "下載後檢查 SHA-256，關閉時安裝", None))
-    }
-
-    /// Stops the download; the newer version stays offered, with 重試下載.
-    pub(super) fn cancel_update(&mut self) {
-        if !self.update.is_downloading() {
-            return;
-        }
-        if let UpdateState::Downloading { release, cancel, .. } = std::mem::replace(&mut self.update, UpdateState::Latest) {
-            cancel.store(true, Ordering::Relaxed);
-            self.update = UpdateState::Available { release, failed: Some("已取消".to_string()) };
-        }
-    }
-
-    /// 重試下載 after a failed or cancelled download.
-    pub(super) fn retry_update(&mut self) {
-        self.start_update_download();
-    }
-
-    /// Restart now into the downloaded version.
-    pub(super) fn restart_to_update(&mut self, ctx: &egui::Context) {
-        if self.update_ready().is_some() {
-            self.update_relaunch = true;
-            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         }
     }
 }
@@ -3499,30 +3385,15 @@ struct WebSource {
 
 impl Drop for App {
     fn drop(&mut self) {
-        let mut saved = !self.force_close;
         if let Some(lib) = &mut self.lib {
             if let Err(e) = lib.flush() {
                 crate::log::error("save", format!("關閉時儲存失敗：{e:#}"));
-                saved = false;
             } else {
                 // The day's newest backup has everything done in this window.
                 lib.backup_if_changed(std::time::Duration::ZERO);
             }
         }
         self.config.save();
-        // Everything is saved: the new version can take this one's place.
-        // After a failed save the old version stays, so nothing changes under
-        // a library that may need fixing.
-        if !saved {
-            if let Some(tag) = self.update.ready() {
-                crate::log::info("update", format!("儲存失敗，不安裝 {tag}"));
-            }
-        } else if let UpdateState::Ready { tag, exe } = &self.update {
-            match crate::self_update::install_on_exit(exe, self.update_relaunch) {
-                Ok(()) => crate::log::info("update", format!("關閉後安裝 {tag}")),
-                Err(e) => crate::log::error("update", e),
-            }
-        }
     }
 }
 
@@ -4135,6 +4006,34 @@ mod tests {
         assert_eq!(stats.by_kind, [1, 1, 1, 0]);
 
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn update_check_prompts_instead_of_auto_downloading() {
+        let release = || crate::update::Release {
+            tag: "v9.9.9".into(),
+            asset: Some("OrangeLink-v9.9.9-windows-x64.zip".into()),
+            sha256: Some("a".repeat(64)),
+            sig: Some("sig".into()),
+        };
+
+        // With auto_update enabled, detecting a newer release opens Dialog::UpdatePrompt.
+        let mut app = App::with_config(&egui::Context::default(), Config { auto_update: true, ..Config::default() });
+        let (tx, rx) = std::sync::mpsc::channel();
+        tx.send(Some(release())).unwrap();
+        app.update = UpdateState::Checking(rx);
+        app.poll_update_check();
+        assert_eq!(app.update.new_version(), Some("v9.9.9"));
+        assert!(matches!(&app.dialog, Some(Dialog::UpdatePrompt { tag }) if tag == "v9.9.9"));
+
+        // With auto_update disabled, the badge state updates without interrupting with a modal.
+        let mut quiet = App::with_config(&egui::Context::default(), Config { auto_update: false, ..Config::default() });
+        let (tx, rx) = std::sync::mpsc::channel();
+        tx.send(Some(release())).unwrap();
+        quiet.update = UpdateState::Checking(rx);
+        quiet.poll_update_check();
+        assert_eq!(quiet.update.new_version(), Some("v9.9.9"));
+        assert!(quiet.dialog.is_none());
     }
 }
 

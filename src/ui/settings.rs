@@ -632,14 +632,13 @@ impl App {
                 }
             }
             SettingsPage::Advanced => {
-                if f.show(ui, "自動更新 新版 下載 安裝") {
-                    ui.checkbox(&mut c.auto_update, "自動下載新版，並在關閉 OrangeLink 時安裝");
-                    let note = if crate::self_update::can_self_update() {
-                        "下載後會先比對 SHA-256，不符就丟棄。取消勾選則只提示有新版，不會下載"
-                    } else {
-                        "目前執行的是開發版（在 target 資料夾裡），不會自動更新"
-                    };
-                    ui.label(RichText::new(note).small().weak());
+                if f.show(ui, "自動更新 新版 檢查 GitHub 下載") {
+                    ui.checkbox(&mut c.auto_update, "啟動時檢查 GitHub 新版本並跳出更新詢問");
+                    ui.label(
+                        RichText::new("偵測到已通過簽章驗證的新版本時，會詢問是否前往 GitHub Releases 手動下載；取消勾選則僅在左下角狀態列顯示提示。")
+                            .small()
+                            .weak(),
+                    );
                 }
                 if f.show(ui, "收合狀態 側邊欄 右側面板 重設") {
                     ui.horizontal(|ui| {
@@ -658,8 +657,13 @@ impl App {
                         }
                     });
                 }
-                if f.show(ui, "版本 關於") {
-                    ui.label(RichText::new(format!("OrangeLink {}", env!("CARGO_PKG_VERSION"))).small().weak());
+                if f.show(ui, "版本 關於 GitHub") {
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new(format!("OrangeLink {}", env!("CARGO_PKG_VERSION"))).small().weak());
+                        if ui.small_button("前往 GitHub Releases").clicked() {
+                            let _ = open::that_detached(crate::update::releases_url());
+                        }
+                    });
                 }
             }
         }

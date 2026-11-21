@@ -470,41 +470,30 @@ impl App {
     fn status_badges(&mut self, ui: &mut Ui) {
         let warn = warning();
         if let Some(tag) = self.update.new_version().map(str::to_string) {
-            let r = ui.add(egui::Button::new(RichText::new("⬆").color(warn)).frame(false)).on_hover_text(format!("有新版 {tag}"));
+            let r = ui.add(egui::Button::new(RichText::new("⬆").color(warn)).frame(false)).on_hover_text(format!("GitHub 有新版 {tag}"));
             let id = ui.id().with("badge-update");
             if r.clicked() {
                 ui.memory_mut(|m| m.toggle_popup(id));
             }
-            let ready = self.update_ready() == Some(tag.as_str());
-            let failed = self.update.failed().map(str::to_string);
-            let can_retry = self.update.can_download();
-            let downloading = self.update.is_downloading();
+            let url = crate::update::release_tag_url(&tag);
             egui::popup::popup_above_or_below_widget(ui, id, &r, egui::AboveOrBelow::Above, egui::PopupCloseBehavior::CloseOnClickOutside, |ui| {
-                ui.set_min_width(240.0);
-                ui.label(RichText::new(format!("有新版 {tag}")).strong());
-                ui.label(RichText::new(format!("目前是 {}", env!("CARGO_PKG_VERSION"))).small().weak());
-                if ready {
-                    ui.label(RichText::new("已下載並通過檢查，關閉 OrangeLink 時會自動安裝").small().color(good()));
-                    if ui.button("立即重新啟動並更新").clicked() {
-                        self.act(Action::RestartToUpdate);
+                ui.set_min_width(250.0);
+                ui.label(RichText::new(format!("GitHub 上有新版 {tag}")).strong());
+                ui.label(RichText::new(format!("目前版本：v{}", env!("CARGO_PKG_VERSION"))).small().weak());
+                ui.label(RichText::new("請前往 GitHub 手動下載新版本並覆蓋安裝。").small().weak());
+                ui.add_space(4.0);
+                ui.horizontal(|ui| {
+                    let btn = egui::Button::new(RichText::new("前往 GitHub 下載").color(Color32::WHITE)).fill(tokens().selection_bg);
+                    if ui.add(btn).clicked() {
+                        let _ = open::that_detached(&url);
                         ui.memory_mut(|m| m.close_popup());
                     }
-                } else if downloading {
-                    ui.label(RichText::new("下載中，進度在背景工作列表裡").small().weak());
-                } else if let Some(why) = &failed {
-                    ui.label(RichText::new(format!("自動更新沒有完成：{why}")).small().color(danger()));
-                }
-                if !ready && !downloading && can_retry {
-                    let label = if failed.is_some() { "重試下載" } else { "下載並在關閉時安裝" };
-                    if ui.button(label).clicked() {
-                        self.act(Action::RetryUpdate);
+                    if ui.button("複製連結").clicked() {
+                        ui.ctx().copy_text(url.clone());
+                        self.toast("已複製 GitHub 下載連結");
                         ui.memory_mut(|m| m.close_popup());
                     }
-                }
-                if ui.button("開啟下載頁面").clicked() {
-                    let _ = open::that_detached(crate::update::releases_url());
-                    ui.memory_mut(|m| m.close_popup());
-                }
+                });
             });
         }
         let unreadable = self.lib.as_ref().map_or(0, |l| l.unreadable.len());
@@ -1013,6 +1002,43 @@ impl App {
                     });
                 });
             }
+            Dialog::UpdatePrompt { tag } => {
+                let url = crate::update::release_tag_url(tag);
+                let mut copied = false;
+                window("發現新版本").show(ctx, |ui| {
+                    ui.set_max_width(440.0);
+                    ui.label(RichText::new(format!("偵測到 GitHub 上有新版本 {tag}")).strong());
+                    ui.label(RichText::new(format!("目前版本：v{}", env!("CARGO_PKG_VERSION"))).small().weak());
+                    ui.add_space(6.0);
+                    ui.label("是否要前往 GitHub 下載頁面手動下載新版本？");
+                    ui.add_space(6.0);
+                    egui::Frame::none()
+                        .fill(tokens().bg_elevated)
+                        .stroke(Stroke::new(1.0_f32, tokens().separator))
+                        .rounding(ROUNDING)
+                        .inner_margin(egui::Margin::symmetric(8.0, 6.0))
+                        .show(ui, |ui| {
+                            ui.set_width(ui.available_width());
+                            ui.horizontal(|ui| {
+                                ui.add(egui::Label::new(RichText::new(&url).small().monospace().color(tokens().link)).truncate());
+                                if ui.small_button("複製").on_hover_text("複製 GitHub 下載連結").clicked() {
+                                    ui.ctx().copy_text(url.clone());
+                                    copied = true;
+                                }
+                            });
+                        });
+                    ui.add_space(10.0);
+                    ui.horizontal(|ui| {
+                        let go = egui::Button::new(RichText::new("是，前往 GitHub 下載").strong().color(Color32::WHITE))
+                            .fill(tokens().selection_bg);
+                        commit |= ui.add(go).clicked();
+                        close |= ui.button("否，稍後再說").clicked();
+                    });
+                });
+                if copied {
+                    self.toast("已複製 GitHub 下載連結");
+                }
+            }
         }
 
         if commit {
@@ -1025,6 +1051,9 @@ impl App {
                 Dialog::BatchRename { ids, pattern, start } => self.apply_batch_rename(ids, pattern, start),
                 Dialog::FieldName { rename, name } => self.apply_field_dialog(rename, name),
                 Dialog::WatchFolders { .. } | Dialog::Backups(_) | Dialog::Unreadable | Dialog::Integrity(_) => {}
+                Dialog::UpdatePrompt { tag } => {
+                    let _ = open::that_detached(crate::update::release_tag_url(&tag));
+                }
                 Dialog::ImportPreview { paths, link, folder, tags, .. } => {
                     self.act(Action::StartImportWith { paths, link, folder, tags: split_tags(&tags) });
                 }

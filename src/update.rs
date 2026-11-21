@@ -14,12 +14,24 @@ pub fn releases_url() -> String {
     format!("https://github.com/{REPO}/releases")
 }
 
+/// The GitHub release page for a validated version tag (e.g. `v0.1.8`),
+/// falling back to the releases list if the tag doesn't look like `vX.Y.Z`.
+pub fn release_tag_url(tag: &str) -> String {
+    let clean = tag.trim().trim_start_matches('v');
+    if parts(clean).is_some_and(|p| p.len() == 3) {
+        format!("https://github.com/{REPO}/releases/tag/v{clean}")
+    } else {
+        releases_url()
+    }
+}
+
 fn latest_json_url() -> String {
     format!("https://github.com/{REPO}/releases/latest/download/latest.json")
 }
 
 /// Where a release's zip is downloaded from: always this repository's release for
 /// `tag`, whatever else `latest.json` might say.
+#[cfg(test)]
 pub fn asset_url(tag: &str, asset: &str) -> String {
     format!("https://github.com/{REPO}/releases/download/{tag}/{asset}")
 }
@@ -419,5 +431,13 @@ mod tests {
         let url = report_url();
         assert!(url.contains("?body=%23%23%20"));
         assert!(!url[url.find("body=").unwrap()..].contains(' '));
+    }
+
+    #[test]
+    fn release_tag_url_points_to_validated_github_tag() {
+        assert_eq!(release_tag_url("v0.1.8"), format!("https://github.com/{REPO}/releases/tag/v0.1.8"));
+        assert_eq!(release_tag_url("0.2.0"), format!("https://github.com/{REPO}/releases/tag/v0.2.0"));
+        assert_eq!(release_tag_url("../evil"), releases_url());
+        assert_eq!(release_tag_url("v0.2.0?x=1"), releases_url());
     }
 }

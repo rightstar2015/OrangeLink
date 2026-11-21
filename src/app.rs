@@ -1912,20 +1912,26 @@ impl App {
         }
         let cols = self.grid_cols.max(1) as i64;
         let step = if left { -1 } else if right { 1 } else if up { -cols } else if down { cols } else { 0 };
-        if step != 0 && !self.visible.is_empty() {
-            let next = match current {
-                Some(i) => (i as i64 + step).clamp(0, self.visible.len() as i64 - 1) as usize,
-                None => 0,
-            };
-            let id = self.visible[next].clone();
-            // Shift extends from the existing anchor; keep it in place while moving caret.
-            if mods.shift {
-                self.act(Action::Click(id.clone(), mods));
-            } else {
-                self.act(Action::Click(id.clone(), egui::Modifiers::NONE));
-            }
-            self.scroll_to = Some(id);
+        if step != 0 {
+            self.arrow_step(step, mods);
         }
+    }
+
+    /// An arrow key in the grid: moves the caret `step` items (a row is
+    /// `grid_cols`). With Shift the anchor stays and the range follows the caret.
+    fn arrow_step(&mut self, step: i64, mods: egui::Modifiers) {
+        if self.visible.is_empty() {
+            return;
+        }
+        let current = self.caret.as_ref().or(self.anchor.as_ref()).and_then(|a| self.visible.iter().position(|id| id == a));
+        let next = match current {
+            Some(i) => (i as i64 + step).clamp(0, self.visible.len() as i64 - 1) as usize,
+            None => 0,
+        };
+        let id = self.visible[next].clone();
+        let mods = if mods.shift { mods } else { egui::Modifiers::NONE };
+        self.act(Action::Click(id.clone(), mods));
+        self.scroll_to = Some(id);
     }
 
     /// Keys while a video or audio plays in the preview: an editor's, not the grid's.
@@ -3856,37 +3862,44 @@ mod tests {
     }
 
     #[test]
-    fn shift_click_moves_caret_so_shift_arrows_extend_range() {
+    fn shift_arrows_extend_the_range_from_the_anchor_and_shrink_it_back() {
         let mut app = App::with_config(&egui::Context::default(), Config::default());
-        app.visible = ["a", "b", "c", "d"].into_iter().map(String::from).collect();
+        app.visible = ["a", "b", "c", "d", "e", "f"].into_iter().map(String::from).collect();
+        app.grid_cols = 2;
         let shift = egui::Modifiers { shift: true, ..Default::default() };
-
-        app.select_click("a".into(), egui::Modifiers::NONE);
-        assert_eq!(app.anchor.as_deref(), Some("a"));
-        assert_eq!(app.caret.as_deref(), Some("a"));
-
-        // Stepping forward twice with Shift keeps anchor at "a" while moving caret past 2 items.
-        let step_shift = |app: &mut App, delta: i64| {
-            let cur = app.caret.as_ref().or(app.anchor.as_ref()).and_then(|x| app.visible.iter().position(|id| id == x)).unwrap();
-            let next = (cur as i64 + delta).clamp(0, app.visible.len() as i64 - 1) as usize;
-            let id = app.visible[next].clone();
-            app.select_click(id, shift);
+        let selected = |app: &App| {
+            let mut sel: Vec<String> = app.selected.iter().cloned().collect();
+            sel.sort();
+            sel.join("")
         };
-        step_shift(&mut app, 1);
-        assert_eq!(app.caret.as_deref(), Some("b"));
-        step_shift(&mut app, 1);
-        assert_eq!(app.anchor.as_deref(), Some("a"));
-        assert_eq!(app.caret.as_deref(), Some("c"));
-        let mut sel: Vec<_> = app.selected.iter().map(String::as_str).collect();
-        sel.sort();
-        assert_eq!(sel, ["a", "b", "c"]);
 
-        // Stepping back shrinks the range instead of getting stuck.
-        step_shift(&mut app, -1);
+        // The first arrow with nothing selected picks the first item.
+        app.arrow_step(1, egui::Modifiers::NONE);
+        assert_eq!((app.anchor.as_deref(), app.caret.as_deref()), (Some("a"), Some("a")));
+
+        // Shift+→ twice: the anchor stays, the caret moves, the range grows.
+        app.arrow_step(1, shift);
+        app.arrow_step(1, shift);
+        assert_eq!((app.anchor.as_deref(), app.caret.as_deref()), (Some("a"), Some("c")));
+        assert_eq!(selected(&app), "abc");
+
+        // Shift+← shrinks it instead of getting stuck at the anchor's end.
+        app.arrow_step(-1, shift);
         assert_eq!(app.caret.as_deref(), Some("b"));
-        let mut sel: Vec<_> = app.selected.iter().map(String::as_str).collect();
-        sel.sort();
-        assert_eq!(sel, ["a", "b"]);
+        assert_eq!(selected(&app), "ab");
+
+        // Shift+↓ moves a whole row; past the end it stops at the last item.
+        app.arrow_step(2, shift);
+        assert_eq!(selected(&app), "abcd");
+        app.arrow_step(10, shift);
+        assert_eq!(app.caret.as_deref(), Some("f"));
+        assert_eq!(selected(&app), "abcdef");
+
+        // A plain arrow drops the range and starts again from where the caret is.
+        app.arrow_step(-1, egui::Modifiers::NONE);
+        assert_eq!((app.anchor.as_deref(), app.caret.as_deref()), (Some("e"), Some("e")));
+        assert_eq!(selected(&app), "e");
+        assert_eq!(app.scroll_to.as_deref(), Some("e"));
     }
 
     #[test]

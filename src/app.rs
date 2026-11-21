@@ -2450,7 +2450,30 @@ impl App {
         }
     }
 
+    /// The preview's item left the grid (deleted, or edited out of the folder shown).
+    fn close_viewer_if_hidden(&mut self) {
+        if self.viewer.as_ref().is_some_and(|v| !self.visible.contains(&v.id)) {
+            self.close_viewer(false);
+        }
+    }
+
+    /// Clears the folder, search and filters when `id` is not among the items shown,
+    /// so it is.
+    pub(super) fn show_in_grid(&mut self, id: &str) {
+        if !self.visible.iter().any(|v| v == id) {
+            self.view = View::All;
+            self.search.clear();
+            self.tag_filter.clear();
+            self.ext_filter.clear();
+            self.min_rating = 0;
+            self.color_filter = None;
+        }
+    }
+
     fn open_viewer_at(&mut self, id: String) {
+        // The preview closes when its item is not among those shown (a related
+        // item, the video of a subtitle line, a finished stream's 查看).
+        self.show_in_grid(&id);
         self.selected.clear();
         self.selected.insert(id.clone());
         self.anchor = Some(id.clone());
@@ -3196,11 +3219,7 @@ impl eframe::App for App {
                 }
                 ctx.request_repaint_after(std::time::Duration::from_secs_f64(secs));
             }
-            if let Some(v) = &self.viewer {
-                if !self.visible.contains(&v.id) {
-                    self.close_viewer(false);
-                }
-            }
+            self.close_viewer_if_hidden();
             self.handle_keys(ctx);
             if self.viewer.is_none() {
                 self.top_bar(ctx);
@@ -4112,6 +4131,33 @@ mod tests {
         // What happened before: egui has dropped the box's focus by the time the keys
         // are handled, so the Esc also cleared the selection.
         assert!(!esc_after_typing(false), "egui keeps the focus through Esc now: `typing` can go");
+    }
+
+    #[test]
+    fn a_preview_opened_on_an_item_outside_the_grid_stays_open() {
+        let root = std::env::temp_dir().join(format!("orangelink-goto-{}", crate::model::new_id()));
+        let mut lib = Library::create(&root).unwrap();
+        for (id, name) in [("v", "直播"), ("s", "直播字幕")] {
+            let it: Item = serde_json::from_value(serde_json::json!({
+                "id": id, "name": name, "file_name": format!("{id}.mp4"), "ext": "mp4",
+                "kind": "video", "size": 1, "width": 10, "height": 10, "added_at": 0, "modified_at": 0
+            }))
+            .unwrap();
+            lib.insert_item(it);
+        }
+        let mut app = App::with_config(&egui::Context::default(), Config::default());
+        app.lib = Some(lib);
+        // A search that shows only the other item, as when a related item is opened.
+        app.search = "字幕".into();
+        app.refresh_visible();
+        assert_eq!(app.visible, ["s"]);
+        app.open_viewer_at("v".into());
+        // The next frame.
+        app.refresh_visible();
+        app.close_viewer_if_hidden();
+        assert_eq!(app.viewer.as_ref().map(|v| v.id.as_str()), Some("v"), "the preview stays open");
+        assert!(app.visible.contains(&"v".to_string()));
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     /// An import under way, fed by the test instead of an importer thread.

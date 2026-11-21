@@ -208,6 +208,15 @@ fn clean_text(s: &str, max: usize) -> Option<String> {
     (!s.is_empty()).then(|| s.to_string())
 }
 
+/// Longest annotation an MCP client may leave, in characters.
+const ANNOTATION_MAX: usize = 20_000;
+
+/// An annotation's text: line breaks and tabs stay, other control characters
+/// and direction overrides go.
+fn clean_note(s: &str) -> String {
+    s.chars().filter(|c| matches!(c, '\n' | '\t') || !(c.is_control() || is_bidi_control(*c))).collect()
+}
+
 /// The media's length for checking times against: f64::MAX when unknown, or when
 /// the stored length is negative or not a number (clamp to it would panic).
 fn known_length(duration: Option<f64>) -> f64 {
@@ -765,10 +774,14 @@ impl App {
                 let Some(id) = str_arg(args, "id").filter(|id| lib.items.contains_key(*id)).map(str::to_string) else {
                     return ToolOutput::error("找不到這個 id");
                 };
-                let Some(text) = str_arg(args, "text").map(str::to_string) else {
+                let Some(text) = str_arg(args, "text").map(clean_note) else {
                     return ToolOutput::error("需要 text 字串");
                 };
                 let append = args.get("append").and_then(|v| v.as_bool()).unwrap_or(false);
+                let old = if append { lib.items[&id].annotation.chars().count() + 1 } else { 0 };
+                if old + text.chars().count() > ANNOTATION_MAX {
+                    return ToolOutput::error(format!("註解最多 {ANNOTATION_MAX} 個字"));
+                }
                 self.edit_items(&[id], |it| {
                     if append && !it.annotation.is_empty() {
                         it.annotation.push('\n');
@@ -823,6 +836,9 @@ impl App {
             }
             "add_to_folder" | "remove_from_folder" => {
                 let ids = existing(&strings(args, "ids"));
+                if ids.is_empty() {
+                    return ToolOutput::error("沒有有效的 id");
+                }
                 let Some(folder) = str_arg(args, "folder_id").filter(|f| lib.folder_name(f).is_some()).map(str::to_string) else {
                     return ToolOutput::error("找不到這個 folder_id（用 list_folders 查詢）");
                 };
@@ -951,6 +967,11 @@ mod tests {
     }
 
     #[test]
+    fn annotations_lose_control_characters_but_keep_their_lines() {
+        assert_eq!(clean_note("a\u{0}\u{202E}b\nc\td\r"), "ab\nc\td");
+    }
+
+    #[test]
     fn tags_and_names_are_cleaned() {
         assert_eq!(clean_text("a\u{0}b", TAG_MAX).as_deref(), Some("ab"));
         assert_eq!(clean_text("\u{202E}evil", TAG_MAX).as_deref(), Some("evil"));
@@ -965,6 +986,27 @@ mod tests {
         }
         // Ordinary text, emoji and joiners stay.
         assert_eq!(clean_text("Vtuber 精華 🎉 👨‍👩‍👧", TAG_MAX).as_deref(), Some("Vtuber 精華 🎉 👨‍👩‍👧"));
+    }
+
+    #[test]
+    fn overlong_annotations_and_folder_moves_of_no_items_are_errors() {
+        let root = std::env::temp_dir().join(format!("orangelink-mcp-note-{}", crate::model::new_id()));
+        let mut lib = Library::create(&root).unwrap();
+        let it: Item = serde_json::from_value(json!({
+            "id": "a", "name": "a", "file_name": "a.png", "ext": "png", "kind": "image", "size": 1, "width": 1, "height": 1, "added_at": 0, "modified_at": 0
+        }))
+        .unwrap();
+        lib.insert_item(it);
+        let folder = lib.add_folder("f", None);
+        let config = crate::config::Config { mcp_allow_write: true, ..Default::default() };
+        let mut app = App::with_config(&eframe::egui::Context::default(), config);
+        app.lib = Some(lib);
+        assert!(!app.mcp_call("set_annotation", &json!({ "id": "a", "text": "x".repeat(ANNOTATION_MAX) })).is_error);
+        assert!(app.mcp_call("set_annotation", &json!({ "id": "a", "text": "y", "append": true })).is_error, "grew past the limit");
+        assert_eq!(app.lib.as_ref().unwrap().items["a"].annotation.len(), ANNOTATION_MAX);
+        assert!(app.mcp_call("add_to_folder", &json!({ "ids": [], "folder_id": folder })).is_error);
+        assert!(app.mcp_call("add_to_folder", &json!({ "ids": ["nope"], "folder_id": folder })).is_error);
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

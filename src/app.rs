@@ -1244,6 +1244,12 @@ impl App {
         self.signals = None;
         self.viewer_loading = None;
         self.viewer_start = None;
+        self.clear_studio();
+    }
+
+    /// Workbench state that belongs to the item in the preview: the in/out
+    /// marks, the 9:16 frame, the clip list's selection, the timeline thumbnails.
+    fn clear_studio(&mut self) {
         self.mark = (None, None);
         self.crop_frame = None;
         self.crop_drag_before = None;
@@ -2552,8 +2558,9 @@ impl App {
         self.player = None;
         self.subs = None;
         self.signals = None;
-        self.mark = (None, None);
         self.pdf = None;
+        // The last video's 9:16 frame would otherwise be given to the next one's clips.
+        self.clear_studio();
         self.viewer = Some(Viewer { id: id.clone(), zoom: 1.0, pan: egui::Vec2::ZERO });
         // Holding an arrow key steps through many items: load only where it stops.
         self.viewer_loading = Some((id, self.now + VIEWER_SETTLE));
@@ -4302,6 +4309,21 @@ mod tests {
         assert!(!app.viewer_tags_open);
         assert!(app.clip_ui.sel.is_empty());
         assert!(app.text_cues_cache.is_none());
+    }
+
+    #[test]
+    fn paging_the_preview_drops_the_last_videos_9_16_frame() {
+        let mut app = App::with_config(&egui::Context::default(), Config::default());
+        app.viewer = Some(Viewer { id: "v1".into(), zoom: 1.0, pan: egui::Vec2::ZERO });
+        app.crop_frame = Some(0.25);
+        app.mark = (Some(1.0), Some(5.0));
+        app.clip_ui.sel.insert("c1".into());
+        app.viewer_tags_open = true;
+        app.open_viewer_at("v2".into());
+        assert_eq!(app.crop_frame, None, "the next video inherited the 9:16 frame");
+        assert_eq!(app.mark, (None, None));
+        assert!(app.clip_ui.sel.is_empty());
+        assert!(!app.viewer_tags_open);
     }
 
     #[test]

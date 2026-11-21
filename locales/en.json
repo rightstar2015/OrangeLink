@@ -1413,5 +1413,7 @@
  "yt-dlp {v}：{p}": "yt-dlp {v}: {p}",
  "yt-dlp：找不到（從網址下載需要，可在下載視窗安裝）": "yt-dlp: not found (needed to download from a URL; install it in the download window)",
  "deno：{p}": "deno: {p}",
- "deno：找不到（部分 YouTube 影片需要）": "deno: not found (some YouTube videos need it)"
+ "deno：找不到（部分 YouTube 影片需要）": "deno: not found (some YouTube videos need it)",
+ "全部": "All",
+ "垃圾桶": "Trash"
 }

@@ -73,7 +73,10 @@ chrome.runtime.onMessage.addListener((msg, _sender, respond) => {
 });
 
 // Shows activity on the icon and keeps the service worker alive during long transfers.
+// The badge stays until the last of several transfers at once is done.
+let active = 0;
 async function track(work) {
+  active++;
   chrome.action.setBadgeText({ text: "…" });
   chrome.action.setBadgeBackgroundColor({ color: "#e0701a" });
   const keepAlive = setInterval(() => chrome.runtime.getPlatformInfo(() => {}), 20000);
@@ -83,7 +86,7 @@ async function track(work) {
     notify("無法加入 OrangeLink", e.message);
   } finally {
     clearInterval(keepAlive);
-    chrome.action.setBadgeText({ text: "" });
+    if (--active === 0) chrome.action.setBadgeText({ text: "" });
     refreshMenus();
   }
 }
@@ -169,11 +172,21 @@ async function checkSize(res) {
 }
 
 // Clear any leftover session rules if the MV3 service worker was terminated mid-fetch.
-chrome.declarativeNetRequest.getSessionRules((rules) => {
-  if (rules?.length) {
-    chrome.declarativeNetRequest.updateSessionRules({ removeRuleIds: rules.map((r) => r.id) });
-  }
-});
+// A download waits for this, or the clean-up could remove the rule it just added.
+const leftoverRulesCleared = chrome.declarativeNetRequest
+  .getSessionRules()
+  .then((rules) => rules?.length && chrome.declarativeNetRequest.updateSessionRules({ removeRuleIds: rules.map((r) => r.id) }))
+  .catch(() => {});
+
+// The rule's URL condition: urlFilter has no escapes, so a URL with its special
+// characters (| * ^) is matched by host instead. Both are ASCII (punycode, %-escapes).
+function ruleCondition(src) {
+  const url = new URL(src).href;
+  const base = { tabIds: [-1], resourceTypes: ["xmlhttprequest"] };
+  return /[|*^]/.test(url)
+    ? { ...base, requestDomains: [new URL(url).hostname] }
+    : { ...base, urlFilter: `|${url}|` };
+}
 
 // Many sites refuse image requests without a Referer from their own pages. The
 // rule applies only to this extension's own request (tabId -1) to that exact URL,
@@ -189,14 +202,20 @@ async function fetchWithReferer(src, pageUrl) {
   }
   const id = nextRule++;
   if (cleanReferer) {
-    await chrome.declarativeNetRequest.updateSessionRules({
-      removeRuleIds: [id],
-      addRules: [{
-        id,
-        action: { type: "modifyHeaders", requestHeaders: [{ header: "Referer", operation: "set", value: cleanReferer }] },
-        condition: { urlFilter: `|${src}|`, tabIds: [-1], resourceTypes: ["xmlhttprequest"] },
-      }],
-    });
+    await leftoverRulesCleared;
+    try {
+      await chrome.declarativeNetRequest.updateSessionRules({
+        removeRuleIds: [id],
+        addRules: [{
+          id,
+          action: { type: "modifyHeaders", requestHeaders: [{ header: "Referer", operation: "set", value: cleanReferer }] },
+          condition: ruleCondition(src),
+        }],
+      });
+    } catch {
+      // Without the Referer most sites still answer; try the download anyway.
+      cleanReferer = null;
+    }
   }
   try {
     return await fetch(src, { credentials: "include" });

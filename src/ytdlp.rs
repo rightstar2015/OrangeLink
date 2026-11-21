@@ -6,7 +6,10 @@ use std::{
     io::{BufRead, BufReader},
     path::{Path, PathBuf},
     process::{Command, Stdio},
-    sync::mpsc::{channel, Receiver},
+    sync::{
+        mpsc::{channel, Receiver},
+        Arc, Mutex,
+    },
     thread,
 };
 
@@ -468,12 +471,16 @@ pub enum Event {
 pub struct Job {
     pub rx: Receiver<Event>,
     pub pid: u32,
+    /// Set, under its lock, once the program has ended and its handle is closed;
+    /// until then Windows cannot give `pid` to another process.
+    exited: Arc<Mutex<bool>>,
 }
 
 impl Job {
     pub fn spawn(exe: &Path, args: &[String], ctx: eframe::egui::Context) -> std::io::Result<Job> {
         let mut child = command(exe).args(args).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn()?;
         let pid = child.id();
+        let exited = Arc::new(Mutex::new(false));
         let (tx, rx) = channel();
         let out = child.stdout.take().expect("piped");
         let err = child.stderr.take().expect("piped");
@@ -519,8 +526,16 @@ impl Job {
             }
             last
         });
+        let ended = exited.clone();
         thread::spawn(move || {
             let status = child.wait();
+            // The handle closes (freeing the pid for reuse) only with the flag set,
+            // so a cancel either sees it or kills while the pid is still this one.
+            {
+                let mut ended = crate::lock(&ended);
+                *ended = true;
+                drop(child);
+            }
             let _ = reader.join();
             let last_error = err_reader.join().ok().flatten();
             let result = match status {
@@ -531,20 +546,34 @@ impl Job {
             let _ = tx.send(Event::Done(result));
             ctx.request_repaint();
         });
-        Ok(Job { rx, pid })
+        Ok(Job { rx, pid, exited })
     }
 
     /// Stops yt-dlp and the processes it started (the exe is a launcher, ffmpeg runs below it).
+    /// Runs in the background: taskkill can take a moment, and the UI must not wait.
     pub fn cancel(&self) {
-        #[cfg(windows)]
-        {
-            let _ = command(Path::new("taskkill")).args(["/T", "/F", "/PID", &self.pid.to_string()]).output();
-        }
-        #[cfg(not(windows))]
-        {
-            let _ = command(Path::new("kill")).arg(self.pid.to_string()).output();
-        }
+        let (pid, exited) = (self.pid, self.exited.clone());
+        thread::spawn(move || kill_if_running(pid, &exited));
     }
+}
+
+/// Kills the process tree of `pid` unless it has ended; whether it tried.
+fn kill_if_running(pid: u32, exited: &Mutex<bool>) -> bool {
+    let ended = crate::lock(exited);
+    if *ended {
+        return false;
+    }
+    #[cfg(windows)]
+    {
+        // From System32, not whatever taskkill.exe comes first on PATH.
+        let Ok(taskkill) = crate::self_update::system_tool("taskkill") else { return false };
+        let _ = command(&taskkill).args(["/T", "/F", "/PID", &pid.to_string()]).output();
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = command(Path::new("kill")).arg(pid.to_string()).output();
+    }
+    true
 }
 
 /// Live-chat JSON files written into `dir` at or after `since`.
@@ -703,6 +732,22 @@ pub fn chat_to_txt(json: &Path) -> Result<(PathBuf, usize), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[cfg(windows)]
+    fn cancelling_a_download_that_already_ended_kills_nothing() {
+        let args = vec!["/c".to_string(), "exit".to_string(), "0".to_string()];
+        let job = Job::spawn(Path::new("cmd"), &args, eframe::egui::Context::default()).unwrap();
+        while !matches!(job.rx.recv().unwrap(), Event::Done(_)) {}
+        // Its pid may belong to another program by now.
+        assert!(!kill_if_running(job.pid, &job.exited), "taskkill ran on an ended program's pid");
+    }
+
+    #[test]
+    fn a_running_download_is_killed_on_cancel() {
+        // u32::MAX is no process; the point is that a kill is tried while it runs.
+        assert!(kill_if_running(u32::MAX, &Mutex::new(false)));
+    }
 
     #[test]
     fn finds_the_exe_in_the_published_hashes() {

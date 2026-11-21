@@ -59,13 +59,27 @@ pub struct McpServer {
     pub token: String,
 }
 
+/// Listens on `port` on this machine only. A server restarted with new settings
+/// frees its port just after being dropped, so binding is tried for half a second.
+pub(crate) fn bind_local(port: u16) -> Result<tiny_http::Server, String> {
+    let mut bound = tiny_http::Server::http(("127.0.0.1", port));
+    for _ in 0..10 {
+        if bound.is_ok() {
+            break;
+        }
+        thread::sleep(std::time::Duration::from_millis(50));
+        bound = tiny_http::Server::http(("127.0.0.1", port));
+    }
+    bound.map_err(|e| e.to_string())
+}
+
 impl McpServer {
     /// Every request must present `token` (see `authorized`); an empty token would let anything in.
     pub fn start(port: u16, token: String, ctx: egui::Context, tools: Value) -> Result<Self, String> {
         if token.is_empty() {
             return Err("缺少 MCP token".into());
         }
-        let server = Arc::new(tiny_http::Server::http(("127.0.0.1", port)).map_err(|e| e.to_string())?);
+        let server = Arc::new(bind_local(port)?);
         // Port 0 lets the system pick one (the tests); report the one we got.
         let port = server.server_addr().to_ip().map_or(port, |a| a.port());
         let (tx, rx) = channel();
@@ -359,6 +373,20 @@ pub fn claude_add_command(claude: Option<&std::path::Path>, url: &str, token: &s
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_restarted_server_gets_its_port_back_when_the_old_one_lets_go_late() {
+        let old = McpServer::start(0, "secret".into(), egui::Context::default(), json!([])).unwrap();
+        let port = old.port;
+        // The old server goes a moment after the new one starts, as on a settings change.
+        let going = thread::spawn(move || {
+            thread::sleep(std::time::Duration::from_millis(150));
+            drop(old);
+        });
+        let new = McpServer::start(port, "secret2".into(), egui::Context::default(), json!([]));
+        going.join().unwrap();
+        assert_eq!(new.map(|s| s.port).ok(), Some(port));
+    }
 
     /// Every request gets an answer, busy or refused; notifications don't.
     #[test]

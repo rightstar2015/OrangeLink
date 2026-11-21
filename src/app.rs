@@ -506,6 +506,8 @@ struct ClipExports {
     /// How far the clip being written is, 0..=1 as `f32` bits.
     progress: Arc<std::sync::atomic::AtomicU32>,
     queue: std::collections::VecDeque<(String, String, crate::config::ExportPreset)>,
+    /// The clip being written: item, clip and preset name, for its export record.
+    current: Option<(String, String, String)>,
 }
 
 pub enum Confirmed {
@@ -1370,6 +1372,7 @@ impl App {
         self.pending_media = None;
         self.cancel_clip_queue();
         self.clips.rx = None;
+        self.clips.current = None;
         self.cancel_dup_search();
         // A frame for this library must not be imported into the next one.
         self.cancel_file_jobs(jobs::JobKind::Capture);
@@ -2438,6 +2441,11 @@ impl App {
             preset,
             subtitles,
         };
+        // Written before with this preset: said, and written again (a new name).
+        if let Some(prev) = c.exported_with(&job.preset.name) {
+            note = if prev.path.is_file() { t!("（這個片段之前已經用這個預設組輸出過，會另存一份）") } else { note };
+        }
+        self.clips.current = Some((id.to_string(), cid.to_string(), job.preset.name.clone()));
         let suffix = if job.vertical() { "_9x16" } else { "" };
         let out = unique_path(&dir.join(format!("{}_{}{suffix}.{}", sanitize_file_name(&it.name), sanitize_file_name(&c.name), job.ext())));
         let name = c.name.clone();
@@ -2472,9 +2480,13 @@ impl App {
             Reply::Lost => Err(crate::i18n::tr(state::LOST).to_string()),
         };
         self.clips.rx = None;
+        let current = self.clips.current.take();
         match result {
             Ok((path, import, encoder)) => {
                 crate::log::info("clip", format!("{}（{encoder}）", path.display()));
+                if let Some((id, cid, preset)) = current {
+                    self.record_clip_export(&id, &cid, preset, path.clone());
+                }
                 if import {
                     // Related to the item it was cut from, once imported.
                     if let (Some(src), Some(key)) = (self.links.clips.remove(&path), importer::path_key(&path)) {
@@ -2495,6 +2507,19 @@ impl App {
             let Some((id, cid, preset)) = self.clips.queue.pop_front() else { break };
             self.export_clip(&id, &cid, preset);
         }
+    }
+
+    /// Notes on the clip that it was written to `path` (not an undo step: the
+    /// file is there whatever is undone).
+    fn record_clip_export(&mut self, id: &str, cid: &str, preset: String, path: PathBuf) {
+        let Some(lib) = &mut self.lib else { return };
+        let Some(c) = lib.items.get_mut(id).and_then(|it| it.clips.iter_mut().find(|c| c.id == cid)) else { return };
+        c.exported.push(crate::model::ClipExport { at: chrono::Utc::now().timestamp(), preset, path });
+        // A clip exported many times keeps its last 20.
+        if c.exported.len() > 20 {
+            c.exported.remove(0);
+        }
+        lib.touch(id);
     }
 
     /// The clip export under way, for the status bar's jobs list.
@@ -3959,7 +3984,7 @@ mod tests {
 
     #[test]
     fn up_down_and_brackets_go_through_clips_in_time_order() {
-        let clip = |id: &str, start: f64| Clip { id: id.into(), name: id.into(), start, end: start + 10.0, crop_x: None, note: None, score: None };
+        let clip = |id: &str, start: f64| Clip { id: id.into(), name: id.into(), start, end: start + 10.0, ..Default::default() };
         // Listed out of order, as after sorting by score.
         let clips = [clip("c", 300.0), clip("a", 10.0), clip("b", 120.0)];
         let at = |n: Option<usize>| n.map(|n| clips[n].id.as_str());
@@ -4969,6 +4994,36 @@ mod tests {
         if let Some(run) = app.import.take() {
             run.cancel.store(true, Ordering::Relaxed);
         }
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Nothing showed whether a clip had been exported, so the same Short
+    /// was written twice. A finished export is noted on the clip.
+    #[test]
+    fn a_finished_clip_export_is_noted_on_the_clip() {
+        let root = std::env::temp_dir().join(format!("orangelink-exported-{}", crate::model::new_id()));
+        let ctx = egui::Context::default();
+        let mut app = App::with_config(&ctx, Config::default());
+        let mut lib = Library::create(&root).unwrap();
+        let mut video: Item = serde_json::from_value(serde_json::json!({
+            "id": "v", "name": "v", "file_name": "v.mp4", "ext": "mp4", "kind": "video", "size": 1,
+            "width": 1920, "height": 1080, "added_at": 0, "modified_at": 0
+        }))
+        .unwrap();
+        video.clips.push(Clip { id: "c".into(), name: "開場".into(), start: 0.0, end: 5.0, ..Default::default() });
+        lib.insert_item(video);
+        app.lib = Some(lib);
+        let (tx, rx) = std::sync::mpsc::channel();
+        app.clips.rx = Some(rx);
+        app.clips.current = Some(("v".into(), "c".into(), "Shorts".into()));
+        let out = root.join("v_開場_9x16.mp4");
+        tx.send(Ok((out.clone(), false, "x264"))).unwrap();
+        app.poll_clip_export(&ctx);
+        let clip = &app.lib.as_ref().unwrap().items["v"].clips[0];
+        assert_eq!(clip.exported.len(), 1);
+        assert_eq!(clip.exported_with("Shorts").map(|e| &e.path), Some(&out));
+        assert!(clip.exported_with("原比例").is_none());
+        assert!(app.clips.current.is_none());
         let _ = std::fs::remove_dir_all(&root);
     }
 

@@ -128,6 +128,25 @@ pub struct Clip {
     /// How strongly a candidate stood out, for sorting by it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub score: Option<f32>,
+    /// Each time the clip was written to a file, oldest first.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub exported: Vec<ClipExport>,
+}
+
+/// One export of a clip: when, with which preset, to where.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct ClipExport {
+    /// Unix seconds.
+    pub at: i64,
+    pub preset: String,
+    pub path: PathBuf,
+}
+
+impl Clip {
+    /// The last export with `preset`, if any.
+    pub fn exported_with(&self, preset: &str) -> Option<&ClipExport> {
+        self.exported.iter().rev().find(|e| e.preset == preset)
+    }
 }
 
 impl Item {

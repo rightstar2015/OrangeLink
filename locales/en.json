@@ -1419,5 +1419,7 @@
  "📋 複製為 YouTube 章節": "📋 Copy as YouTube chapters",
  "把保留的片段依開始時間寫成章節（第一個是 0:00），貼到影片說明": "Kept clips as chapters by start time (the first at 0:00), to paste into the video description",
  "已複製 YouTube 章節": "YouTube chapters copied",
- "已複製，但 YouTube 需要至少 3 個章節、每段至少 10 秒才會顯示": "Copied, but YouTube shows chapters only with at least 3, each 10 s or longer"
+ "已複製，但 YouTube 需要至少 3 個章節、每段至少 10 秒才會顯示": "Copied, but YouTube shows chapters only with at least 3, each 10 s or longer",
+ "（這個片段之前已經用這個預設組輸出過，會另存一份）": "(This clip was exported with this preset before; another copy is written)",
+ "已輸出 {n} 次，最近一次：{preset}\n\n{list}": "Exported {n} times, last with {preset}\n\n{list}"
 }

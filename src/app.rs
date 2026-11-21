@@ -806,6 +806,9 @@ pub struct App {
     pub chat_keywords_draft: Option<String>,
     /// Whether the currently open modal dialog's text input already received initial focus.
     pub dialog_focused: bool,
+    /// A text box had the keyboard at the end of the last frame. egui drops that
+    /// focus as soon as Esc arrives, before `handle_keys` can see it was typing.
+    typing: bool,
     /// Active keyboard focus item (extends Shift+arrow range from `anchor`).
     caret: Option<String>,
 }
@@ -986,6 +989,7 @@ impl App {
             crop_drag_before: None,
             chat_keywords_draft: None,
             dialog_focused: false,
+            typing: false,
             caret: None,
         }
     }
@@ -1747,6 +1751,11 @@ impl App {
             return;
         }
         use egui::Key;
+        // Esc in a text box only leaves the box (the box itself cancels an edit); it
+        // doesn't also close the preview, clear the selection or close a window.
+        if self.typing && ctx.input(|i| i.key_pressed(Key::Escape)) {
+            return;
+        }
         // The mouse's side buttons go back and forward even while typing in the search box.
         let (side_back, side_fwd) = ctx.input(|i| (i.pointer.button_pressed(egui::PointerButton::Extra1), i.pointer.button_pressed(egui::PointerButton::Extra2)));
         let (alt_back, alt_fwd) = if ctx.wants_keyboard_input() {
@@ -3222,6 +3231,7 @@ impl eframe::App for App {
         self.process_actions(ctx);
         self.track_structure();
         self.track_history();
+        self.typing = ctx.wants_keyboard_input();
         self.maybe_drag_out(ctx, frame);
         self.process_thumb_wants();
         self.evict_thumbs();
@@ -4070,6 +4080,38 @@ mod tests {
         quiet.poll_update_check();
         assert_eq!(quiet.update.new_version(), Some("v9.9.9"));
         assert!(quiet.dialog.is_none());
+    }
+
+    /// Esc in the search box, a tag or note field, or a settings field.
+    #[test]
+    fn esc_in_a_text_box_leaves_the_box_and_keeps_the_selection() {
+        let esc_after_typing = |typing_was_noted: bool| {
+            let ctx = egui::Context::default();
+            let mut app = App::with_config(&ctx, Config::default());
+            app.visible = vec!["a".into()];
+            app.selected.insert("a".into());
+            let mut text = String::new();
+            let frame = |events: Vec<egui::Event>| egui::RawInput { events, ..Default::default() };
+            for _ in 0..2 {
+                let _ = ctx.run(frame(Vec::new()), |ctx| {
+                    egui::CentralPanel::default().show(ctx, |ui| ui.text_edit_singleline(&mut text).request_focus());
+                });
+            }
+            assert!(ctx.wants_keyboard_input(), "the box has the keyboard");
+            if typing_was_noted {
+                app.typing = ctx.wants_keyboard_input();
+            }
+            let esc = egui::Event::Key { key: egui::Key::Escape, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::NONE };
+            let _ = ctx.run(frame(vec![esc]), |ctx| {
+                app.handle_keys(ctx);
+                app.process_actions(ctx);
+            });
+            app.selected.contains("a")
+        };
+        assert!(esc_after_typing(true));
+        // What happened before: egui has dropped the box's focus by the time the keys
+        // are handled, so the Esc also cleared the selection.
+        assert!(!esc_after_typing(false), "egui keeps the focus through Esc now: `typing` can go");
     }
 
     /// An import under way, fed by the test instead of an importer thread.

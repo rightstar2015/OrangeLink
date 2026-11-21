@@ -10,14 +10,34 @@ use crate::{
 use std::{collections::HashSet, fmt::Write};
 
 fn esc(s: &str) -> String {
+    // XML 1.0 forbids most control characters even escaped; one of them in a
+    // title makes Premiere reject the whole file.
+    let s: String = s.chars().filter(|c| !is_xml_illegal(*c)).collect();
     s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;").replace('\'', "&apos;")
 }
 
-/// `file://localhost/F%3a/dir/a%20b.mp4`, the form Premiere writes itself.
+fn is_xml_illegal(c: char) -> bool {
+    matches!(c, '\0'..='\x08' | '\x0B' | '\x0C' | '\x0E'..='\x1F' | '\u{FFFE}' | '\u{FFFF}')
+}
+
+/// `file://localhost/F%3a/dir/a%20b.mp4`, the form Premiere writes itself;
+/// a network path `\\nas\share\a.mp4` is `file://nas/share/a.mp4`.
 fn path_url(path: &std::path::Path) -> String {
-    let s = path.to_string_lossy().replace('\\', "/");
-    let mut out = String::from("file://localhost/");
-    for b in s.trim_start_matches('/').bytes() {
+    let raw = path.to_string_lossy();
+    // `\\?\` long-path prefixes mean nothing to Premiere.
+    let raw = match raw.strip_prefix(r"\\?\UNC\") {
+        Some(rest) => format!(r"\\{rest}"),
+        None => raw.strip_prefix(r"\\?\").unwrap_or(&raw).to_string(),
+    };
+    let s = raw.replace('\\', "/");
+    let (mut out, rest) = match s.strip_prefix("//") {
+        Some(unc) => {
+            let (host, rest) = unc.split_once('/').unwrap_or((unc, ""));
+            (format!("file://{host}/"), rest.to_string())
+        }
+        None => ("file://localhost/".to_string(), s.trim_start_matches('/').to_string()),
+    };
+    for b in rest.bytes() {
         if b.is_ascii_alphanumeric() || b"-._~/".contains(&b) {
             out.push(b as char);
         } else if b == b':' {
@@ -259,7 +279,9 @@ pub fn build_xml(lib: &Library, ids: &[String], project: &str, seq: Sequences) -
     }
     // Sequences: in the order asked for, falling back to when items were added.
     let mut ordered: Vec<(&Item, usize)> = ids.iter().filter_map(|id| items.iter().find(|i| i.id == *id).map(|i| (*i, files[i.id.as_str()]))).collect();
-    ordered.dedup_by_key(|(i, _)| i.id.clone());
+    // An id asked for twice, next to each other or not, is placed once.
+    let mut placed_ids = HashSet::new();
+    ordered.retain(|(i, _)| placed_ids.insert(i.id.clone()));
     if seq.sequence {
         sequence_xml(&mut out, &format!("{project} 片段"), "sequence-1", &placed(&ordered, false), seq.gap, (1920, 1080), false);
     }
@@ -349,8 +371,16 @@ mod tests {
     }
 
     #[test]
+    fn control_characters_that_xml_forbids_are_left_out_of_names() {
+        assert_eq!(esc("a\u{1}b\u{8}<c>\td\u{FFFF}"), "ab&lt;c&gt;\td");
+    }
+
+    #[test]
     fn urls_and_rates() {
         assert_eq!(path_url(std::path::Path::new(r"F:\素材\a b.mp4")), "file://localhost/F%3a/%E7%B4%A0%E6%9D%90/a%20b.mp4");
+        assert_eq!(path_url(std::path::Path::new(r"\\nas\share\素材\a.mp4")), "file://nas/share/%E7%B4%A0%E6%9D%90/a.mp4");
+        assert_eq!(path_url(std::path::Path::new(r"\\?\UNC\nas\share\a.mp4")), "file://nas/share/a.mp4");
+        assert_eq!(path_url(std::path::Path::new(r"\\?\F:\a.mp4")), "file://localhost/F%3a/a.mp4");
         assert_eq!(rate(Some(29.97)), (30, true));
         assert_eq!(rate(Some(25.0)), (25, false));
         assert_eq!(rate(None), (30, false));

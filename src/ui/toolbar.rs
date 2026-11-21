@@ -71,10 +71,10 @@ impl App {
     fn search_suggestions(&mut self, ui: &mut Ui, search: &egui::Response) {
         let id = ui.make_persistent_id("search-suggestions");
         let has_any = !self.config.recent_searches.is_empty() || !self.config.pinned_searches.is_empty();
-        if has_any && (search.gained_focus() || search.clicked()) {
+        if has_any && (search.gained_focus() || search.clicked() || (search.changed() && search.has_focus())) {
             ui.memory_mut(|m| m.open_popup(id));
         }
-        if !has_any || !ui.memory(|m| m.is_popup_open(id)) {
+        if !ui.memory(|m| m.is_popup_open(id)) {
             return;
         }
         let typed = self.search.trim().to_lowercase();
@@ -82,6 +82,9 @@ impl App {
         let pinned: Vec<String> = self.config.pinned_searches.iter().filter(|s| wanted(s)).cloned().collect();
         let recent: Vec<String> = self.config.recent_searches.iter().filter(|s| wanted(s)).cloned().collect();
         if pinned.is_empty() && recent.is_empty() {
+            // Closed, not left open with nothing drawn: an open popup takes Esc and
+            // the next click. Typing opens it again.
+            ui.memory_mut(|m| m.close_popup());
             return;
         }
         enum Do {
@@ -585,6 +588,24 @@ fn swatch(ui: &mut Ui, c: [u8; 3], chosen: bool) -> egui::Response {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn search_suggestions_with_nothing_to_show_are_closed_not_hidden() {
+        let ctx = egui::Context::default();
+        let mut app = crate::app::App::with_config(&ctx, crate::config::Config::default());
+        app.config.recent_searches = vec!["貓".into()];
+        app.search = "狗".into();
+        let mut text = String::new();
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                let resp = ui.text_edit_singleline(&mut text);
+                let id = ui.make_persistent_id("search-suggestions");
+                ui.memory_mut(|m| m.open_popup(id));
+                app.search_suggestions(ui, &resp);
+            });
+        });
+        assert!(!ctx.memory(|m| m.any_popup_open()), "an empty popup is still open");
+    }
 
     #[test]
     fn formats_are_grouped_by_kind_most_used_first() {

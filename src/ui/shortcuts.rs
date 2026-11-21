@@ -43,6 +43,7 @@ use Scope::*;
 pub const SHORTCUTS: &[Shortcut] = &[
     s(General, "? / F1", tk!("快速鍵一覽"), true),
     s(General, "Ctrl + F", tk!("搜尋"), true),
+    s(General, "Ctrl + K", tk!("前往資料夾、智慧資料夾、標籤或執行指令（有選取時也能直接加入資料夾或標籤）"), false),
     s(General, "Alt + ← / Alt + →", tk!("上一個 / 下一個檢視（資料夾、標籤、搜尋、相似結果…，含捲動位置與選取；滑鼠側鍵也可以）"), false),
     s(General, "Ctrl + Z / Ctrl + Y", tk!("復原 / 重做（標籤、評分、名稱、資料夾、智慧資料夾、標籤群組、欄位等修改，含 AI 的修改）"), false),
     s(General, "Ctrl + C", tk!("複製選取的檔案（可貼到檔案總管、Premiere）"), false),

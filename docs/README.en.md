@@ -98,6 +98,7 @@ General:
 | --- | --- |
 | ? / F1 | Keyboard shortcuts |
 | Ctrl + F | Search |
+| Ctrl + K | Go to a folder, smart folder or tag, or run a command (with items selected, also file or tag them) |
 | Alt + ← / Alt + → | Previous / next view (folders, tags, searches, similar results…, with scroll position and selection; mouse side buttons work too) |
 | Ctrl + Z / Ctrl + Y | Undo / redo (changes to tags, ratings, names, folders, smart folders, tag groups, fields and so on, including the AI's) |
 | Ctrl + C | Copy the selected files (paste into File Explorer, Premiere) |

@@ -1927,7 +1927,9 @@ impl App {
     }
 
     fn handle_keys(&mut self, ctx: &egui::Context) {
-        if self.dialog.is_some() {
+        // The side-by-side view takes only Esc (in `compare_ui`): Delete or the
+        // arrows mustn't act on the library hidden behind it.
+        if self.dialog.is_some() || self.compare.is_some() {
             return;
         }
         use egui::Key;

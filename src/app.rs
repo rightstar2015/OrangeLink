@@ -25,7 +25,7 @@ use crate::{
     library::{Library, LibraryLock, Originals},
     loader::{Kind, Loader},
     media,
-    model::{Item, MediaKind, SavedFilter, WatchFolder},
+    model::{Clip, Item, MediaKind, SavedFilter, WatchFolder},
 };
 use eframe::egui;
 use filter::{in_view, Criteria};
@@ -2111,16 +2111,32 @@ impl App {
             self.act(Action::CloseViewer);
             return;
         }
-        // Another item: Ctrl+arrow, PageUp/PageDown, or the up and down arrows.
-        let item_step = if (left && mods.command) || k(Key::PageUp) || k(Key::ArrowUp) {
+        // Another item: Ctrl+arrow or PageUp/PageDown. The up and down arrows
+        // once did this too, and one stray press while marking a clip swapped
+        // the video; they go through the clips now.
+        let item_step = if (left && mods.command) || k(Key::PageUp) {
             -1
-        } else if (right && mods.command) || k(Key::PageDown) || k(Key::ArrowDown) {
+        } else if (right && mods.command) || k(Key::PageDown) {
             1
         } else {
             0
         };
         if item_step != 0 {
             self.act(Action::ViewerStep(item_step));
+            return;
+        }
+        // The previous / next clip (↑ ↓ or [ ]), played; Y keeps a highlight
+        // candidate and N deletes it, each going on to the next clip.
+        let clip_step = if plain && (k(Key::ArrowUp) || k(Key::OpenBracket)) {
+            -1
+        } else if plain && (k(Key::ArrowDown) || k(Key::CloseBracket)) {
+            1
+        } else {
+            0
+        };
+        let (keep, drop) = (plain && k(Key::Y), plain && k(Key::N));
+        if clip_step != 0 || keep || drop {
+            self.step_clip(clip_step, keep, drop);
             return;
         }
         let Some(p) = &mut self.player else { return };
@@ -2191,6 +2207,38 @@ impl App {
             self.seek_flash = Some((text, self.now));
             ctx.request_repaint();
         }
+    }
+
+    /// Goes to the clip `dir` before or after the selected one (or the playhead),
+    /// selects and plays it. With `keep` / `drop` the selected clip is first kept
+    /// (a candidate becomes 精華 NN) or deleted, and the next one follows.
+    fn step_clip(&mut self, dir: i32, keep: bool, drop: bool) {
+        let Some(p) = &self.player else { return };
+        let (id, pos) = (p.id.clone(), p.position());
+        let Some(clips) = self.lib.as_ref().and_then(|l| l.items.get(&id)).map(|it| it.clips.clone()) else { return };
+        let current = (self.clip_ui.sel.len() == 1).then(|| self.clip_ui.sel.iter().next().cloned()).flatten();
+        let dir = if (keep || drop) && dir == 0 { 1 } else { dir };
+        let next = neighbour_clip(&clips, pos, current.as_deref(), dir).map(|n| clips[n].clone());
+        if let Some(cid) = current.filter(|_| keep || drop) {
+            if keep {
+                self.act(Action::KeepClip(id.clone(), cid));
+            } else {
+                self.act(Action::DeleteClips(id.clone(), vec![cid]));
+            }
+        }
+        let Some(c) = next else {
+            if !keep && !drop {
+                self.seek_flash = Some((t!("沒有其他片段").into(), self.now));
+            }
+            return;
+        };
+        self.clip_ui.sel = std::iter::once(c.id.clone()).collect();
+        self.clip_ui.anchor = Some(c.id.clone());
+        self.viewer_tab = ViewerTab::Clips;
+        if let Some(p) = &mut self.player {
+            p.play_range(c.start, c.end);
+        }
+        self.seek_flash = Some((c.name.clone(), self.now));
     }
 
     /// Makes the first of `ids` in display order the anchor for Shift-click and arrow keys.
@@ -3799,6 +3847,23 @@ fn unique_path(path: &std::path::Path) -> PathBuf {
         .unwrap()
 }
 
+/// The clip `dir` (−1 or 1) away in time order: from `current` when it is one
+/// of `clips`, else from the playhead `pos` (a clip starting at the playhead
+/// counts as passed, so 上一個 doesn't stop on the one being played).
+pub fn neighbour_clip(clips: &[Clip], pos: f64, current: Option<&str>, dir: i32) -> Option<usize> {
+    let mut order: Vec<usize> = (0..clips.len()).collect();
+    order.sort_by(|a, b| clips[*a].start.total_cmp(&clips[*b].start));
+    if let Some(at) = current.and_then(|cid| order.iter().position(|n| clips[*n].id == cid)) {
+        let to = at as i64 + dir as i64;
+        return usize::try_from(to).ok().and_then(|to| order.get(to)).copied();
+    }
+    if dir > 0 {
+        order.into_iter().find(|n| clips[*n].start > pos + 0.05)
+    } else {
+        order.into_iter().rev().find(|n| clips[*n].start < pos - 0.5)
+    }
+}
+
 /// The clip the in/out marks make: from the in mark (or the start) to the out mark,
 /// or else to the playhead when it is past the in mark, or else to the end.
 pub fn clip_from_marks(mark: (Option<f64>, Option<f64>), pos: f64, duration: f64) -> (f64, f64) {
@@ -3810,6 +3875,23 @@ pub fn clip_from_marks(mark: (Option<f64>, Option<f64>), pos: f64, duration: f64
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn up_down_and_brackets_go_through_clips_in_time_order() {
+        let clip = |id: &str, start: f64| Clip { id: id.into(), name: id.into(), start, end: start + 10.0, crop_x: None, note: None, score: None };
+        // Listed out of order, as after sorting by score.
+        let clips = [clip("c", 300.0), clip("a", 10.0), clip("b", 120.0)];
+        let at = |n: Option<usize>| n.map(|n| clips[n].id.as_str());
+        assert_eq!(at(neighbour_clip(&clips, 0.0, None, 1)), Some("a"));
+        assert_eq!(at(neighbour_clip(&clips, 125.0, None, 1)), Some("c"), "from the playhead");
+        assert_eq!(at(neighbour_clip(&clips, 125.0, None, -1)), Some("b"));
+        assert_eq!(at(neighbour_clip(&clips, 120.2, None, -1)), Some("a"), "the one just started is passed");
+        assert_eq!(at(neighbour_clip(&clips, 0.0, Some("b"), 1)), Some("c"), "from the selected clip");
+        assert_eq!(at(neighbour_clip(&clips, 0.0, Some("b"), -1)), Some("a"));
+        assert_eq!(neighbour_clip(&clips, 0.0, Some("c"), 1), None, "past the last");
+        assert_eq!(neighbour_clip(&clips, 0.0, Some("a"), -1), None);
+        assert_eq!(neighbour_clip(&[], 0.0, None, 1), None);
+    }
 
     #[test]
     fn deleting_for_good_says_what_happens_to_originals() {

@@ -223,12 +223,14 @@ fn parse_duration(s: &str) -> Option<f64> {
     Some(total)
 }
 
+/// A kind by its name in any interface language, so `type:` works whichever
+/// language the search help is shown in.
 fn kind_named(s: &str) -> Option<MediaKind> {
     match s {
-        "圖片" | "image" | "img" | "圖" => Some(MediaKind::Image),
-        "影片" | "video" | "視頻" => Some(MediaKind::Video),
-        "音訊" | "audio" | "音樂" | "聲音" => Some(MediaKind::Audio),
-        "其他" | "other" => Some(MediaKind::Other),
+        "圖片" | "image" | "img" | "圖" | "图片" | "图" | "画像" | "이미지" | "사진" => Some(MediaKind::Image),
+        "影片" | "video" | "視頻" | "视频" | "動画" | "동영상" | "비디오" => Some(MediaKind::Video),
+        "音訊" | "audio" | "音樂" | "聲音" | "音频" | "音乐" | "声音" | "音声" | "오디오" | "음악" => Some(MediaKind::Audio),
+        "其他" | "other" | "その他" | "기타" => Some(MediaKind::Other),
         _ => None,
     }
 }
@@ -252,7 +254,7 @@ fn special(word: &str) -> Special {
     if word == "★" {
         return Special::Incomplete;
     }
-    let numeric = [("rating", NumKey::Rating), ("★", NumKey::Rating), ("dur", NumKey::Duration), ("長度", NumKey::Duration), ("w", NumKey::Width), ("h", NumKey::Height)];
+    let numeric = [("rating", NumKey::Rating), ("★", NumKey::Rating), ("dur", NumKey::Duration), ("長度", NumKey::Duration), ("长度", NumKey::Duration), ("長さ", NumKey::Duration), ("길이", NumKey::Duration), ("w", NumKey::Width), ("h", NumKey::Height)];
     for (key, nk) in numeric {
         let Some(rest) = word.strip_prefix(key) else { continue };
         let found = [(">=", Cmp::Ge), ("<=", Cmp::Le), (">", Cmp::Gt), ("<", Cmp::Lt), ("=", Cmp::Eq), (":", Cmp::Eq), ("：", Cmp::Eq)]
@@ -270,13 +272,13 @@ fn special(word: &str) -> Special {
     }
     let Some((key, value)) = word.split_once([':', '：']) else { return Special::Plain };
     match key {
-        "ext" | "格式" => match value.trim_start_matches('.') {
+        "ext" | "格式" | "形式" | "형식" => match value.trim_start_matches('.') {
             "" => Special::Incomplete,
             ext => Special::Atom(Atom::Ext(ext.to_string())),
         },
-        "type" | "類型" if value.is_empty() => Special::Incomplete,
+        "type" | "類型" | "类型" | "種類" | "종류" if value.is_empty() => Special::Incomplete,
         // An unknown kind may still be a field called "type".
-        "type" | "類型" => kind_named(value).map_or(Special::Plain, |k| Special::Atom(Atom::Kind(k))),
+        "type" | "類型" | "类型" | "種類" | "종류" => kind_named(value).map_or(Special::Plain, |k| Special::Atom(Atom::Kind(k))),
         _ => Special::Plain,
     }
 }
@@ -571,6 +573,13 @@ mod tests {
         assert_eq!(h("直播"), ["開場動畫 草稿", "開場 動畫"]);
         assert_eq!(h("ext:mp4"), ["開場動畫 草稿"]);
         assert_eq!(h("type:影片"), ["開場動畫 草稿"]);
+        // The type names and keys of every interface language.
+        for q in ["type:video", "type:视频", "類型:動画", "종류:동영상", "種類:動画", "类型:视频"] {
+            assert_eq!(h(q), ["開場動畫 草稿"], "{q}");
+        }
+        assert_eq!(h("長さ>10m"), h("dur>10m"));
+        assert_eq!(h("길이>10m"), h("dur>10m"));
+        assert_eq!(h("形式:mp4"), h("ext:mp4"));
         assert_eq!(h("type:audio"), ["狗狗"]);
         assert_eq!(h("★>=4"), ["開場 動畫", "貓咪"]);
         assert_eq!(h("★4"), ["開場 動畫", "貓咪"]);

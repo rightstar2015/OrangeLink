@@ -127,17 +127,35 @@ pub fn make_thumbnail(img: &DynamicImage) -> DynamicImage {
 
 /// Opaque thumbnails are stored as JPEG (several times smaller); ones with
 /// transparency stay PNG. The file name stays the same: decoding sniffs content.
+///
+/// Written to a temporary file that replaces the thumbnail only once complete:
+/// a full disk or a crash leaves the old thumbnail, never half a new one, and a
+/// similarity search reading it meanwhile sees a whole file.
 pub fn save_thumbnail(img: &DynamicImage, path: &Path) -> anyhow::Result<()> {
+    use std::io::Write;
     let thumb = make_thumbnail(img);
     let rgba = thumb.to_rgba8();
-    if rgba.pixels().all(|p| p.0[3] == 255) {
-        let file = std::io::BufWriter::new(std::fs::File::create(path)?);
-        let rgb = DynamicImage::ImageRgba8(rgba).to_rgb8();
-        image::codecs::jpeg::JpegEncoder::new_with_quality(file, 85).encode_image(&rgb)?;
-    } else {
-        rgba.save_with_format(path, image::ImageFormat::Png)?;
+    let name = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+    let tmp = path.with_file_name(format!("{name}.{}.tmp", crate::model::new_id()));
+    let written = (|| -> anyhow::Result<()> {
+        let mut file = std::io::BufWriter::new(std::fs::File::create(&tmp)?);
+        if rgba.pixels().all(|p| p.0[3] == 255) {
+            let rgb = DynamicImage::ImageRgba8(rgba).to_rgb8();
+            image::codecs::jpeg::JpegEncoder::new_with_quality(&mut file, 85).encode_image(&rgb)?;
+        } else {
+            rgba.write_to(&mut file, image::ImageFormat::Png)?;
+        }
+        // Dropping a BufWriter would hide an error writing its last bytes.
+        file.flush()?;
+        // Closed before the rename: Windows won't rename a file that is open.
+        drop(file);
+        std::fs::rename(&tmp, path)?;
+        Ok(())
+    })();
+    if written.is_err() {
+        let _ = std::fs::remove_file(&tmp);
     }
-    Ok(())
+    written
 }
 
 pub fn fit_for_view(img: DynamicImage) -> DynamicImage {
@@ -213,6 +231,20 @@ pub fn extract_palette(img: &DynamicImage) -> Vec<PaletteColor> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_thumbnail_is_replaced_whole_and_leaves_no_temp_file() {
+        let dir = std::env::temp_dir().join(format!("orangelink-thumbsave-{}", crate::model::new_id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("_thumbnail.png");
+        save_thumbnail(&DynamicImage::ImageRgb8(image::RgbImage::from_pixel(8, 8, image::Rgb([255, 0, 0]))), &path).unwrap();
+        // Replaced while it exists (as when a thumbnail is rebuilt), with transparency this time.
+        save_thumbnail(&DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(8, 8, image::Rgba([0, 0, 255, 128]))), &path).unwrap();
+        assert_eq!(image::open(&path).unwrap().to_rgba8().get_pixel(0, 0).0, [0, 0, 255, 128]);
+        let names: Vec<_> = std::fs::read_dir(&dir).unwrap().flatten().map(|e| e.file_name()).collect();
+        assert_eq!(names, vec![std::ffi::OsString::from("_thumbnail.png")]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
     use image::{codecs::gif::GifEncoder, Delay, Frame, Rgba, RgbaImage};
 
     #[test]

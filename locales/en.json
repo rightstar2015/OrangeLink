@@ -1374,5 +1374,8 @@
  "時間軸顯示整場": "Show the whole video on the timeline",
  "放大時間軸（Ctrl＋滾輪，以游標為中心）": "Zoom in the timeline (Ctrl+wheel, around the cursor)",
  "縮小時間軸": "Zoom out the timeline",
- "整場；框起來的是時間軸上顯示的部分，拖曳移動": "The whole video; the box is the part shown on the timeline, drag to move it"
+ "整場；框起來的是時間軸上顯示的部分，拖曳移動": "The whole video; the box is the part shown on the timeline, drag to move it",
+ "無法設定縮圖：{e}": "Couldn't set the thumbnail: {e}",
+ "已把 {pos} 的畫面設為縮圖": "The frame at {pos} is now the thumbnail",
+ "把目前畫面設為這部影片的縮圖": "Use the current frame as this video's thumbnail"
 }

@@ -354,6 +354,8 @@ pub enum Action {
     Redo,
     /// Save the frame at `pos` seconds of a video as a new image item.
     CaptureFrame(String, f64),
+    /// Make the frame at `pos` seconds the video's thumbnail.
+    FrameAsThumbnail(String, f64),
     BackupsDialog,
     FindSimilar(String),
     FindDuplicates,

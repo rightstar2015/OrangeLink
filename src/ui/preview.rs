@@ -778,6 +778,9 @@ impl App {
                     if p.has_frames() && ui.button("📷").on_hover_text(t!("擷取目前畫面成圖片")).clicked() {
                         self.acts.borrow_mut().push(Action::CaptureFrame(p.id.clone(), pos));
                     }
+                    if p.has_frames() && ui.button("🖼").on_hover_text(t!("把目前畫面設為這部影片的縮圖")).clicked() {
+                        self.acts.borrow_mut().push(Action::FrameAsThumbnail(p.id.clone(), pos));
+                    }
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         let mut volume = p.volume;
                         ui.spacing_mut().slider_width = 80.0;

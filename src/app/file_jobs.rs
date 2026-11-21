@@ -31,12 +31,15 @@ pub struct FileCopy {
 }
 
 /// A frame being written to `out`; it is imported and linked to `id` when done.
+/// With `as_thumb`, it becomes `id`'s thumbnail instead, and the thread sends
+/// the thumbnail's palette.
 pub struct Capture {
     id: String,
     pos: f64,
     out: PathBuf,
-    rx: Receiver<Result<(), String>>,
+    rx: Receiver<Result<Vec<crate::model::PaletteColor>, String>>,
     cancel: Arc<AtomicBool>,
+    as_thumb: bool,
 }
 
 /// Copies each `(from, to)`, sending whether it worked; stops when `cancel` is set.
@@ -54,6 +57,19 @@ fn copy_files(files: Vec<(PathBuf, PathBuf)>, tx: Sender<bool>, cancel: Arc<Atom
         }
         ctx.request_repaint();
     }
+}
+
+/// Makes the frame at `pos` of `input` the thumbnail at `thumb`, by way of
+/// the full-size frame in `tmp` (removed after); returns the new palette.
+fn frame_to_thumbnail(ffmpeg: &Path, input: &Path, pos: f64, tmp: &Path, thumb: &Path, cancel: &AtomicBool) -> Result<Vec<crate::model::PaletteColor>, String> {
+    let made = write_frame(ffmpeg, input, pos, tmp, cancel).and_then(|()| crate::imaging::decode_file(tmp).map_err(|e| e.to_string()));
+    let _ = std::fs::remove_file(tmp);
+    let frame = made?;
+    if cancel.load(Ordering::Relaxed) {
+        return Err(t!("已取消").to_string());
+    }
+    crate::imaging::save_thumbnail(&frame, thumb).map_err(|e| e.to_string())?;
+    Ok(crate::imaging::extract_palette(&crate::imaging::make_thumbnail(&frame)))
 }
 
 /// Writes the frame at `pos` of `input` to `out`. At or past the end, where
@@ -216,6 +232,30 @@ impl App {
         result
     }
 
+    /// Starts making the video frame at `pos` the item's thumbnail.
+    pub(crate) fn frame_as_thumbnail(&mut self, id: &str, pos: f64) {
+        if let Err(e) = self.start_thumb_capture(id, pos) {
+            self.toast(t!("無法設定縮圖：{e}", e));
+        }
+    }
+
+    fn start_thumb_capture(&mut self, id: &str, pos: f64) -> Result<(), String> {
+        let lib = self.lib.as_ref().ok_or(t!("沒有開啟資源庫"))?;
+        let ff = self.ffmpeg_dir.clone().ok_or(t!("找不到 FFmpeg"))?;
+        let it = lib.items.get(id).ok_or(t!("找不到項目"))?;
+        let (input, thumb) = (lib.file_path(it), lib.thumb_path(id));
+        let out = std::env::temp_dir().join(format!("orangelink-frame-{}.png", crate::model::new_id()));
+        let (tx, rx) = channel();
+        let cancel = Arc::new(AtomicBool::new(false));
+        let (o, c, ctx) = (out.clone(), cancel.clone(), self.egui_ctx.clone());
+        std::thread::spawn(move || {
+            let _ = tx.send(frame_to_thumbnail(&ff, &input, pos, &o, &thumb, &c));
+            ctx.request_repaint();
+        });
+        self.files.captures.push(Capture { id: id.to_string(), pos, out, rx, cancel, as_thumb: true });
+        Ok(())
+    }
+
     fn start_capture(&mut self, id: &str, pos: f64) -> Result<PathBuf, String> {
         let lib = self.lib.as_ref().ok_or(t!("沒有開啟資源庫"))?;
         let ff = self.ffmpeg_dir.clone().ok_or(t!("找不到 FFmpeg"))?;
@@ -235,10 +275,10 @@ impl App {
         let cancel = Arc::new(AtomicBool::new(false));
         let (o, c, ctx) = (out.clone(), cancel.clone(), self.egui_ctx.clone());
         std::thread::spawn(move || {
-            let _ = tx.send(write_frame(&ff, &input, pos, &o, &c));
+            let _ = tx.send(write_frame(&ff, &input, pos, &o, &c).map(|()| Vec::new()));
             ctx.request_repaint();
         });
-        self.files.captures.push(Capture { id: id.to_string(), pos, out: out.clone(), rx, cancel });
+        self.files.captures.push(Capture { id: id.to_string(), pos, out: out.clone(), rx, cancel, as_thumb: false });
         Ok(out)
     }
 
@@ -255,7 +295,18 @@ impl App {
             };
             let cap = self.files.captures.remove(i);
             match result {
-                Ok(()) => {
+                Ok(palette) if cap.as_thumb => {
+                    self.thumbs.tex.remove(&cap.id);
+                    self.thumbs.failed.remove(&cap.id);
+                    if let Some(it) = self.lib.as_mut().and_then(|l| l.items.get_mut(&cap.id)) {
+                        it.palette = palette;
+                    }
+                    if let Some(lib) = self.lib.as_mut() {
+                        lib.touch(&cap.id);
+                    }
+                    self.toast(t!("已把 {pos} 的畫面設為縮圖", pos = crate::media::fmt_duration(cap.pos)));
+                }
+                Ok(_) => {
                     if let Some(key) = importer::path_key(&cap.out) {
                         self.links.link_to.insert(key, LinkTo::Item(cap.id.clone()));
                     }
@@ -306,7 +357,7 @@ mod tests {
         let mut app = App::with_config(&ctx, crate::config::Config::default());
         let (tx, rx) = std::sync::mpsc::channel();
         let cancel = Arc::new(AtomicBool::new(false));
-        app.files.captures.push(Capture { id: "v".into(), pos: 1.0, out: std::env::temp_dir().join("never.png"), rx, cancel });
+        app.files.captures.push(Capture { id: "v".into(), pos: 1.0, out: std::env::temp_dir().join("never.png"), rx, cancel, as_thumb: false });
         app.cancel_file_jobs(jobs::JobKind::Capture);
         tx.send(Err("已取消".into())).unwrap();
         app.poll_captures(&ctx);
@@ -336,6 +387,32 @@ mod tests {
         }
         assert!(write_frame(&ff, &dir.join("missing.mp4"), 1.0, &dir.join("x.png"), &no).is_err());
         assert!(!dir.join("x.png").exists());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// 設為縮圖 replaces the item's thumbnail with the frame shown, and
+    /// leaves no full-size frame behind.
+    #[test]
+    fn the_frame_shown_becomes_the_thumbnail() {
+        let Some(ff) = crate::media::ffmpeg_for_test("the_frame_shown_becomes_the_thumbnail") else { return };
+        let dir = std::env::temp_dir().join(format!("orangelink-thumbframe-{}", crate::model::new_id()));
+        fs::create_dir_all(&dir).unwrap();
+        let src = dir.join("src.mp4");
+        let made = media::tool(&ff, "ffmpeg")
+            .args(["-v", "error", "-f", "lavfi", "-i", "testsrc2=size=1280x720:rate=30:duration=3", "-c:v", "libx264", "-preset", "ultrafast"])
+            .arg(&src)
+            .status()
+            .unwrap();
+        assert!(made.success());
+        let (tmp, thumb) = (dir.join("frame.png"), dir.join("_thumbnail.png"));
+        fs::write(&thumb, b"old").unwrap();
+        let palette = frame_to_thumbnail(&ff, &src, 1.5, &tmp, &thumb, &AtomicBool::new(false)).unwrap();
+        assert!(!palette.is_empty());
+        assert!(!tmp.exists(), "the full-size frame is removed");
+        let img = crate::imaging::decode_file(&thumb).unwrap();
+        assert!(img.width() <= crate::imaging::THUMB_SIDE && img.width() > 0, "{}", img.width());
+        assert!(frame_to_thumbnail(&ff, &dir.join("missing.mp4"), 1.0, &tmp, &thumb, &AtomicBool::new(false)).is_err());
+        assert!(crate::imaging::decode_file(&thumb).is_ok(), "a failed try keeps the thumbnail it had");
         let _ = fs::remove_dir_all(&dir);
     }
 

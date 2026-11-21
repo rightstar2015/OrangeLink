@@ -100,6 +100,23 @@ fn inspector_section(ui: &mut Ui, collapsed: &[String], title: &'static str, add
     (open, added)
 }
 
+/// `1920×1080 · 24.0 MB · 12:34 · MP4`: what the 檔案資訊 section says most
+/// often, on one line under the name.
+fn summary_line(it: &crate::model::Item) -> String {
+    let mut parts = Vec::new();
+    if it.width > 0 && it.height > 0 {
+        parts.push(format!("{}×{}", it.width, it.height));
+    }
+    parts.push(human_size(it.size));
+    if let Some(d) = it.duration.filter(|d| d.is_finite() && *d > 0.0) {
+        parts.push(fmt_duration(d));
+    }
+    if !it.ext.is_empty() {
+        parts.push(it.ext.to_uppercase());
+    }
+    parts.join(" · ")
+}
+
 impl App {
     pub fn inspector(&mut self, ctx: &egui::Context) {
         egui::SidePanel::right("inspector")
@@ -107,6 +124,15 @@ impl App {
             .default_width(300.0)
             .width_range(240.0..=520.0)
             .show(ctx, |ui| {
+                // One item's actions stay at the bottom, however far its
+                // sections scroll.
+                if let (1, Some(id)) = (self.selected.len(), self.selected.iter().next().cloned()) {
+                    egui::TopBottomPanel::bottom("inspector-actions").show_separator_line(true).show_inside(ui, |ui| {
+                        ui.add_space(6.0);
+                        self.inspector_actions(ui, &id);
+                        ui.add_space(2.0);
+                    });
+                }
                 ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
                     ui.add_space(8.0);
                     match self.selected.len() {
@@ -145,14 +171,14 @@ impl App {
         let Some(id) = self.selected.iter().next().cloned() else { return };
         let thumb = self.preview_tex(&id).or_else(|| self.thumb_tex(&id));
         let progress = self.preview_progress(&id);
-        let in_trash = self.view == View::Trash;
         let stats = self.cached_sidebar_stats();
         let all_tags = stats.tag_counts;
         let folders = stats.folder_flat;
-        let (field_names, name) = match &self.lib {
+        let (field_names, name, summary) = match &self.lib {
             Some(lib) => (
                 lib.meta.fields.clone(),
                 lib.items.get(&id).map(|i| i.name.clone()).unwrap_or_default(),
+                lib.items.get(&id).map(summary_line).unwrap_or_default(),
             ),
             None => return,
         };
@@ -198,6 +224,7 @@ impl App {
                     pending.push(Action::StartRename(id.clone(), true));
                 }
             }
+            ui.label(RichText::new(&summary).small().weak());
         }
 
         // The sidebar's ＋ opens the section to reach the box; keep focus_tag for next frame.
@@ -294,7 +321,9 @@ impl App {
         let note_changed = ui
             .scope(|ui| {
                 ui.visuals_mut().extreme_bg_color = tokens().bg_elevated;
-                ui.add(TextEdit::multiline(&mut note_draft).desired_rows(3).desired_width(f32::INFINITY)).changed()
+                // An empty note takes one line, not three.
+                let rows = if note_draft.is_empty() { 1 } else { 3 };
+                ui.add(TextEdit::multiline(&mut note_draft).desired_rows(rows).desired_width(f32::INFINITY)).changed()
             })
             .inner;
         if note_changed {
@@ -467,16 +496,30 @@ impl App {
         }
 
         ui.add_space(10.0);
-        let is_video = it.kind == MediaKind::Video;
+
+        if let Some(before) = before {
+            lib.touch(&id);
+            self.record_undo(vec![before], true);
+        }
+        for a in pending {
+            self.act(a);
+        }
+    }
+
+    /// 剪輯工作台, 開啟, 檔案總管 and 🗑 for the one selected item.
+    fn inspector_actions(&mut self, ui: &mut Ui, id: &str) {
+        let Some(kind) = self.lib.as_ref().and_then(|l| l.items.get(id)).map(|it| it.kind) else { return };
+        let in_trash = self.view == View::Trash;
+        let mut pending = Vec::new();
         ui.horizontal_wrapped(|ui| {
-            if is_video && ui.button(RichText::new(t!("✂ 剪輯工作台")).color(accent())).clicked() {
-                pending.push(Action::OpenViewer(id.clone()));
+            if kind == MediaKind::Video && ui.button(RichText::new(t!("✂ 剪輯工作台")).color(accent())).clicked() {
+                pending.push(Action::OpenViewer(id.to_string()));
             }
             if ui.button(t!("開啟")).clicked() {
-                pending.push(Action::OpenExternal(id.clone()));
+                pending.push(Action::OpenExternal(id.to_string()));
             }
             if ui.button(t!("檔案總管")).clicked() {
-                pending.push(Action::ShowInExplorer(id.clone()));
+                pending.push(Action::ShowInExplorer(id.to_string()));
             }
             if in_trash {
                 if ui.button(t!("還原")).clicked() {
@@ -486,11 +529,6 @@ impl App {
                 pending.push(Action::TrashSelected);
             }
         });
-
-        if let Some(before) = before {
-            lib.touch(&id);
-            self.record_undo(vec![before], true);
-        }
         for a in pending {
             self.act(a);
         }
@@ -664,7 +702,24 @@ impl App {
 
 #[cfg(test)]
 mod tests {
-    use super::tag_suggestions;
+    use super::{summary_line, tag_suggestions};
+
+    /// Size, length and format sat at the bottom of 檔案資訊, below every
+    /// other section.
+    #[test]
+    fn the_summary_line_under_the_name_says_what_the_item_is() {
+        let item = |v: serde_json::Value| -> crate::model::Item {
+            let mut base = serde_json::json!({
+                "id": "i", "name": "n", "file_name": "n.bin", "ext": "mp4", "kind": "video", "size": 25_165_824,
+                "width": 1920, "height": 1080, "added_at": 0, "modified_at": 0, "duration": 754.0
+            });
+            base.as_object_mut().unwrap().extend(v.as_object().unwrap().clone());
+            serde_json::from_value(base).unwrap()
+        };
+        assert_eq!(summary_line(&item(serde_json::json!({}))), "1920×1080 · 24.0 MB · 12:34 · MP4");
+        assert_eq!(summary_line(&item(serde_json::json!({"kind": "audio", "ext": "wav", "width": 0, "height": 0, "size": 512, "duration": 3.0}))), "512 B · 0:03 · WAV");
+        assert_eq!(summary_line(&item(serde_json::json!({"kind": "other", "ext": "", "width": 0, "duration": null, "size": 0}))), "0 B");
+    }
 
     #[test]
     fn suggestions_put_prefixes_first_then_the_most_used() {

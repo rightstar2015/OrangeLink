@@ -1369,5 +1369,10 @@
  "在播放位置拆開": "Split at playhead",
  "播放位置不在這句裡時，從中間拆開": "Splits in the middle when the playhead isn't within this line",
  "刪除這句": "Delete line",
- "無法儲存字幕：{e}": "Could not save the subtitles: {e}"
+ "無法儲存字幕：{e}": "Could not save the subtitles: {e}",
+ "整場": "Whole",
+ "時間軸顯示整場": "Show the whole video on the timeline",
+ "放大時間軸（Ctrl＋滾輪，以游標為中心）": "Zoom in the timeline (Ctrl+wheel, around the cursor)",
+ "縮小時間軸": "Zoom out the timeline",
+ "整場；框起來的是時間軸上顯示的部分，拖曳移動": "The whole video; the box is the part shown on the timeline, drag to move it"
 }

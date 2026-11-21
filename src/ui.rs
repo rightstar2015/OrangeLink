@@ -12,7 +12,7 @@ mod toolbar;
 
 pub(crate) use theme::*;
 
-pub use preview::SignalPlotCache;
+pub use preview::{SignalPlotCache, TimeView};
 pub use sidebar::SidebarStats;
 pub use smooth_scroll::Glide;
 pub use toolbar::FormatGroups;

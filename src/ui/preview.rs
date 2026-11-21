@@ -22,23 +22,29 @@ impl SignalPlotCache {
         self.loud.clear();
     }
 
-    fn update(&mut self, id: &str, cols: usize, chat: Option<&[f32]>, loud: Option<&[f32]>) {
-        let key = (id.to_string(), cols, chat.map_or(0, <[f32]>::len), loud.map_or(0, <[f32]>::len));
+    /// Downsamples the part of the curves `view` shows (of a `dur`-second
+    /// video) to `cols` columns, when any of those changed.
+    fn update(&mut self, id: &str, cols: usize, view: TimeView, dur: f64, chat: Option<&[f32]>, loud: Option<&[f32]>) {
+        let key = (format!("{id}\u{1f}{}\u{1f}{}", view.t0.to_bits(), view.t1.to_bits()), cols, chat.map_or(0, <[f32]>::len), loud.map_or(0, <[f32]>::len));
         if self.key == key {
             return;
         }
         self.key = key;
         self.chat.clear();
         self.loud.clear();
+        let (from, to) = ((view.t0 / dur).clamp(0.0, 1.0), (view.t1 / dur).clamp(0.0, 1.0));
         let column = |values: &[f32], c: usize, empty: f32| {
-            let per = values.len() as f64 / cols as f64;
-            let a = (c as f64 * per) as usize;
-            let b = (((c + 1) as f64 * per).ceil() as usize).min(values.len());
-            values.get(a..b.max(a + 1).min(values.len())).map_or(empty, |s| s.iter().copied().fold(empty, f32::max))
+            let n = values.len() as f64;
+            let per = n * (to - from) / cols as f64;
+            let a = (n * from + c as f64 * per) as usize;
+            let b = ((n * from + (c + 1) as f64 * per).ceil() as usize).min(values.len());
+            values.get(a.min(values.len())..b.max(a + 1).min(values.len())).map_or(empty, |s| s.iter().copied().fold(empty, f32::max))
         };
         if let Some(chat) = chat.filter(|c| !c.is_empty()) {
             let raw: Vec<f32> = (0..cols).map(|c| column(chat, c, 0.0)).collect();
-            let top = raw.iter().copied().fold(0.0f32, f32::max).max(1.0);
+            // Scaled to the whole stream's peak, so zooming in doesn't make a
+            // quiet stretch look busy.
+            let top = chat.iter().copied().fold(0.0f32, f32::max).max(1.0);
             self.chat = raw.into_iter().map(|v| (v / top).clamp(0.0, 1.0)).collect();
         }
         if let Some(loud) = loud.filter(|l| !l.is_empty()) {
@@ -284,10 +290,12 @@ impl App {
         }
 
         let has_curves = self.signals.as_ref().is_some_and(|s| s.id == id && (s.chat.is_some() || s.loud.is_some()));
-        let controls_h = match (has_player, has_curves) {
-            (false, _) => 0.0,
-            (true, false) => 92.0,
-            (true, true) => 142.0,
+        // The dock below is as tall as it was last frame (its rows change with
+        // curves, clips and zoom); a guess before it has been drawn.
+        let controls_h = if has_player {
+            ui.ctx().data(|d| d.get_temp::<f32>(egui::Id::new(DOCK_HEIGHT))).unwrap_or(if has_curves { 170.0 } else { 120.0 })
+        } else {
+            0.0
         };
         let avail = ui.available_size();
         let canvas_size = vec2(avail.x.max(1.0), (avail.y - controls_h).max(1.0));
@@ -562,11 +570,19 @@ impl App {
         let dur = p.duration.max(0.1);
         let pos = p.position();
         let has_curves = self.signals.as_ref().is_some_and(|s| s.id == item_id && (s.chat.is_some() || s.loud.is_some()));
+        // The part of the video the timeline shows; a new item starts whole.
+        let mut view = match &self.timeline {
+            Some((tid, v)) if *tid == item_id => v.clamped(dur),
+            _ => TimeView::whole(dur),
+        };
+        if self.player.as_ref().is_some_and(|p| p.is_playing()) {
+            view = view.follow(dur, pos);
+        }
         // Update downsampled curve cache before borrowing `self.player` mutably.
         let plot_cols = (ui.available_width() - 32.0).max(1.0) as usize;
         if has_curves {
             if let Some(s) = self.signals.as_ref().filter(|s| s.id == item_id) {
-                self.signal_plot_cache.update(&item_id, plot_cols, s.chat.as_deref(), s.loud.as_deref());
+                self.signal_plot_cache.update(&item_id, plot_cols, view, dur, s.chat.as_deref(), s.loud.as_deref());
             }
         }
 
@@ -580,36 +596,51 @@ impl App {
         let mark_color = info();
         let mut hover = None;
 
-        egui::Frame::none()
+        let mut view_to: Option<TimeView> = None;
+        let dock = egui::Frame::none()
             .fill(tokens().bg_panel)
             .stroke(Stroke::new(1.0_f32, tokens().separator))
             .inner_margin(egui::Margin::symmetric(12.0, 8.0))
             .show(ui, |ui| {
+                let width = ui.available_width().max(1.0);
+                // Every row maps time to x the same way, so a clip, a peak and
+                // the playhead line up at any zoom.
+                let map = TimeMap { left: ui.cursor().left() + TRACK_INSET, width: (width - 2.0 * TRACK_INSET).max(1.0), view };
+                let top = ui.cursor().top();
                 if has_curves {
-                    if let Some(t) = activity_strip(ui, &self.signal_plot_cache, dur, pos, mark) {
+                    if let Some(t) = activity_strip(ui, &self.signal_plot_cache, &map, pos, mark) {
                         p.seek(t);
                     }
                 }
-                let mut seek_to = pos;
-                ui.spacing_mut().slider_width = ui.available_width().max(1.0);
-                let r = ui.add(egui::Slider::new(&mut seek_to, 0.0..=dur).show_value(false));
+                ruler(ui, &map);
+                let (bar, r) = ui.allocate_exact_size(vec2(width, 16.0), Sense::click_and_drag());
+                {
+                    let painter = ui.painter();
+                    let track = Rect::from_x_y_ranges(map.left..=map.left + map.width, bar.center().y - 2.0..=bar.center().y + 2.0);
+                    painter.rect_filled(track, 2.0, ui.visuals().extreme_bg_color);
+                    let played = Rect::from_x_y_ranges(map.left..=map.x(pos), track.y_range());
+                    painter.rect_filled(played, 2.0, accent().gamma_multiply(0.7));
+                    if map.shows(pos) {
+                        painter.circle_filled(pos2(map.x(pos), bar.center().y), 6.0, Color32::WHITE);
+                    }
+                }
                 // Media Foundation follows the drag (nearest keyframe); restarting
                 // ffmpeg on every step would stutter, so it seeks on release.
-                if r.dragged() && r.changed() {
-                    p.scrub(seek_to);
+                if let Some(at) = r.interact_pointer_pos() {
+                    let t = map.t(at.x);
+                    if r.dragged() {
+                        p.scrub(t);
+                    }
+                    if r.drag_stopped() || r.clicked() {
+                        p.seek(t);
+                    }
                 }
-                if r.drag_stopped() || (r.changed() && !r.dragged()) {
-                    p.seek(seek_to);
-                }
-                let handle = r.rect.height() / 2.5;
-                let span = (r.rect.width() - 2.0 * handle).max(1.0);
                 if let (true, Some(at)) = (p.has_frames(), r.hover_pos()) {
-                    let t = ((at.x - r.rect.left() - handle) / span).clamp(0.0, 1.0) as f64 * dur;
-                    hover = Some((t, r.id, ui.layer_id(), p.id.clone(), dur));
+                    hover = Some((map.t(at.x), r.id, ui.layer_id(), p.id.clone(), dur));
                 }
-                let (strip, _) = ui.allocate_exact_size(vec2(r.rect.width().max(1.0), if clips.is_empty() { 6.0 } else { 13.0 }), Sense::hover());
-                let x = |t: f64| r.rect.left() + handle + (t / dur).clamp(0.0, 1.0) as f32 * span;
-                let t_at = |px: f32| ((px - r.rect.left() - handle) / span).clamp(0.0, 1.0) as f64 * dur;
+                let (strip, _) = ui.allocate_exact_size(vec2(width, if clips.is_empty() { 6.0 } else { 13.0 }), Sense::hover());
+                let x = |t: f64| map.x(t);
+                let t_at = |px: f32| map.t(px);
                 ui.painter().rect_filled(strip, 2.0, ui.visuals().extreme_bg_color);
                 // Clips on the timeline: click one to select it and jump to its start;
                 // drag either end to move its in or out point (one undo step).
@@ -624,6 +655,12 @@ impl App {
                                 a = *t;
                             }
                         }
+                    }
+                    // Off the stretch shown, unless an end is being dragged
+                    // (its release must still arrive).
+                    let dragged = drag.as_ref().is_some_and(|(cid, _, _)| *cid == c.id);
+                    if (b < view.t0 || a > view.t1) && !dragged {
+                        continue;
                     }
                     let block = Rect::from_x_y_ranges(x(a)..=x(b).max(x(a) + 2.0), strip.y_range());
                     let candidate = crate::app::is_candidate(&c.name);
@@ -669,10 +706,38 @@ impl App {
                     painter.rect_filled(band, 2.0, mark_color.gamma_multiply(0.6));
                 }
                 for (m, label) in [(mark.0, "I"), (mark.1, "O")] {
-                    if let Some(t) = m {
+                    if let Some(t) = m.filter(|t| map.shows(*t)) {
                         let px = x(t);
-                        painter.line_segment([pos2(px, r.rect.top()), pos2(px, strip.bottom())], Stroke::new(2.0_f32, mark_color));
-                        painter.text(pos2(px + 3.0, r.rect.top()), Align2::LEFT_TOP, label, FontId::proportional(10.0), mark_color);
+                        painter.line_segment([pos2(px, bar.top()), pos2(px, strip.bottom())], Stroke::new(2.0_f32, mark_color));
+                        painter.text(pos2(px + 3.0, bar.top()), Align2::LEFT_TOP, label, FontId::proportional(11.0), mark_color);
+                    }
+                }
+                // The whole video in a thin bar, with the part shown framed:
+                // drag or click it to move there.
+                if view.span() < dur - 1e-6 {
+                    ui.add_space(2.0);
+                    let (mini, mr) = ui.allocate_exact_size(vec2(width, 7.0), Sense::click_and_drag());
+                    let whole = TimeMap { left: map.left, width: map.width, view: TimeView::whole(dur) };
+                    let painter = ui.painter();
+                    painter.rect_filled(mini, 2.0, ui.visuals().extreme_bg_color);
+                    let frame = Rect::from_x_y_ranges(whole.x(view.t0)..=whole.x(view.t1).max(whole.x(view.t0) + 3.0), mini.y_range());
+                    painter.rect_filled(frame, 2.0, accent().gamma_multiply(0.45));
+                    painter.circle_filled(pos2(whole.x(pos), mini.center().y), 2.0, Color32::WHITE);
+                    if let Some(at) = mr.interact_pointer_pos().filter(|_| mr.dragged() || mr.clicked()) {
+                        view_to = Some(TimeView::around(dur, whole.t(at.x), view.span() / 2.0));
+                    }
+                    mr.on_hover_text(t!("整場；框起來的是時間軸上顯示的部分，拖曳移動"));
+                }
+                // Ctrl+wheel zooms around the pointer, the wheel moves along.
+                let area = Rect::from_x_y_ranges(bar.left()..=bar.right(), top..=ui.cursor().top());
+                if ui.rect_contains_pointer(area) {
+                    let (scroll, ctrl, pointer) = ui.input(|i| (i.raw_scroll_delta, i.modifiers.command, i.pointer.hover_pos()));
+                    let along = if scroll.x != 0.0 { scroll.x } else { scroll.y };
+                    if ctrl && scroll.y != 0.0 {
+                        let at = pointer.map_or(pos, |p| map.t(p.x));
+                        view_to = Some(view.zoom(dur, at, if scroll.y > 0.0 { 0.8 } else { 1.25 }));
+                    } else if along != 0.0 && view.span() < dur - 1e-6 {
+                        view_to = Some(view.pan(dur, -(along as f64) / map.width as f64 * view.span()));
                     }
                 }
 
@@ -721,12 +786,28 @@ impl App {
                             self.config.volume = volume;
                         }
                         ui.label(RichText::new("🔊").color(tokens().text_muted));
+                        ui.separator();
+                        let whole = view.span() >= dur - 1e-6;
+                        if ui.add_enabled(!whole, egui::Button::new(RichText::new(t!("整場")).small())).on_hover_text(t!("時間軸顯示整場")).clicked() {
+                            view_to = Some(TimeView::whole(dur));
+                        }
+                        if ui.small_button("＋").on_hover_text(t!("放大時間軸（Ctrl＋滾輪，以游標為中心）")).clicked() {
+                            view_to = Some(view.zoom(dur, pos, 0.5));
+                        }
+                        if ui.add_enabled(!whole, egui::Button::new(RichText::new("－").small())).on_hover_text(t!("縮小時間軸")).clicked() {
+                            view_to = Some(view.zoom(dur, pos, 2.0));
+                        }
+                        if !whole {
+                            ui.label(RichText::new(format!("{} – {}", fmt_duration(view.t0), fmt_duration(view.t1))).small().monospace().weak());
+                        }
                     });
                 });
                 if let Some(e) = &p.error {
                     ui.label(RichText::new(e).small().color(danger()));
                 }
             });
+        ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new(DOCK_HEIGHT), dock.response.rect.height()));
+        self.timeline = Some((item_id.clone(), view_to.unwrap_or(view)));
         self.clip_ui.drag = drag;
         if let Some(cid) = picked {
             self.clip_ui.sel = std::collections::HashSet::from([cid]);
@@ -1274,8 +1355,6 @@ fn picked_lines_editor(ui: &mut Ui, subs: &mut crate::app::Subtitles, (a, b): (u
         });
 }
 
-/// Chat activity (bars) and loudness (line) along the video, lined up with the progress
-/// bar below, with I/O range highlight. Returns the time clicked.
 /// Whether the preview shows something worth zooming and paging through
 /// as pictures: an image or a PDF page. Not text, nor the system icon of a
 /// font or another file.
@@ -1295,21 +1374,21 @@ fn header_info_width(available: f32, reserve: f32) -> f32 {
     }
 }
 
-fn activity_strip(ui: &mut Ui, cache: &SignalPlotCache, dur: f64, pos: f64, mark: (Option<f64>, Option<f64>)) -> Option<f64> {
+/// Chat activity (bars) and loudness (line) over the part of the video the
+/// timeline shows, lined up with the bar below, with the I/O range. Returns
+/// the time clicked.
+fn activity_strip(ui: &mut Ui, cache: &SignalPlotCache, map: &TimeMap, pos: f64, mark: (Option<f64>, Option<f64>)) -> Option<f64> {
     let width = ui.available_width().max(1.0);
     let (rect, resp) = ui.allocate_exact_size(vec2(width, 40.0), Sense::click());
-    // The same inset as the slider's handle, so a time lines up with the bar below.
-    let inset = ui.spacing().interact_size.y / 2.5;
-    let inner = rect.shrink2(vec2(inset, 0.0));
-    let inner_w = inner.width().max(1.0);
+    let inner = Rect::from_x_y_ranges(map.left..=map.left + map.width, rect.y_range());
+    let inner_w = map.width;
     let painter = ui.painter_at(rect);
     painter.rect_filled(rect, 4.0, tokens().bg_sunken);
     painter.rect_stroke(rect, 4.0, Stroke::new(1.0_f32, tokens().separator));
 
     // Selected I/O range band across the activity strip.
     if let (Some(a), Some(b)) = mark {
-        let xa = inner.left() + (a.min(b) / dur).clamp(0.0, 1.0) as f32 * inner_w;
-        let xb = inner.left() + (a.max(b) / dur).clamp(0.0, 1.0) as f32 * inner_w;
+        let (xa, xb) = (map.x(a.min(b)), map.x(a.max(b)));
         let band = Rect::from_x_y_ranges(xa..=xb, rect.y_range());
         painter.rect_filled(band, 0.0, tokens().accent_soft);
     }
@@ -1335,10 +1414,117 @@ fn activity_strip(ui: &mut Ui, cache: &SignalPlotCache, dur: f64, pos: f64, mark
             .collect();
         painter.add(egui::Shape::line(points, Stroke::new(1.1_f32, info())));
     }
-    let x = inner.left() + (pos / dur).clamp(0.0, 1.0) as f32 * inner_w;
-    painter.line_segment([pos2(x, rect.top()), pos2(x, rect.bottom())], Stroke::new(1.5_f32, Color32::WHITE));
+    if map.shows(pos) {
+        let x = map.x(pos);
+        painter.line_segment([pos2(x, rect.top()), pos2(x, rect.bottom())], Stroke::new(1.5_f32, Color32::WHITE));
+    }
     let resp = resp.on_hover_text(t!("橘色：聊天熱度　藍色：音量（點一下跳到該時間）"));
-    resp.clicked().then(|| resp.interact_pointer_pos()).flatten().map(|p| ((p.x - inner.left()) / inner_w).clamp(0.0, 1.0) as f64 * dur)
+    resp.clicked().then(|| resp.interact_pointer_pos()).flatten().map(|p| map.t(p.x))
+}
+
+/// Time marks over the bar, as far apart as the zoom allows.
+fn ruler(ui: &mut Ui, map: &TimeMap) {
+    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width().max(1.0), 14.0), Sense::hover());
+    let painter = ui.painter_at(rect.expand2(vec2(30.0, 0.0)));
+    let step = tick_step(map.view.span(), map.width);
+    let mut t = (map.view.t0 / step).ceil() * step;
+    while t <= map.view.t1 + 1e-9 {
+        let x = map.x(t);
+        painter.line_segment([pos2(x, rect.bottom() - 4.0), pos2(x, rect.bottom())], Stroke::new(1.0_f32, tokens().text_muted));
+        painter.text(pos2(x + 2.0, rect.bottom() - 3.0), Align2::LEFT_BOTTOM, fmt_duration(t), FontId::monospace(10.0), tokens().text_muted);
+        t += step;
+    }
+}
+
+/// The marks' spacing in seconds: the first round step that leaves room for a label.
+fn tick_step(span: f64, width: f32) -> f64 {
+    const STEPS: [f64; 16] = [1.0, 2.0, 5.0, 10.0, 15.0, 30.0, 60.0, 120.0, 300.0, 600.0, 900.0, 1800.0, 3600.0, 7200.0, 10800.0, 21600.0];
+    let per_px = span / width.max(1.0) as f64;
+    STEPS.iter().copied().find(|s| s / per_px >= 70.0).unwrap_or(STEPS[STEPS.len() - 1])
+}
+
+/// The timeline dock's height last frame, so the picture above leaves it room.
+const DOCK_HEIGHT: &str = "viewer-dock-height";
+/// Space at each end of the timeline rows, so the playhead dot fits.
+const TRACK_INSET: f32 = 7.0;
+/// The shortest stretch the timeline zooms in to.
+const MIN_SPAN: f64 = 2.0;
+
+/// The stretch of a video the timeline shows, in seconds.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TimeView {
+    pub t0: f64,
+    pub t1: f64,
+}
+
+impl TimeView {
+    pub fn whole(dur: f64) -> Self {
+        Self { t0: 0.0, t1: dur.max(MIN_SPAN.min(dur)).max(0.001) }
+    }
+
+    pub fn span(&self) -> f64 {
+        self.t1 - self.t0
+    }
+
+    /// `half` seconds each side of `center`, moved inside the video.
+    pub fn around(dur: f64, center: f64, half: f64) -> Self {
+        Self { t0: center - half, t1: center + half }.clamped(dur)
+    }
+
+    /// Inside 0..=dur and at least `MIN_SPAN` long (or the whole of a shorter video).
+    pub fn clamped(self, dur: f64) -> Self {
+        let whole = Self::whole(dur);
+        let span = self.span().clamp(MIN_SPAN.min(whole.span()), whole.span());
+        if !span.is_finite() || !self.t0.is_finite() {
+            return whole;
+        }
+        let t0 = self.t0.clamp(0.0, whole.t1 - span);
+        Self { t0, t1: t0 + span }
+    }
+
+    /// `factor` times as long (below 1 zooms in), keeping `at` where it is on screen.
+    pub fn zoom(self, dur: f64, at: f64, factor: f64) -> Self {
+        let at = at.clamp(self.t0, self.t1);
+        let share = if self.span() > 0.0 { (at - self.t0) / self.span() } else { 0.5 };
+        let span = (self.span() * factor).clamp(MIN_SPAN.min(dur), Self::whole(dur).span());
+        Self { t0: at - span * share, t1: at - span * share + span }.clamped(dur)
+    }
+
+    pub fn pan(self, dur: f64, by: f64) -> Self {
+        Self { t0: self.t0 + by, t1: self.t1 + by }.clamped(dur)
+    }
+
+    /// While playing: when the playhead leaves the stretch shown, the next
+    /// stretch starts just before it.
+    pub fn follow(self, dur: f64, pos: f64) -> Self {
+        if pos >= self.t0 && pos <= self.t1 {
+            return self;
+        }
+        Self { t0: pos - self.span() * 0.1, t1: pos + self.span() * 0.9 }.clamped(dur)
+    }
+}
+
+/// Time ↔ x for one row of the timeline.
+pub struct TimeMap {
+    pub left: f32,
+    pub width: f32,
+    pub view: TimeView,
+}
+
+impl TimeMap {
+    pub fn x(&self, t: f64) -> f32 {
+        let share = ((t - self.view.t0) / self.view.span().max(1e-9)).clamp(0.0, 1.0);
+        self.left + share as f32 * self.width
+    }
+
+    pub fn t(&self, x: f32) -> f64 {
+        let share = ((x - self.left) / self.width.max(1.0)).clamp(0.0, 1.0) as f64;
+        self.view.t0 + share * self.view.span()
+    }
+
+    pub fn shows(&self, t: f64) -> bool {
+        t >= self.view.t0 && t <= self.view.t1
+    }
 }
 
 /// The export presets that fit the item, as menu buttons; returns the index clicked.
@@ -1430,5 +1616,61 @@ mod tests {
         });
         assert!(clicks.iter().any(|(clicked, _)| *clicked), "the click selects the clip");
         assert!(clicks.iter().all(|(_, dragged)| !dragged), "and doesn't move its ends");
+    }
+
+    /// A 9-hour stream's timeline showed the whole stream in 900 pixels: a
+    /// 30-second clip was a few pixels wide. Zooming keeps the time under the
+    /// cursor where it is, and never leaves the video.
+    #[test]
+    fn the_timeline_zooms_around_the_cursor_and_stays_inside_the_video() {
+        let dur = 9.0 * 3600.0;
+        let whole = TimeView::whole(dur);
+        assert_eq!(whole, TimeView { t0: 0.0, t1: dur });
+        let at = 3600.0;
+        let share = |v: TimeView| (at - v.t0) / v.span();
+        let mut v = whole;
+        for _ in 0..40 {
+            let before = share(v);
+            v = v.zoom(dur, at, 0.5);
+            assert!((share(v) - before).abs() < 1e-6, "{v:?}");
+        }
+        assert!((v.span() - MIN_SPAN).abs() < 1e-6, "zooms in no further than {MIN_SPAN} s: {v:?}");
+        let out = v.zoom(dur, at, 1e9);
+        assert!(out.t0 == 0.0 && (out.t1 - dur).abs() < 1e-6, "and out no further than the whole: {out:?}");
+        let end = TimeView::around(dur, dur, 60.0);
+        assert_eq!((end.t0, end.t1), (dur - 120.0, dur), "a stretch past the end is moved back");
+        assert_eq!(end.pan(dur, 1e6), end, "panning stops at the end");
+        assert_eq!(end.pan(dur, -1e9).t0, 0.0, "and at the start");
+        let short = TimeView::whole(1.0);
+        assert_eq!(short.zoom(1.0, 0.5, 0.1), short, "a 1-second sound can't zoom in further");
+        assert_eq!(TimeView { t0: f64::NAN, t1: 3.0 }.clamped(dur), whole);
+    }
+
+    #[test]
+    fn the_timeline_follows_the_playhead_out_of_the_stretch_shown() {
+        let v = TimeView { t0: 100.0, t1: 200.0 };
+        assert_eq!(v.follow(1000.0, 150.0), v);
+        assert_eq!(v.follow(1000.0, 201.0), TimeView { t0: 191.0, t1: 291.0 });
+        assert_eq!(v.follow(1000.0, 990.0), TimeView { t0: 900.0, t1: 1000.0 });
+    }
+
+    #[test]
+    fn timeline_marks_leave_room_for_their_labels() {
+        for (span, width) in [(10.0, 900.0), (600.0, 900.0), (9.0 * 3600.0, 900.0), (9.0 * 3600.0, 300.0), (3.0, 2000.0)] {
+            let step = tick_step(span, width);
+            assert!(step / (span / width as f64) >= 70.0, "{span} s in {width} px: every {step} s");
+        }
+        assert_eq!(tick_step(9.0 * 3600.0, 900.0), 3600.0);
+        assert_eq!(tick_step(60.0, 900.0), 5.0);
+    }
+
+    #[test]
+    fn the_time_map_puts_the_stretch_shown_across_the_row() {
+        let map = TimeMap { left: 10.0, width: 100.0, view: TimeView { t0: 50.0, t1: 150.0 } };
+        assert_eq!(map.x(50.0), 10.0);
+        assert_eq!(map.x(100.0), 60.0);
+        assert_eq!(map.x(9999.0), 110.0, "times off the stretch go to its ends");
+        assert_eq!(map.t(60.0), 100.0);
+        assert!(map.shows(150.0) && !map.shows(151.0));
     }
 }

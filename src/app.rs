@@ -881,6 +881,8 @@ pub struct App {
     pub mark: (Option<f64>, Option<f64>),
     /// Centre of the 9:16 frame shown over a landscape video, when shown.
     pub crop_frame: Option<f32>,
+    /// The part of the timeline shown, and the item it belongs to.
+    pub timeline: Option<(String, crate::ui::TimeView)>,
     /// "+5s" and the like, shown briefly over the video after a key jump.
     pub seek_flash: Option<(String, f64)>,
     /// Clips played from the list start over at their out point.
@@ -1120,6 +1122,7 @@ impl App {
             syntax_open: false,
             viewer_tags_open: false,
             signal_plot_cache: crate::ui::SignalPlotCache::default(),
+            timeline: None,
             text_cues_cache: None,
             crop_drag_before: None,
             chat_keywords_draft: None,

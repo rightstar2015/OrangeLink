@@ -89,7 +89,8 @@ fn frame_hash(ffmpeg_dir: &Path, file: &Path, t: f64) -> Option<u64> {
 }
 
 fn video_frames(ffmpeg_dir: &Path, file: &Path, duration: f64) -> Option<[u64; 3]> {
-    if duration <= 0.0 {
+    // NaN or infinity (a damaged length) would ask FFmpeg for frames at "NaN" seconds.
+    if !(duration.is_finite() && duration > 0.0) {
         return None;
     }
     let mut out = [0u64; 3];

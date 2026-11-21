@@ -1117,6 +1117,10 @@ impl App {
                                 }
                             }
                             ui.label(len).on_hover_text(t!("片段長度"));
+                            if let Some(last) = c.exported.last() {
+                                let list = c.exported.iter().rev().map(|e| format!("{}  {}  {}", fmt_time(e.at), e.preset, e.path.display())).collect::<Vec<_>>().join("\n");
+                                ui.label(RichText::new("✓").small().color(good())).on_hover_text(t!("已輸出 {n} 次，最近一次：{preset}\n\n{list}", n = c.exported.len(), preset = last.preset, list));
+                            }
                         });
                     });
                     ui.horizontal(|ui| {

@@ -208,9 +208,9 @@ impl App {
                         ui.separator();
 
                         if has_player {
-                            let xml_btn = egui::Button::new(RichText::new(t!("匯出 Premiere XML")).color(Color32::WHITE))
-                                .fill(tokens().selection_bg);
-                            if ui.add(xml_btn).on_hover_text(t!("將目前素材與片段匯出為 Premiere Pro XML")).clicked() {
+                            // A plain button: the last step of the work (and an
+                            // experimental one) shouldn't be the loudest thing here.
+                            if ui.button(t!("匯出 Premiere XML")).on_hover_text(t!("將目前素材與片段匯出為 Premiere Pro XML")).clicked() {
                                 self.act(Action::ExportPremiereXmlFor(vec![id.clone()]));
                             }
                             if has_frames && is_landscape {

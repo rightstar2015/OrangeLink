@@ -1387,5 +1387,8 @@
  "2～4 張圖片並排，一起縮放與移動": "2–4 pictures side by side, zoomed and moved together",
  "已排在目前的匯入之後": "Queued after the current import",
  "已清除篩選以顯示這個項目；Alt+← 回到原本的畫面": "Filters cleared to show this item; Alt+← goes back",
- "📁 資料夾": "📁 Folder"
+ "📁 資料夾": "📁 Folder",
+ "沒有符合的台詞": "No matching lines",
+ "上一個（Shift＋Enter）": "Previous (Shift+Enter)",
+ "下一個（Enter）": "Next (Enter)"
 }

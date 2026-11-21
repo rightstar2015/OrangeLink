@@ -1231,7 +1231,35 @@ impl App {
                 if subs.edit.tools_open {
                     proofreading_tools(ui, &mut subs.edit, &mut edits);
                 }
-                ui.add(TextEdit::singleline(&mut subs.search).hint_text(t!("🔍 搜尋台詞…")).desired_width(f32::INFINITY));
+                // Every line stays listed: the hits are marked, and ‹ › or
+                // Enter go through them.
+                let hits = subs.matching();
+                ui.horizontal(|ui| {
+                    let nav_w = if subs.search.trim().is_empty() { 0.0 } else { 110.0 };
+                    let r = ui.add(TextEdit::singleline(&mut subs.search).hint_text(t!("🔍 搜尋台詞…")).desired_width(ui.available_width() - nav_w));
+                    if r.changed() {
+                        subs.step_hit(0);
+                    }
+                    if r.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
+                        let back = ui.input(|i| i.modifiers.shift);
+                        subs.step_hit(if back { -1 } else { 1 });
+                        r.request_focus();
+                    }
+                    if nav_w > 0.0 {
+                        let hits = subs.matching();
+                        if hits.is_empty() {
+                            ui.label(RichText::new(t!("沒有符合的台詞")).small().weak());
+                        } else {
+                            ui.label(RichText::new(format!("{}／{}", subs.hit.min(hits.len() - 1) + 1, hits.len())).small().monospace());
+                            if ui.small_button("‹").on_hover_text(t!("上一個（Shift＋Enter）")).clicked() {
+                                subs.step_hit(-1);
+                            }
+                            if ui.small_button("›").on_hover_text(t!("下一個（Enter）")).clicked() {
+                                subs.step_hit(1);
+                            }
+                        }
+                    }
+                });
                 if subs.cues.is_empty() {
                     ui.label(RichText::new(t!("字幕檔中沒有可讀取的內容")).weak());
                 }
@@ -1241,28 +1269,28 @@ impl App {
                 let current = subs.at(pos);
                 let follow = playing && current.is_some() && current != subs.last_cue && subs.search.is_empty();
                 subs.last_cue = current;
-                let filtered = subs.matching();
                 ui.label(RichText::new(t!("點一句跳到該時間並選取（可校對）；Shift＋點一下選一段，可建立片段")).small().weak());
                 let row_h = 26.0;
                 let mut scroll = ScrollArea::vertical().id_salt("cues").auto_shrink([false, false]);
                 let scroll_target = subs.scroll_target(if follow { current } else { None });
                 if let Some(target_idx) = scroll_target {
-                    if let Some(row_pos) = filtered.iter().position(|&idx| idx == target_idx) {
-                        let view_h = ui.available_height().max(row_h);
-                        let target_y = (row_pos as f32 * row_h - view_h * 0.4).max(0.0);
-                        scroll = scroll.vertical_scroll_offset(target_y);
-                    }
+                    let view_h = ui.available_height().max(row_h);
+                    let target_y = (target_idx as f32 * row_h - view_h * 0.4).max(0.0);
+                    scroll = scroll.vertical_scroll_offset(target_y);
                 }
                 let picked = subs.edit.picked();
                 let mut pick = None;
-                scroll.show_rows(ui, row_h, filtered.len(), |ui, range| {
-                    for &i in &filtered[range] {
+                scroll.show_rows(ui, row_h, subs.cues.len(), |ui, range| {
+                    for i in range {
                         let c = &subs.cues[i];
                         let is_curr = current == Some(i);
+                        let is_hit = hits.binary_search(&i).is_ok();
                         let single_line = c.text.replace('\n', " ");
                         let (rect, r) = ui.allocate_exact_size(vec2(ui.available_width(), row_h), Sense::click());
                         let fill = if is_curr {
                             tokens().accent_soft
+                        } else if is_hit {
+                            star().gamma_multiply(0.18)
                         } else if r.hovered() {
                             ui.visuals().widgets.hovered.weak_bg_fill
                         } else {

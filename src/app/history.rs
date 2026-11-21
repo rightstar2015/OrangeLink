@@ -61,6 +61,11 @@ impl App {
         }
     }
 
+    /// The next change of view or filter is a step of its own right away.
+    pub(super) fn history_step_now(&mut self) {
+        self.history.changed_at = Some(f64::NEG_INFINITY);
+    }
+
     /// Called every frame: records the state being left when the view changes.
     pub(super) fn track_history(&mut self) {
         if self.lib.is_none() {
@@ -174,5 +179,24 @@ mod tests {
         assert!(app.viewer.is_none());
         assert_eq!(app.mark, (None, None), "the preview was closed, not just hidden");
         assert!(app.player.is_none());
+    }
+
+    /// Opening a related item cleared the search and filters to show it, and
+    /// Alt+← couldn't bring them back when the view stayed 全部.
+    #[test]
+    fn jumping_to_an_item_outside_the_filter_can_be_undone_with_back() {
+        let root = std::env::temp_dir().join(format!("orangelink-navjump-{}", crate::model::new_id()));
+        let mut app = App::with_config(&egui::Context::default(), Config::default());
+        app.lib = Some(crate::library::Library::create(&root).unwrap());
+        app.search = "boss".into();
+        app.min_rating = 3;
+        app.track_history();
+        app.show_in_grid("elsewhere");
+        assert!(app.search.is_empty() && app.min_rating == 0);
+        assert!(app.toast.list.iter().any(|t| t.msg.contains("Alt+←")), "the way back is said");
+        app.track_history();
+        app.go_back();
+        assert_eq!((app.search.as_str(), app.min_rating), ("boss", 3));
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

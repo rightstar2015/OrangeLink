@@ -192,11 +192,11 @@ impl App {
             }
             Action::ExportSelected => self.export_selected(),
             Action::ImportFiles => {
-                if let Some(files) = rfd::FileDialog::new()
-                    .set_title(t!("匯入圖片"))
-                    .add_filter(t!("圖片"), imaging::SUPPORTED_EXTS)
-                    .pick_files()
-                {
+                let mut dialog = rfd::FileDialog::new().set_title(t!("匯入檔案"));
+                for (name, exts) in crate::media::import_dialog_filters() {
+                    dialog = dialog.add_filter(crate::i18n::tr(name), &exts);
+                }
+                if let Some(files) = dialog.pick_files() {
                     self.apply(ctx, Action::ImportPaths(files));
                 }
             }

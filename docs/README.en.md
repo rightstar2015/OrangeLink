@@ -10,11 +10,14 @@
 
 OrangeLink is an asset management and video editing workflow tool for Windows. You can collect images, videos, audio, subtitles and other files in one library, organize them with tags, ratings and folders, and quickly find the assets you need with search syntax.
 
-It is especially useful for people who work with long videos, such as livestream recordings or interviews. You can search subtitles, mark clips on a video, find highlight candidates, export vertical short videos, and export to Premiere Pro XML, all in one place.
+It is especially useful for people who work with long videos, such as livestream recordings or interviews. You can search and proofread subtitles, mark clips on a zoomable timeline, review highlight candidates, export vertical short videos, and export to Premiere Pro XML, all in one place.
 
 - A single executable. Extract it and run; no installer needed.
 - The library is plain file structure with no database, so you can back it up or read it with other tools at any time.
 - Speech-to-text, playback and thumbnails are all processed locally. The program does not automatically upload your assets or logs.
+- The interface is available in Traditional Chinese, Simplified Chinese, English, Japanese and Korean, and can be switched at any time (Settings → General → Language).
+
+> The screenshots below were taken from an earlier version. Since 0.2 the interface has changed (for example the clip workspace and the viewer's info panel), so the screens may look slightly different from what you see. The feature descriptions in the text are authoritative.
 
 ## Main features
 
@@ -24,6 +27,8 @@ It is especially useful for people who work with long videos, such as livestream
 - When importing, you can "Copy to library", or "Keep in place" to create only an index and thumbnails, which suits large asset collections.
 - When you drag in many files at once, it first shows the file count, total size and number of duplicates, so you can choose the folder and tags before confirming the import.
 - Folders, tags, ★1–5 ratings, notes and custom fields. You can set up a watch folder so new files are imported automatically and tagged.
+- Press `Ctrl + K` to quickly jump to a folder, tag, smart folder or the settings page, and you can also put the selected items straight into a folder. You can copy one item's tags, folders and fields and paste them onto other items.
+- You can compare 2 to 4 images side by side; an info panel sits beside them when viewing images.
 - Smart folders save search and filter criteria as dynamic folders.
 
 ![Import confirmation: shows 30 files totaling 32.1 MB, with options for storage mode, folder and tags](images/import-dialog.png)
@@ -38,7 +43,9 @@ Names, tags, notes, URLs and subtitle lines can all be searched, and conditions 
 
 - Videos and audio play directly in the program. By default it uses Windows Media Foundation (GPU hardware decoding), and formats it cannot open automatically fall back to FFmpeg.
 - It automatically finds `.srt` / `.vtt` subtitles with the same name. While previewing, every subtitle line is listed, and clicking one jumps to that time. You can also use Whisper to generate subtitles from a video or audio file locally.
-- Press I / O to mark the in and out points, add the range as a clip, and export it to a file. This includes a preset for Shorts (vertical 1080×1920).
+- Subtitles can be proofread directly: editing text and times, merging and splitting are all undoable. When you search subtitles, every matching line is highlighted and you can jump through them one by one. A run of consecutive subtitle lines can be turned into a clip in one click.
+- The timeline in the clip workspace can be zoomed and scrolled, with a time ruler and an overview bar, so long videos are easy to work with.
+- Press I / O to mark the in and out points, add the range as a clip, and export it to a file. This includes a preset for Shorts (vertical 1080×1920). Clips can be exported in one click; progress and remaining time show in background tasks, exported clips are checked off, and you can also copy them as YouTube chapters.
 
 ![Video preview: subtitles and the clip list on the right, with markers below the progress bar showing where clips are](images/preview-clips.png)
 
@@ -46,7 +53,7 @@ Names, tags, notes, URLs and subtitle lines can all be searched, and conditions 
 
 ### Livestream highlight candidates and Premiere XML
 
-When previewing a livestream recording, chat activity (read from the `.live_chat.json` file with the same name as the video) and volume can be shown above the progress bar. Highlight candidates are created automatically around the peaks, and each one is marked with the reason it was chosen. Selected clips can be exported as XML for Premiere Pro (experimental; full compatibility with every version is not guaranteed).
+When previewing a livestream recording, chat activity (read from the `.live_chat.json` file with the same name as the video) and volume can be shown above the progress bar. Highlight candidates are created automatically around the peaks, and each one is marked with the reason it was chosen. Use ↑ ↓ to move between candidates, press Y to keep one or N to delete it. Selected clips can be exported as XML for Premiere Pro (experimental; full compatibility with every version is not guaranteed).
 
 ### Similar and duplicate assets
 
@@ -160,6 +167,7 @@ When jumping, a brief hint such as "+5s" appears in the center of the screen. Wh
 
 - **AI organization (MCP)**: After enabling the local MCP server in Settings, AI assistants such as Claude can search assets, view thumbnails, add tags, rate assets and organize folders. By default they can only view. Changing the database requires separate authorization, and every change can be undone. The AI never deletes assets or any files. It only accepts local connections and requires a token. For setup steps, the tool list and permission details, see [docs/FEATURES.md](FEATURES.md#ai-整理mcp). For the security design, see [SECURITY.md](../SECURITY.md).
 - **Browser extension (Brave / Chrome / Edge)**: Right-click an image, video or file link on a web page and choose "Add to OrangeLink". It goes straight into the library and records the source page. It only accepts local connections with the correct pairing code, and dangerous formats such as executables are rejected. For installation steps and permission details, see [docs/FEATURES.md](FEATURES.md#瀏覽器擴充功能brave--chrome--edge). For security, see [SECURITY.md](../SECURITY.md).
+- **Extensions**: Add a folder on your own computer as an extension and trust it, and OrangeLink can hand videos or audio to it and ask it to find highlight clips. The results become highlight candidates in the clip workspace, to be reviewed as usual. An extension is described by a JSON manifest in its folder. It runs only locally and cannot modify the library directly, and the whole batch of results can be undone. Trusting an extension means trusting its code, so only add extensions you wrote yourself or trust. For the format and how to write one, see [EXTENSIONS.md](EXTENSIONS.md).
 - **Download from URL**: Choose "＋ Import" → "Download from URL". It uses the yt-dlp you installed to download mp4, mp3, m4a files or livestream chat, and imports them automatically. Only download content you have the right to use, and follow each site's terms of use and copyright laws. Details: [docs/FEATURES.md](FEATURES.md#從網址下載yt-dlp).
 
 ## Building from source

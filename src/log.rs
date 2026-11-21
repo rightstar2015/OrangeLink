@@ -41,20 +41,33 @@ fn scrub(text: &str) -> String {
     out
 }
 
-/// Windows paths differ in case from one API to the next.
+/// Windows paths differ in case from one API to the next, also outside ASCII
+/// (C:\Users\Élise vs c:\users\élise).
 fn replace_ignore_case(text: &str, from: &str, to: &str) -> String {
-    if from.is_empty() || !from.is_ascii() {
-        return text.replace(from, to);
+    if from.is_empty() {
+        return text.to_string();
     }
-    let (lower, needle) = (text.to_ascii_lowercase(), from.to_ascii_lowercase());
-    let mut out = String::new();
-    let mut last = 0;
-    for (i, _) in lower.match_indices(&needle) {
-        out.push_str(&text[last..i]);
-        out.push_str(to);
-        last = i + from.len();
+    let same = |a: char, b: char| a == b || a.to_lowercase().eq(b.to_lowercase());
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(c) = rest.chars().next() {
+        let mut chars = rest.char_indices();
+        let mut end = 0;
+        let found = from.chars().all(|n| match chars.next() {
+            Some((i, c)) if same(c, n) => {
+                end = i + c.len_utf8();
+                true
+            }
+            _ => false,
+        });
+        if found {
+            out.push_str(to);
+            rest = &rest[end..];
+        } else {
+            out.push(c);
+            rest = &rest[c.len_utf8()..];
+        }
     }
-    out.push_str(&text[last..]);
     out
 }
 
@@ -140,6 +153,14 @@ pub fn install_panic_hook() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_home_folder_with_non_ascii_letters_is_hidden_in_any_case() {
+        assert_eq!(replace_ignore_case(r"C:\USERS\ÉLISE\a.mp4", r"c:\users\élise", "~"), r"~\a.mp4");
+        assert_eq!(replace_ignore_case(r"c:\users\小明\a and C:\Users\小明", r"C:\Users\小明", "~"), r"~\a and ~");
+        assert_eq!(replace_ignore_case("abc", "", "~"), "abc");
+        assert_eq!(replace_ignore_case("aé", "é", "~"), "a~");
+    }
 
     #[test]
     fn lines_hide_home_and_secrets_and_old_files_go() {

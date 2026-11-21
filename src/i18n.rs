@@ -235,7 +235,8 @@ mod tests {
                     stack.push(path);
                 } else if path.extension().is_some_and(|e| e == "rs") && !path.ends_with("i18n.rs") {
                     let src = std::fs::read_to_string(&path).unwrap();
-                    let code = src.split("#[cfg(test)]\nmod tests").next().unwrap_or_default();
+                    let code = src.replace("\r\n", "\n");
+                    let code = join_continued_lines(code.split("#[cfg(test)]\nmod tests").next().unwrap_or_default());
                     let ident = |c: char| c.is_alphanumeric() || c == '_';
                     for (i, _) in code.match_indices("t!(\"").chain(code.match_indices("tk!(\"")) {
                         if code[..i].chars().next_back().is_some_and(ident) {
@@ -249,6 +250,24 @@ mod tests {
             }
         }
         keys
+    }
+
+    /// `s` with each string continuation (`\` at the end of a line, then the
+    /// next line's indentation) removed, as the compiler reads it.
+    fn join_continued_lines(s: &str) -> String {
+        let mut out = String::new();
+        let mut rest = s;
+        while let Some(i) = rest.find("\\\n") {
+            out.push_str(&rest[..i]);
+            rest = rest[i + 2..].trim_start();
+        }
+        out.push_str(rest);
+        out
+    }
+
+    #[test]
+    fn keys_continued_over_lines_are_read_as_one_line() {
+        assert_eq!(join_continued_lines("t!(\"第一行，\\\n        第二行\")"), "t!(\"第一行，第二行\")");
     }
 
     fn placeholders(s: &str) -> BTreeSet<&str> {

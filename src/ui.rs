@@ -61,7 +61,7 @@ pub fn folder_picker(ui: &mut Ui, id: impl std::hash::Hash, tree: &[(usize, Stri
     egui::ComboBox::from_id_salt(id).selected_text(shown).width(180.0).show_ui(ui, |ui| {
         ui.selectable_value(folder, None, t!("（不加入資料夾）"));
         for (depth, fid, name) in tree {
-            ui.selectable_value(folder, Some(fid.clone()), format!("{}{name}", t!("　").repeat(*depth)));
+            ui.selectable_value(folder, Some(fid.clone()), format!("{}{name}", "　".repeat(*depth)));
         }
     });
 }

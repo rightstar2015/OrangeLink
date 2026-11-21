@@ -522,7 +522,9 @@ impl App {
         let Some(lib) = &self.lib else { return };
         let gap = 8.0;
         let label_h = 20.0;
-        let width = ui.available_width() - 12.0;
+        // Not below a thumbnail's width: a very narrow window (or the side panels
+        // taking it all) made it negative, and every row a negative height.
+        let width = (ui.available_width() - 12.0).max(40.0);
         let target_h = self.config.thumb_size;
         let aspect = |id: &String| {
             lib.items

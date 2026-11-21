@@ -16,6 +16,7 @@ pub enum JobKind {
     Thumbnails,
     ClipExport,
     Stream,
+    Extension,
     FileCopy,
     Capture,
     Integrity,
@@ -35,6 +36,7 @@ impl JobKind {
             JobKind::Thumbnails => "thumbnails",
             JobKind::ClipExport => "clip_export",
             JobKind::Stream => "stream_processing",
+            JobKind::Extension => "extension",
             JobKind::FileCopy => "file_export",
             JobKind::Capture => "frame_capture",
             JobKind::Integrity => "library_check",
@@ -98,6 +100,7 @@ impl App {
         jobs.extend(self.subtitle_index_job());
         jobs.extend(self.loudness_job());
         jobs.extend(self.stream_job());
+        jobs.extend(self.extension_job());
         jobs.extend(self.clip_export_job());
         jobs.extend(self.file_copy_job());
         jobs.extend(self.capture_job());
@@ -140,6 +143,7 @@ impl App {
             JobKind::Loudness => self.cancel_loudness(),
             JobKind::ClipExport => self.cancel_clip_queue(),
             JobKind::Stream => self.cancel_stream(),
+            JobKind::Extension => self.cancel_extensions(),
             JobKind::FileCopy | JobKind::Capture => self.cancel_file_jobs(kind),
             JobKind::Integrity => self.cancel_integrity(),
             JobKind::Duplicates => self.cancel_dup_search(),

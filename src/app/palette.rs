@@ -26,6 +26,10 @@ pub struct Sources<'a> {
     pub smart: Vec<(String, String)>,
     pub tags: &'a [(String, usize)],
     pub selected: Vec<String>,
+    /// Extension actions for the item in the preview (else the selected ones):
+    /// (label, folder, action), and the items they run on.
+    pub extensions: Vec<(String, std::path::PathBuf, String)>,
+    pub ext_targets: Vec<String>,
 }
 
 const MAX_SHOWN: usize = 40;
@@ -42,6 +46,9 @@ pub fn entries(query: &str, src: &Sources) -> Vec<Entry> {
         Entry { label: t!("匯入資料夾…").into(), what: tk!("指令"), action: Action::ImportFolder },
         Entry { label: t!("設定").into(), what: tk!("指令"), action: Action::OpenSettings },
     ];
+    for (label, dir, action) in &src.extensions {
+        all.push(Entry { label: format!("🧩 {label}"), what: tk!("擴充套件"), action: Action::RunExtension { dir: dir.clone(), action: action.clone(), ids: src.ext_targets.clone() } });
+    }
     let filing = !src.selected.is_empty();
     for (id, name, _) in src.folders {
         all.push(Entry { label: format!("📁 {name}"), what: tk!("資料夾"), action: Action::SetView(View::Folder(id.clone())) });
@@ -89,8 +96,21 @@ impl App {
         let smart: Vec<(String, String)> = lib.meta.smart_folders.iter().filter(|s| !s.group).map(|s| (s.id.clone(), s.name.clone())).collect();
         let mut selected: Vec<String> = self.selected.iter().cloned().collect();
         selected.sort();
+        let ext_targets: Vec<String> = match &self.viewer {
+            Some(v) => vec![v.id.clone()],
+            None => selected.clone(),
+        };
+        // Offered when the first target fits; the run skips any other that does not.
+        let extensions: Vec<(String, std::path::PathBuf, String)> = ext_targets
+            .first()
+            .and_then(|id| lib.items.get(id))
+            .map(|it| self.extension_actions(it.kind, it.duration))
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(dir, action, label)| (label, dir, action))
+            .collect();
         let (close, picked) = self.with_sidebar_stats(|stats| {
-            let src = Sources { folders: &stats.folder_flat, smart, tags: &stats.tag_counts, selected };
+            let src = Sources { folders: &stats.folder_flat, smart, tags: &stats.tag_counts, selected, extensions, ext_targets };
             let found = entries(&p.query, &src);
             p.pick = p.pick.min(found.len().saturating_sub(1));
             let (up, down, enter, esc) = ctx.input_mut(|i| {
@@ -165,7 +185,7 @@ mod tests {
     use super::*;
 
     fn src<'a>(folders: &'a [(String, String, usize)], tags: &'a [(String, usize)], selected: &[&str]) -> Sources<'a> {
-        Sources { folders, smart: vec![("s1".into(), "待處理的直播".into())], tags, selected: selected.iter().map(|s| s.to_string()).collect() }
+        Sources { folders, smart: vec![("s1".into(), "待處理的直播".into())], tags, selected: selected.iter().map(|s| s.to_string()).collect(), extensions: Vec::new(), ext_targets: Vec::new() }
     }
 
     #[test]
@@ -192,5 +212,14 @@ mod tests {
         let found = entries("boss", &s);
         assert!(found.iter().any(|e| matches!(&e.action, Action::AddTag(ids, t) if ids.len() == 2 && t == "boss")));
         assert!(entries("", &s).iter().all(|e| !matches!(e.action, Action::AddToFolder(..))), "not before something is typed");
+    }
+
+    #[test]
+    fn ctrl_k_runs_an_extension_on_the_item_in_view() {
+        let mut s = src(&[], &[], &[]);
+        s.extensions = vec![("Demo：找精華".into(), "D:/ext".into(), "find".into())];
+        s.ext_targets = vec!["i1".into()];
+        let found = entries("找精華", &s);
+        assert!(matches!(&found[0].action, Action::RunExtension { action, ids, .. } if action == "find" && ids == &["i1"]));
     }
 }

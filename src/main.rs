@@ -10,6 +10,7 @@ mod config;
 #[cfg(test)]
 mod fuzz;
 mod export;
+mod extension;
 mod font_sample;
 mod grouping;
 mod hotkey;

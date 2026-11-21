@@ -442,6 +442,11 @@ impl App {
                     }
                 }
             }
+            SettingsPage::Extensions => {
+                if f.show(ui, t!("擴充套件 外掛 plugin extension 精華")) {
+                    self.extensions_page(ui, out);
+                }
+            }
             SettingsPage::Integration => {
                 if f.show(ui, t!("ai 整理 mcp claude 連接埠 token")) {
                     group(ui, t!("AI 整理（MCP）"));
@@ -716,6 +721,98 @@ impl App {
                 }
             }
         }
+    }
+}
+
+impl App {
+    /// Settings → 擴充套件: the added folders, whether each is trusted, its options.
+    fn extensions_page(&mut self, ui: &mut Ui, out: &mut PageOut) {
+        ui.label(
+            RichText::new(t!("擴充套件是這台電腦上的程式資料夾（裡面有 orangelink-extension.json）。OrangeLink 只在你按下時執行它，結果會變成精華候選，不會直接改資源庫。"))
+                .small()
+                .weak(),
+        );
+        let t = tokens();
+        for entry in &mut self.config.extensions {
+            let Some(found) = self.ext.list.iter().find(|i| i.dir == entry.dir) else { continue };
+            ui.add_space(8.0);
+            egui::Frame::none().fill(t.bg_elevated).stroke(Stroke::new(1.0_f32, t.separator)).rounding(ROUNDING).inner_margin(8.0).show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                let folder = entry.dir.file_name().map_or_else(|| entry.dir.display().to_string(), |n| n.to_string_lossy().to_string());
+                match &found.manifest {
+                    Err(e) => {
+                        ui.label(RichText::new(folder).strong());
+                        ui.add(egui::Label::new(RichText::new(format!("⚠ {e}")).small().color(danger())).wrap());
+                    }
+                    Ok((m, hash)) => {
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new(&m.name).strong());
+                            ui.label(RichText::new(&m.version).small().weak());
+                        });
+                        let trusted = entry.trusted.as_deref() == Some(hash.as_str());
+                        ui.horizontal_wrapped(|ui| {
+                            if trusted {
+                                ui.checkbox(&mut entry.enabled, t!("啟用"));
+                            } else {
+                                let why = if entry.trusted.is_some() { t!("⚠ 設定檔改過了，要重新確認才能使用") } else { t!("還沒有信任，不會出現在選單") };
+                                ui.label(RichText::new(why).small().color(danger()));
+                                if ui.small_button(t!("檢視並信任…")).clicked() {
+                                    out.then = Some(Action::TrustExtensionAsk(entry.dir.clone()));
+                                }
+                            }
+                        });
+                        for a in &m.actions {
+                            ui.label(RichText::new(format!("🧩 {}", a.label)).small());
+                            for o in &a.options {
+                                let key = format!("{}.{}", a.id, o.id);
+                                let mut on = entry.options.get(&key).copied().unwrap_or(o.default);
+                                if ui.checkbox(&mut on, RichText::new(&o.label).small()).changed() {
+                                    entry.options.insert(key, on);
+                                }
+                            }
+                        }
+                        ui.horizontal_wrapped(|ui| {
+                            let checking = self.ext.check.as_ref().is_some_and(|c| c.dir == entry.dir);
+                            if m.check.is_some() && !checking && ui.small_button(t!("檢查環境")).clicked() {
+                                out.then = Some(Action::CheckExtension(entry.dir.clone()));
+                            }
+                            if let Some((label, _)) = m.ui.as_ref().filter(|_| trusted && entry.enabled) {
+                                if ui.small_button(label).clicked() {
+                                    out.then = Some(Action::OpenExtensionUi(entry.dir.clone()));
+                                }
+                            }
+                            if checking {
+                                ui.spinner();
+                            }
+                        });
+                        if let Some((_, ok, text)) = self.ext.check_result.as_ref().filter(|(d, ..)| *d == entry.dir) {
+                            let head = if *ok { RichText::new(t!("✔ 檢查通過")).small().color(good()) } else { RichText::new(t!("✖ 檢查沒有通過")).small().color(danger()) };
+                            ui.label(head);
+                            ScrollArea::vertical().id_salt(("ext-check", &entry.dir)).max_height(120.0).show(ui, |ui| {
+                                ui.add(egui::Label::new(RichText::new(text).small().monospace()).wrap());
+                            });
+                        }
+                    }
+                }
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new(entry.dir.display().to_string()).small().weak());
+                    if ui.small_button(t!("移除")).on_hover_text(t!("從清單移除；資料夾裡的檔案不會刪除")).clicked() {
+                        out.then = Some(Action::RemoveExtension(entry.dir.clone()));
+                    }
+                });
+            });
+        }
+        ui.add_space(8.0);
+        ui.horizontal(|ui| {
+            if ui.button(t!("＋ 加入擴充資料夾…")).clicked() {
+                if let Some(dir) = rfd::FileDialog::new().set_title(t!("選擇含有 orangelink-extension.json 的資料夾")).pick_folder() {
+                    out.then = Some(Action::AddExtension(dir));
+                }
+            }
+            if !self.config.extensions.is_empty() && ui.button(t!("重新讀取")).on_hover_text(t!("擴充的檔案改過（例如更新了）之後按這裡")).clicked() {
+                out.then = Some(Action::ReloadExtensions);
+            }
+        });
     }
 }
 

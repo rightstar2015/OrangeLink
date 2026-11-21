@@ -372,6 +372,17 @@ pub fn kept_name(name: &str) -> String {
     }
 }
 
+/// Keeps a candidate: named as its extension suggested, else `精華 NN`.
+pub fn keep(c: &mut crate::model::Clip) {
+    if !is_candidate(&c.name) {
+        return;
+    }
+    c.name = match c.title.take() {
+        Some(title) => title,
+        None => kept_name(&c.name),
+    };
+}
+
 /// `候選 01` and the like, as named by `find_candidates`.
 pub fn is_candidate(name: &str) -> bool {
     name.strip_prefix(CANDIDATE).is_some_and(|n| !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()))
@@ -446,6 +457,7 @@ pub fn candidates_ui(app: &mut App, ui: &mut egui::Ui, id: &str) {
                 open_settings = true;
             }
         });
+    extensions_ui(app, ui, id);
     ui.add_space(8.0);
     ui.label(
         RichText::new(t!("提示：分析完成後可在時間軸上看到橘色聊天熱度與藍色音量曲線，點一下即可跳轉；按 I／O 標記並按 Enter 加入片段，最後從上方一鍵匯出 Premiere XML。"))
@@ -468,6 +480,39 @@ pub fn candidates_ui(app: &mut App, ui: &mut egui::Ui, id: &str) {
     }
 }
 
+/// The extensions that can look for candidates in this item, and the one running.
+fn extensions_ui(app: &mut App, ui: &mut egui::Ui, id: &str) {
+    use egui::RichText;
+    let Some(it) = app.lib.as_ref().and_then(|l| l.items.get(id)) else { return };
+    let actions = app.extension_actions(it.kind, it.duration);
+    let running = app.ext.run.as_ref().filter(|r| r.task.item == id).map(|r| {
+        let p = crate::lock(&r.progress);
+        (r.label.clone(), p.fraction, p.message.clone())
+    });
+    if actions.is_empty() && running.is_none() {
+        return;
+    }
+    ui.add_space(6.0);
+    if let Some((label, fraction, message)) = running {
+        ui.horizontal_wrapped(|ui| {
+            ui.spinner();
+            let pct = fraction.map_or(String::new(), |f| format!(" {:.0}%", f * 100.0));
+            ui.label(RichText::new(format!("{label}{pct} {}", message.unwrap_or_default())).small());
+            if ui.small_button(t!("取消")).clicked() {
+                app.act(Action::CancelJob(super::jobs::JobKind::Extension));
+            }
+        });
+        return;
+    }
+    let busy = app.extension_busy(id);
+    for (dir, action, label) in actions {
+        let r = ui.add_enabled(!busy, egui::Button::new(format!("🧩 {label}"))).on_hover_text(t!("用擴充套件找精華候選，結果會取代還沒保留的候選；選項在設定 →「擴充套件」"));
+        if r.clicked() {
+            app.act(Action::RunExtension { dir, action, ids: vec![id.to_string()] });
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -485,5 +530,19 @@ mod tests {
         // Anything else keeps its name.
         assert_eq!(kept_name("開場"), "開場");
         assert_eq!(kept_name("候選 01 爆笑"), "候選 01 爆笑");
+    }
+
+    #[test]
+    fn a_kept_candidate_takes_the_name_its_extension_suggested() {
+        let mut c = crate::model::Clip { name: "候選 02".into(), title: Some("王也打不過".into()), ..Default::default() };
+        keep(&mut c);
+        assert_eq!((c.name.as_str(), c.title.as_deref()), ("王也打不過", None));
+        let mut plain = crate::model::Clip { name: "候選 03".into(), ..Default::default() };
+        keep(&mut plain);
+        assert_eq!(plain.name, "精華 03");
+        // A clip that is not a candidate keeps its name.
+        let mut named = crate::model::Clip { name: "開場".into(), title: Some("x".into()), ..Default::default() };
+        keep(&mut named);
+        assert_eq!(named.name, "開場");
     }
 }

@@ -105,16 +105,14 @@ mod platform {
             StorageFile,
             Streams::{DataReader, InMemoryRandomAccessStream},
         },
-        Win32::System::Com::{CoInitializeEx, COINIT_MULTITHREADED},
     };
 
     /// Renders the pages asked for until nobody asks any more.
     pub fn serve(path: &Path, width: u32, asks: &Receiver<u32>, tx: &Sender<Update>, wake: &dyn Fn()) -> Result<(), String> {
         // WinRT needs an apartment. Threads calling this are this module's own or the
-        // thumbnail workers, which are STA already: then this keeps theirs.
-        // SAFETY: no pointers; a thread already in an apartment just gets an error code.
-        #[allow(unsafe_code)]
-        let _ = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) };
+        // thumbnail workers, which are STA already: then this keeps theirs. Declared
+        // first, so it is left after every WinRT object here is released.
+        let _com = crate::com::Apartment::mta();
         let e = |e: windows::core::Error| e.message().to_string();
         let full = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
         let file = StorageFile::GetFileFromPathAsync(&HSTRING::from(full.to_string_lossy().replace('/', "\\"))).and_then(|a| a.join()).map_err(e)?;

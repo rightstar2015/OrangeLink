@@ -1509,5 +1509,6 @@
  "時間不對（要 0 ≤ start < end）": "时间不对（要 0 ≤ start < end）",
  "score 不對": "score 不对",
  "crop_x 要在 0 到 1 之間": "crop_x 要在 0 到 1 之间",
- "名稱超過 {CLIP_NAME_MAX} 字或註解超過 {CLIP_NOTE_MAX} 字": "名称超过 {CLIP_NAME_MAX} 字或注释超过 {CLIP_NOTE_MAX} 字"
+ "名稱超過 {CLIP_NAME_MAX} 字或註解超過 {CLIP_NOTE_MAX} 字": "名称超过 {CLIP_NAME_MAX} 字或注释超过 {CLIP_NOTE_MAX} 字",
+ "這個擴充沒有介面": "这个扩展没有界面"
 }

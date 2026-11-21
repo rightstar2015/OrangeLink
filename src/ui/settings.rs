@@ -773,7 +773,7 @@ impl App {
                         }
                         ui.horizontal_wrapped(|ui| {
                             let checking = self.ext.check.as_ref().is_some_and(|c| c.dir == entry.dir);
-                            if m.check.is_some() && !checking && ui.small_button(t!("檢查環境")).clicked() {
+                            if m.check.is_some() && trusted && entry.enabled && !checking && ui.small_button(t!("檢查環境")).clicked() {
                                 out.then = Some(Action::CheckExtension(entry.dir.clone()));
                             }
                             if let Some((label, _)) = m.ui.as_ref().filter(|_| trusted && entry.enabled) {

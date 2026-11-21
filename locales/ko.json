@@ -1509,5 +1509,6 @@
  "時間不對（要 0 ≤ start < end）": "시간이 올바르지 않습니다(0 ≤ start < end 필요)",
  "score 不對": "score가 올바르지 않습니다",
  "crop_x 要在 0 到 1 之間": "crop_x는 0~1 사이여야 합니다",
- "名稱超過 {CLIP_NAME_MAX} 字或註解超過 {CLIP_NOTE_MAX} 字": "이름이 {CLIP_NAME_MAX}자 또는 메모가 {CLIP_NOTE_MAX}자를 넘습니다"
+ "名稱超過 {CLIP_NAME_MAX} 字或註解超過 {CLIP_NOTE_MAX} 字": "이름이 {CLIP_NAME_MAX}자 또는 메모가 {CLIP_NOTE_MAX}자를 넘습니다",
+ "這個擴充沒有介面": "이 확장에는 자체 화면이 없습니다"
 }

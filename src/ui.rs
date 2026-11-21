@@ -680,7 +680,7 @@ impl App {
                     });
                 });
             }
-            Dialog::WatchFolders { link, tags } => {
+            Dialog::WatchFolders { link, tags, missing } => {
                 let mut remove = None;
                 let mut add = None;
                 let mut scan = false;
@@ -702,7 +702,7 @@ impl App {
                             }
                             let mode = if w.link { "🔗 保留原位置" } else { "複製" };
                             ui.label(RichText::new(mode).small().weak());
-                            let exists = w.path.is_dir();
+                            let exists = !missing.contains(&w.path);
                             let mut text = RichText::new(w.path.display().to_string()).small();
                             if !exists {
                                 text = text.color(danger());
@@ -954,12 +954,12 @@ impl App {
                     close |= self.lib.as_ref().is_some_and(|l| l.unreadable.is_empty());
                 }
             }
-            Dialog::ImportMode { paths, link, remember } => {
+            Dialog::ImportMode { paths, dirs, link, remember } => {
                 let policy = self.originals_policy();
                 let deletes = policy != Originals::Keep;
                 window("匯入方式").show(ctx, |ui| {
                     ui.set_max_width(440.0);
-                    let n_dirs = paths.iter().filter(|p| p.is_dir()).count();
+                    let n_dirs = *dirs;
                     let n_files = paths.len() - n_dirs;
                     let mut what = Vec::new();
                     if n_dirs > 0 {
@@ -1058,7 +1058,7 @@ impl App {
                 Dialog::ImportPreview { paths, link, folder, tags, .. } => {
                     self.act(Action::StartImportWith { paths, link, folder, tags: split_tags(&tags) });
                 }
-                Dialog::ImportMode { paths, link, remember } => {
+                Dialog::ImportMode { paths, link, remember, .. } => {
                     if remember {
                         self.config.import_mode = if link { ImportMode::Link } else { ImportMode::Copy };
                         self.config.save();

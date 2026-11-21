@@ -338,7 +338,9 @@ pub enum Dialog {
     FolderName { parent: Option<String>, rename: Option<String>, name: String },
     TagRename { old: String, name: String },
     Confirm { message: String, on_yes: Confirmed },
-    ImportMode { paths: Vec<PathBuf>, link: bool, remember: bool },
+    /// `dirs`: how many of `paths` are folders, counted once (not every frame:
+    /// a disconnected network drive makes each check slow).
+    ImportMode { paths: Vec<PathBuf>, dirs: usize, link: bool, remember: bool },
     /// A large drop: counts, and where the files go, before importing.
     ImportPreview { paths: Vec<PathBuf>, link: bool, folder: Option<String>, tags: String, scan: Arc<std::sync::Mutex<crate::importer::ImportScan>> },
     Backups(Vec<(PathBuf, usize)>),
@@ -347,7 +349,9 @@ pub enum Dialog {
     TagGroupName { rename: Option<String>, name: String, tag: Option<String> },
     BatchRename { ids: Vec<String>, pattern: String, start: usize },
     /// `tags` holds the tag text being typed per watch folder.
-    WatchFolders { link: bool, tags: std::collections::HashMap<PathBuf, String> },
+    /// `missing`: watch folders not found when the dialog opened, checked then
+    /// rather than every frame (an offline network drive stalls each check).
+    WatchFolders { link: bool, tags: std::collections::HashMap<PathBuf, String>, missing: std::collections::HashSet<PathBuf> },
     FieldName { rename: Option<String>, name: String },
     /// What 「檢查資源庫」 found; fixes take their part out.
     Integrity(crate::library::Integrity),
@@ -3769,6 +3773,31 @@ mod tests {
         app.open_viewer_at("c".into());
         assert_eq!(app.caret.as_deref(), Some("c"));
         assert_eq!(app.anchor.as_deref(), Some("c"));
+    }
+
+    #[test]
+    fn dialogs_check_folders_once_when_they_open() {
+        let ctx = egui::Context::default();
+        let mut app = App::with_config(&ctx, Config::default());
+        let root = std::env::temp_dir().join(format!("orangelink-dlg-{}", crate::model::new_id()));
+        let mut lib = Library::create(&root.join("lib")).unwrap();
+        let (here, gone) = (root.join("here"), root.join("gone"));
+        std::fs::create_dir_all(&here).unwrap();
+        lib.add_watch_folder(here.clone(), true);
+        lib.add_watch_folder(gone.clone(), true);
+        app.lib = Some(lib);
+        app.act(Action::WatchFoldersDialog);
+        app.process_actions(&ctx);
+        let Some(Dialog::WatchFolders { missing, .. }) = &app.dialog else { panic!("no dialog") };
+        assert_eq!(missing.iter().collect::<Vec<_>>(), [&gone]);
+
+        app.dialog = None;
+        app.config.import_mode = crate::config::ImportMode::Ask;
+        app.act(Action::ImportByMode(vec![here.clone(), root.join("file.png")]));
+        app.process_actions(&ctx);
+        assert!(matches!(&app.dialog, Some(Dialog::ImportMode { dirs: 1, .. })));
+        drop(app);
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

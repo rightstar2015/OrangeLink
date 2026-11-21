@@ -218,7 +218,8 @@ impl App {
             }
             Action::ImportByMode(paths) => match self.config.import_mode {
                 ImportMode::Ask => {
-                    self.dialog = Some(Dialog::ImportMode { paths, link: false, remember: false });
+                    let dirs = paths.iter().filter(|p| p.is_dir()).count();
+                    self.dialog = Some(Dialog::ImportMode { paths, dirs, link: false, remember: false });
                 }
                 ImportMode::Copy => self.apply(ctx, Action::StartImport { paths, link: false }),
                 ImportMode::Link => self.apply(ctx, Action::StartImport { paths, link: true }),
@@ -316,7 +317,11 @@ impl App {
                     self.toast(format!("已重新連結 {fixed} / {missing} 個遺失的項目"));
                 }
             }
-            Action::WatchFoldersDialog => self.dialog = Some(Dialog::WatchFolders { link: true, tags: Default::default() }),
+            Action::WatchFoldersDialog => {
+                let folders = self.lib.as_ref().map(|l| l.meta.watch_folders.as_slice()).unwrap_or_default();
+                let missing = folders.iter().map(|w| w.path.clone()).filter(|p| !p.is_dir()).collect();
+                self.dialog = Some(Dialog::WatchFolders { link: true, tags: Default::default(), missing });
+            }
             Action::ScanWatchFolders => self.scan_watch_folders(ctx),
             Action::SaveSmartFolder => self.apply(ctx, Action::NewSmartIn { parent: None, group: false }),
             Action::NewSmartIn { parent, group } => {

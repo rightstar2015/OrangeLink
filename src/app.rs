@@ -1259,7 +1259,10 @@ impl App {
                 self.close_viewer(false);
                 self.lib = Some(lib);
                 self.lib_lock = lock;
-                self.edits = undo::Edits::default();
+                // Step numbers keep counting: a 復原 on a toast or in the AI log
+                // from the last library must not match a step made in this one.
+                self.edits = undo::Edits { seq: self.edits.seq, ..Default::default() };
+                self.ai_log.clear();
                 self.visible_key = None;
                 self.smart_counts = (u64::MAX, HashMap::new());
                 self.sidebar_cache.borrow_mut().0 = None;

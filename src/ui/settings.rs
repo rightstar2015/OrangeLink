@@ -526,6 +526,11 @@ impl App {
                     group(ui, "瀏覽器擴充功能（Brave / Chrome / Edge）");
                     ui.checkbox(&mut c.webclip_enabled, "接收瀏覽器傳來的素材（在網頁上按右鍵「加入 OrangeLink」）");
                     if c.webclip_enabled {
+                        // Made now, not when the settings are applied: the code shown
+                        // (and maybe copied) right after ticking the box must work.
+                        if c.webclip_token.is_empty() {
+                            c.webclip_token = crate::webclip::new_token();
+                        }
                         ui.horizontal(|ui| {
                             ui.label("連接埠");
                             ui.add(egui::DragValue::new(&mut c.webclip_port).range(1024..=65535));

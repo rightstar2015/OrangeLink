@@ -282,7 +282,8 @@ impl App {
             self.finish_download(result);
         }
 
-        if !self.import_running() && !self.yt.pending_import.is_empty() {
+        // Waits for a library: while one is opening, an import would be dropped.
+        if self.lib.is_some() && !self.import_running() && !self.yt.pending_import.is_empty() {
             let (paths, link) = self.yt.pending_import.remove(0);
             self.apply(ctx, super::Action::StartImport { paths, link });
         }
@@ -957,5 +958,14 @@ mod tests {
         app.start_queued_downloads();
         assert!(app.yt.queue.is_empty() && !app.yt.run_queue, "the queue was left waiting");
         assert!(app.yt.status.1, "the failure is shown");
+    }
+
+    #[test]
+    fn a_finished_download_waits_for_a_library_to_be_imported_into() {
+        let ctx = egui::Context::default();
+        let mut app = App::with_config(&ctx, crate::config::Config::default());
+        app.yt.pending_import = vec![(vec![std::env::temp_dir().join("video.mp4")], false)];
+        app.poll_ytdlp(&ctx);
+        assert_eq!(app.yt.pending_import.len(), 1, "dropped while no library was open");
     }
 }

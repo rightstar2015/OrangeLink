@@ -551,8 +551,8 @@ mod tests {
     #[test]
     fn search_syntax() {
         let items = vec![
-            item("開場動畫 草稿", "mp4", &["角色名", "直播"], 2, Some(1800.0), 1920, 1080),
-            item("開場 動畫", "png", &["角色名稱"], 4, None, 1080, 1920),
+            item("開場動畫 草稿", "mp4", &["直播"], 2, Some(1800.0), 1920, 1080),
+            item("開場 動畫", "png", &["直播精華"], 4, None, 1080, 1920),
             item("貓咪", "jpg", &["貓"], 5, None, 4000, 3000),
             item("狗狗", "mp3", &["狗"], 0, Some(20.0), 0, 0),
         ];
@@ -567,8 +567,8 @@ mod tests {
         assert_eq!(h("貓 OR 狗"), ["貓咪", "狗狗"]);
         assert_eq!(h("貓 OR 狗 OR 草稿"), ["開場動畫 草稿", "貓咪", "狗狗"]);
         assert_eq!(h("貓 or 狗"), Vec::<String>::new(), "lowercase or is a word");
-        assert_eq!(h("#角色名"), ["開場動畫 草稿"], "a tag equal, not containing");
-        assert_eq!(h("角色名"), ["開場動畫 草稿", "開場 動畫"]);
+        assert_eq!(h("#直播"), ["開場動畫 草稿"], "a tag equal, not containing");
+        assert_eq!(h("直播"), ["開場動畫 草稿", "開場 動畫"]);
         assert_eq!(h("ext:mp4"), ["開場動畫 草稿"]);
         assert_eq!(h("type:影片"), ["開場動畫 草稿"]);
         assert_eq!(h("type:audio"), ["狗狗"]);

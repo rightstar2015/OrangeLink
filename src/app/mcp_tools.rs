@@ -985,7 +985,7 @@ mod tests {
             assert_eq!(clean_text(blank, NAME_MAX), None, "{blank:?}");
         }
         // Ordinary text, emoji and joiners stay.
-        assert_eq!(clean_text("Vtuber 精華 🎉 👨‍👩‍👧", TAG_MAX).as_deref(), Some("Vtuber 精華 🎉 👨‍👩‍👧"));
+        assert_eq!(clean_text("直播 精華 🎉 👨‍👩‍👧", TAG_MAX).as_deref(), Some("直播 精華 🎉 👨‍👩‍👧"));
     }
 
     #[test]

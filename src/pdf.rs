@@ -8,7 +8,12 @@
 use image::RgbaImage;
 use std::{
     path::{Path, PathBuf},
-    sync::mpsc::{channel, Receiver, Sender},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        mpsc::{channel, Receiver, Sender},
+        Arc,
+    },
+    time::Duration,
 };
 
 pub enum Update {
@@ -20,7 +25,10 @@ pub enum Update {
 
 /// A document being read; dropping it stops the worker.
 pub struct Job {
-    ask: Sender<u32>,
+    /// `None` once dropping has begun: closing it is what stops the worker.
+    ask: Option<Sender<u32>>,
+    /// The worker thread, joined when the document is dropped.
+    worker: Option<std::thread::JoinHandle<()>>,
     pub rx: Receiver<Update>,
 }
 
@@ -28,22 +36,45 @@ impl Job {
     /// Opens `path`; pages are rendered `width` pixels wide as they are asked for.
     /// `wake` runs whenever an update is ready.
     pub fn open(path: PathBuf, width: u32, wake: impl Fn() + Send + 'static) -> Self {
+        Self::open_tracked(path, width, wake, Arc::new(AtomicBool::new(false)))
+    }
+
+    /// `open`, with `finished` set once the worker has ended.
+    fn open_tracked(path: PathBuf, width: u32, wake: impl Fn() + Send + 'static, finished: Arc<AtomicBool>) -> Self {
         let (ask, asks) = channel::<u32>();
         let (tx, rx) = channel();
-        std::thread::Builder::new()
+
+        let worker = std::thread::Builder::new()
             .name("pdf".into())
             .spawn(move || {
                 if let Err(e) = platform::serve(&path, width, &asks, &tx, &wake) {
                     let _ = tx.send(Update::Failed(e));
                     wake();
                 }
+                finished.store(true, Ordering::SeqCst);
             })
             .ok();
-        Self { ask, rx }
+        Self { ask: Some(ask), worker, rx }
     }
 
     pub fn ask(&self, page: u32) {
-        let _ = self.ask.send(page);
+        if let Some(ask) = &self.ask {
+            let _ = ask.send(page);
+        }
+    }
+}
+
+impl Drop for Job {
+    /// Stops the worker and waits for it to release the document. A worker left to
+    /// finish by itself can still be tearing down its Windows Runtime objects when
+    /// the process exits, and the process then dies with STATUS_INVALID_PARAMETER.
+    /// The wait is bounded (a page being rendered finishes first) so a stuck
+    /// renderer can't hold the window open.
+    fn drop(&mut self) {
+        self.ask = None;
+        if let Some(worker) = self.worker.take() {
+            crate::join_within(worker, Duration::from_secs(3));
+        }
     }
 }
 
@@ -188,6 +219,28 @@ mod tests {
         }
         out.extend(format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n", objs.len() + 1).bytes());
         std::fs::write(path, out).unwrap();
+    }
+
+    /// Dropping a document must not return while its worker is still running: such a
+    /// worker was left tearing down when the test process exited.
+    #[test]
+    fn dropping_a_document_waits_for_its_worker() {
+        let dir = std::env::temp_dir().join(format!("orangelink-pdf-{}", crate::model::new_id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let pdf = dir.join("two pages.pdf");
+        sample_pdf(&pdf);
+        for _ in 0..3 {
+            let finished = Arc::new(AtomicBool::new(false));
+            let job = Job::open_tracked(pdf.clone(), 200, || {}, finished.clone());
+            // Once it is open the worker waits for the next page to be asked for.
+            match job.rx.recv_timeout(Duration::from_secs(20)).expect("an update") {
+                Update::Total(2) => {}
+                _ => panic!("the sample document did not open"),
+            }
+            drop(job);
+            assert!(finished.load(Ordering::SeqCst), "the worker was still running after the document was dropped");
+        }
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

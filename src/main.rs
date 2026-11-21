@@ -54,6 +54,21 @@ pub(crate) fn lock<T>(m: &std::sync::Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     m.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
+/// Waits up to `limit` for `thread` to end, and joins it once it has: the join
+/// returns only when the operating system thread is gone, thread-local and COM
+/// clean-up included. A thread that runs past `limit` is left to finish alone, so
+/// a stuck one can't hold the caller (the UI thread) for good.
+pub(crate) fn join_within(thread: std::thread::JoinHandle<()>, limit: std::time::Duration) {
+    let end = std::time::Instant::now() + limit;
+    while !thread.is_finished() {
+        if std::time::Instant::now() >= end {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+    let _ = thread.join();
+}
+
 fn window_icon() -> egui::IconData {
     let img = icon::render(128);
     egui::IconData { width: img.width(), height: img.height(), rgba: img.into_raw() }

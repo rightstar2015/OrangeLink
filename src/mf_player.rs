@@ -12,6 +12,7 @@
 
 use std::{
     sync::{
+        atomic::{AtomicBool, Ordering},
         mpsc::{self, Receiver, RecvTimeoutError, Sender, SyncSender},
         Arc, Mutex,
     },
@@ -53,7 +54,10 @@ struct State {
 
 /// The UI side of one Media Foundation player.
 pub struct MfPlayer {
-    commands: Sender<(u64, Cmd)>,
+    /// `None` once dropping has begun: closing it is what ends the engine thread.
+    commands: Option<Sender<(u64, Cmd)>>,
+    /// The engine thread, joined when the player is dropped.
+    engine: Option<thread::JoinHandle<()>>,
     state: Arc<Mutex<State>>,
     frames: Receiver<Frame>,
     /// Commands sent so far; the state is current once it has applied them all.
@@ -77,18 +81,28 @@ impl MfPlayer {
     /// picture: a video the engine opens without one (a codec Windows lacks)
     /// counts as a failure, so it can be played some other way.
     pub fn open(path: &std::path::Path, duration: f64, video: bool, max_width: u32, volume: f32) -> Self {
+        Self::open_tracked(path, duration, video, max_width, volume, Arc::new(AtomicBool::new(false)))
+    }
+
+    /// `open`, with `finished` set once the engine thread has shut everything down.
+    fn open_tracked(path: &std::path::Path, duration: f64, video: bool, max_width: u32, volume: f32, finished: Arc<AtomicBool>) -> Self {
         let (commands, rx) = mpsc::channel();
         let (frame_tx, frames) = mpsc::sync_channel(2);
         let state = Arc::new(Mutex::new(State { duration, ..Default::default() }));
         let shared = state.clone();
         let path = path.to_path_buf();
-        thread::spawn(move || run(&path, video, max_width, volume, rx, &shared, frame_tx));
-        Self { commands, state, frames, sent: 0, last_seek: 0, last_rough: None, expect: 0.0, expect_since: None, playing: false, duration, rate: 1.0 }
+        let engine = thread::spawn(move || {
+            run(&path, video, max_width, volume, rx, &shared, frame_tx);
+            finished.store(true, Ordering::SeqCst);
+        });
+        Self { commands: Some(commands), engine: Some(engine), state, frames, sent: 0, last_seek: 0, last_rough: None, expect: 0.0, expect_since: None, playing: false, duration, rate: 1.0 }
     }
 
     fn send(&mut self, cmd: Cmd) {
         self.sent += 1;
-        let _ = self.commands.send((self.sent, cmd));
+        if let Some(commands) = &self.commands {
+            let _ = commands.send((self.sent, cmd));
+        }
     }
 
     pub fn play(&mut self) {
@@ -189,6 +203,21 @@ impl MfPlayer {
             self.expect_since = None;
         }
         (frame, error, duration)
+    }
+}
+
+impl Drop for MfPlayer {
+    /// Closes the command channel, which ends the engine thread's loop, and waits
+    /// for the thread to end after shutting the engine, Direct3D and Media Foundation down. A
+    /// thread left to finish by itself can still be inside that shutdown when the
+    /// process exits, and the process then dies with STATUS_INVALID_PARAMETER
+    /// (seen at the end of `cargo test` once a PDF had also been rendered).
+    /// The wait is bounded so a stuck engine can't hold the window open.
+    fn drop(&mut self) {
+        self.commands = None;
+        if let Some(engine) = self.engine.take() {
+            crate::join_within(engine, Duration::from_secs(3));
+        }
     }
 }
 
@@ -504,5 +533,33 @@ impl Engine {
             self.device.CreateTexture2D(&desc, None, Some(&mut staging)).ok()?;
         }
         Some((tex?, staging?, w, h))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Dropping a player must not return while its engine thread is still shutting
+    /// down: such a thread was left running when the test process exited.
+    #[test]
+    fn dropping_a_player_waits_for_its_engine_thread() {
+        // The first player of a process can take seconds to start Media Foundation,
+        // longer than dropping waits; let that one end by itself, so the drops below
+        // are the usual short ones.
+        let warm = Arc::new(AtomicBool::new(false));
+        drop(MfPlayer::open_tracked(std::path::Path::new(r"C:
+o\sucholder\clip.mp4"), 0.0, false, 320, 1.0, warm.clone()));
+        let start = Instant::now();
+        while !warm.load(Ordering::SeqCst) && start.elapsed() < Duration::from_secs(60) {
+            thread::sleep(Duration::from_millis(50));
+        }
+        for _ in 0..5 {
+            let finished = Arc::new(AtomicBool::new(false));
+            let player = MfPlayer::open_tracked(std::path::Path::new(r"C:
+o\sucholder\clip.mp4"), 0.0, false, 320, 1.0, finished.clone());
+            drop(player);
+            assert!(finished.load(Ordering::SeqCst), "the engine thread was still running after the player was dropped");
+        }
     }
 }

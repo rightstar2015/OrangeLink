@@ -996,6 +996,17 @@ impl App {
         if candidates > 0 && ui.small_button(t!("刪除所有未保留的候選（{candidates}）", candidates)).clicked() {
             pending.push(Action::DeleteCandidates(id.to_string()));
         }
+        // Kept clips (not candidates) as YouTube chapters, for the video's description.
+        let kept: Vec<(f64, String)> = clips.iter().filter(|c| !is_candidate(&c.name)).map(|c| (c.start, c.name.clone())).collect();
+        if !kept.is_empty() && ui.small_button(t!("📋 複製為 YouTube 章節")).on_hover_text(t!("把保留的片段依開始時間寫成章節（第一個是 0:00），貼到影片說明")).clicked() {
+            let (text, ok) = crate::media::youtube_chapters(&kept, t!("開頭"));
+            ui.ctx().copy_text(text);
+            if ok {
+                self.toast(t!("已複製 YouTube 章節"));
+            } else {
+                self.toast(t!("已複製，但 YouTube 需要至少 3 個章節、每段至少 10 秒才會顯示"));
+            }
+        }
         // Always there, so selecting does not move the list under the pointer.
         let sel: Vec<String> = clips.iter().filter(|c| self.clip_ui.sel.contains(&c.id)).map(|c| c.id.clone()).collect();
         let any = !sel.is_empty();

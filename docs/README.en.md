@@ -146,7 +146,9 @@ Previewing video and audio:
 | I / O | Set the clip's in / out point |
 | Enter | Add a clip when an in or out point is set |
 | V | Toggle the 9:16 crop frame (landscape video) |
-| Ctrl + ← / →, PageUp / PageDown, ↑ / ↓ | Previous / next asset |
+| Ctrl + ← / →, PageUp / PageDown | Previous / next asset |
+| ↑ / ↓, [ / ] | Previous / next clip (selected and played) |
+| Y / N | Keep / delete the selected clip, then go to the next (can be undone) |
 | Delete | With clips selected in the Clips tab, delete them (can be undone) |
 | 0–5 | Rate the current asset |
 | Esc | Close the preview |

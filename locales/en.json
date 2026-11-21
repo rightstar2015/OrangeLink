@@ -1162,7 +1162,6 @@
  "設定片段入點 / 出點": "Set the clip's in / out point",
  "有入點或出點時加入片段": "Add a clip when an in or out point is set",
  "切換 9:16 裁切框（橫式影片）": "Toggle the 9:16 crop frame (landscape video)",
- "Ctrl + ← / →、PageUp / PageDown、↑ / ↓": "Ctrl + ← / →, PageUp / PageDown, ↑ / ↓",
  "片段分頁有選取片段時，刪除這些片段（可復原）": "With clips selected in the Clips tab, delete them (can be undone)",
  "：": ":",
  "按鍵": "Keys",
@@ -1338,5 +1337,10 @@
  "所有檔案": "All files",
  "匯入檔案": "Import files",
  "略過這個版本": "Skip this version",
- "不再為這個版本跳出視窗，狀態列仍會顯示；有更新的版本時再提示": "Don't open this window for this version again; the status bar still shows it, and a newer version will prompt again"
+ "不再為這個版本跳出視窗，狀態列仍會顯示；有更新的版本時再提示": "Don't open this window for this version again; the status bar still shows it, and a newer version will prompt again",
+ "沒有其他片段": "No more clips",
+ "Ctrl + ← / →、PageUp / PageDown": "Ctrl + ← / →, PageUp / PageDown",
+ "↑ / ↓、[ / ]": "↑ / ↓, [ / ]",
+ "上一個 / 下一個片段（選取並播放）": "Previous / next clip (selected and played)",
+ "保留 / 刪除選取的片段，再跳到下一個（可復原）": "Keep / delete the selected clip, then go to the next (can be undone)"
 }

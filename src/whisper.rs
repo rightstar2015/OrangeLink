@@ -301,9 +301,14 @@ fn read_progress(mut stderr: impl Read, tx: &Sender<Event>, ctx: &egui::Context)
 
 fn parse_time(line: &str) -> Option<f64> {
     let value = line.split("time=").nth(1)?.split_whitespace().next()?;
+    // FFmpeg prints a negative time at the start of a file whose first timestamp is
+    // below zero; "-00:00:01" would otherwise add up to +1 s.
+    if value.starts_with('-') {
+        return Some(0.0);
+    }
     let mut secs = 0.0;
     for part in value.split(':') {
-        secs = secs * 60.0 + part.parse::<f64>().ok()?;
+        secs = secs * 60.0 + part.parse::<f64>().ok().filter(|v| v.is_finite())?;
     }
     Some(secs)
 }
@@ -441,5 +446,8 @@ mod tests {
         assert_eq!(parse_time("size=N/A time=00:01:02.50 bitrate=N/A speed=2.7x"), Some(62.5));
         assert_eq!(parse_time("time=N/A bitrate=N/A"), None);
         assert_eq!(parse_time("[whisper] run transcription"), None);
+        assert_eq!(parse_time("time=-00:00:01.00 bitrate=N/A"), Some(0.0), "before the start, not 1 s in");
+        assert_eq!(parse_time("time=00:inf:00"), None);
+        assert_eq!(parse_time("time=00:NaN:00"), None);
     }
 }

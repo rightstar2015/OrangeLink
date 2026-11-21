@@ -56,6 +56,18 @@ pub fn take<T>(slot: &mut Option<Receiver<T>>) -> Reply<T> {
     reply
 }
 
+/// Whether the thread answering on `rx` has ended (it dropped its sender);
+/// whatever it sent in between is read and dropped.
+pub fn ended<T>(rx: &Receiver<T>) -> bool {
+    loop {
+        match rx.try_recv() {
+            Ok(_) => continue,
+            Err(TryRecvError::Empty) => return false,
+            Err(TryRecvError::Disconnected) => return true,
+        }
+    }
+}
+
 /// Said when a worker thread ended without answering. The panic itself is in the log.
 pub const LOST: &str = "背景工作意外結束（詳見記錄）";
 

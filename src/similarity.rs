@@ -13,7 +13,10 @@ use std::{
     collections::HashMap,
     fs,
     path::{Path, PathBuf},
-    sync::Mutex,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Mutex,
+    },
     time::UNIX_EPOCH,
 };
 
@@ -100,13 +103,17 @@ fn video_frames(ffmpeg_dir: &Path, file: &Path, duration: f64) -> Option<[u64; 3
 /// videos the file) is unchanged and computed otherwise. Items without a
 /// readable thumbnail are left out. Without FFmpeg videos get no frames.
 /// The cache then holds exactly these items.
-pub fn hashes(root: &Path, items: &[Source], ffmpeg_dir: Option<&Path>) -> Vec<Print> {
+/// Stops early, with nothing, when `cancel` is set; the cache is then left as it was.
+pub fn hashes(root: &Path, items: &[Source], ffmpeg_dir: Option<&Path>, cancel: &AtomicBool) -> Vec<Print> {
     use rayon::prelude::*;
     let file = root.join(CACHE_FILE);
     let cached: HashMap<String, Entry> = fs::read(&file).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
     let entries: Vec<(String, Entry, bool)> = items
         .par_iter()
         .filter_map(|s| {
+            if cancel.load(Ordering::Relaxed) {
+                return None;
+            }
             let (modified, size) = stamp(&s.thumb)?;
             let old = cached.get(&s.id).copied();
             let mut changed = false;
@@ -134,6 +141,10 @@ pub fn hashes(root: &Path, items: &[Source], ffmpeg_dir: Option<&Path>) -> Vec<P
             Some((s.id.clone(), e, changed))
         })
         .collect();
+    // A partial list would drop the hashes of every item not reached.
+    if cancel.load(Ordering::Relaxed) {
+        return Vec::new();
+    }
     let changed = entries.iter().any(|e| e.2) || entries.len() != cached.len();
     if changed {
         let map: HashMap<&str, Entry> = entries.iter().map(|(id, e, _)| (id.as_str(), *e)).collect();
@@ -330,7 +341,7 @@ mod tests {
         let src = |id: &str, thumb: &Path| Source { id: id.into(), thumb: thumb.to_path_buf(), video: None };
         let items = vec![src("a", &a), src("b", &b), src("gone", &root.join("x.png"))];
 
-        let first = hashes(&root, &items, None);
+        let first = hashes(&root, &items, None, &AtomicBool::new(false));
         assert_eq!(first.len(), 2, "no thumbnail, no hash");
         let ha = first.iter().find(|e| e.id == "a").unwrap().hash;
         assert_eq!(Some(ha), crate::imaging::dhash(&a));
@@ -340,17 +351,22 @@ mod tests {
         let mut map: HashMap<String, Entry> = serde_json::from_slice(&fs::read(&file).unwrap()).unwrap();
         map.get_mut("a").unwrap().hash = 42;
         fs::write(&file, serde_json::to_vec(&map).unwrap()).unwrap();
-        let again = hashes(&root, &items, None);
+        let again = hashes(&root, &items, None, &AtomicBool::new(false));
         assert_eq!(again.iter().find(|e| e.id == "a").unwrap().hash, 42);
 
         // A rebuilt thumbnail is hashed again.
         std::thread::sleep(std::time::Duration::from_millis(20));
         picture(&a, true);
-        let rebuilt = hashes(&root, &items, None);
+        let rebuilt = hashes(&root, &items, None, &AtomicBool::new(false));
         assert_eq!(rebuilt.iter().find(|e| e.id == "a").unwrap().hash, crate::imaging::dhash(&a).unwrap());
 
+        // A cancelled search leaves the cache as it was.
+        let before = fs::read(&file).unwrap();
+        assert!(hashes(&root, &items[1..], None, &AtomicBool::new(true)).is_empty());
+        assert_eq!(fs::read(&file).unwrap(), before);
+
         // Items no longer asked about leave the cache.
-        hashes(&root, &items[1..], None);
+        hashes(&root, &items[1..], None, &AtomicBool::new(false));
         let map: HashMap<String, Entry> = serde_json::from_slice(&fs::read(&file).unwrap()).unwrap();
         assert_eq!(map.keys().collect::<Vec<_>>(), vec!["b"]);
         let _ = fs::remove_dir_all(&root);
@@ -381,7 +397,7 @@ mod tests {
         picture(&thumb, false);
         let src = |id: &str, f: &Path| Source { id: id.into(), thumb: thumb.clone(), video: Some((f.to_path_buf(), 4.0)) };
         let items = vec![src("a", &a), src("b", &b), src("c", &c)];
-        let p = hashes(&root, &items, Some(&ff));
+        let p = hashes(&root, &items, Some(&ff), &AtomicBool::new(false));
         assert!(p.iter().all(|p| p.frames.is_some()), "{p:?}");
         let d = |x: usize, y: usize| distance(&p[x], &p[y]);
         assert!(d(0, 1) <= DUPES, "same picture, other size: {}", d(0, 1));
@@ -392,7 +408,7 @@ mod tests {
         let mut map: HashMap<String, Entry> = serde_json::from_slice(&fs::read(&file).unwrap()).unwrap();
         map.get_mut("a").unwrap().frames = Some([1, 2, 3]);
         fs::write(&file, serde_json::to_vec(&map).unwrap()).unwrap();
-        let again = hashes(&root, &items, Some(&ff));
+        let again = hashes(&root, &items, Some(&ff), &AtomicBool::new(false));
         assert_eq!(again[0].frames, Some([1, 2, 3]));
         let _ = fs::remove_dir_all(&root);
     }

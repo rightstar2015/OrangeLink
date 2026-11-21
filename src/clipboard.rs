@@ -124,8 +124,44 @@ pub fn save_clipboard_image(dir: &Path) -> Option<PathBuf> {
     let img = arboard::Clipboard::new().ok()?.get_image().ok()?;
     let buf = image::RgbaImage::from_raw(img.width as u32, img.height as u32, img.bytes.into_owned())?;
     std::fs::create_dir_all(dir).ok()?;
-    let name = format!("貼上_{}.png", chrono::Local::now().format("%Y%m%d_%H%M%S"));
-    let path = dir.join(name);
-    buf.save(&path).ok()?;
-    Some(path)
+    save_png_new(dir, &format!("貼上_{}", chrono::Local::now().format("%Y%m%d_%H%M%S")), &buf)
+}
+
+/// Writes `img` as `<stem>.png` in `dir`, or `<stem> (2).png` and so on when that
+/// is taken (two pastes in one second): a file there is never replaced.
+fn save_png_new(dir: &Path, stem: &str, img: &image::RgbaImage) -> Option<PathBuf> {
+    for n in 1..1000 {
+        let path = dir.join(if n == 1 { format!("{stem}.png") } else { format!("{stem} ({n}).png") });
+        let file = match std::fs::OpenOptions::new().write(true).create_new(true).open(&path) {
+            Ok(f) => f,
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(_) => return None,
+        };
+        let written = img.write_to(&mut std::io::BufWriter::new(file), image::ImageFormat::Png);
+        if written.is_err() {
+            let _ = std::fs::remove_file(&path);
+            return None;
+        }
+        return Some(path);
+    }
+    None
+}
+
+#[cfg(test)]
+mod paste_tests {
+    use super::*;
+
+    #[test]
+    fn two_pastes_in_one_second_keep_both_pictures() {
+        let dir = std::env::temp_dir().join(format!("orangelink-paste-{}", crate::model::new_id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let red = image::RgbaImage::from_pixel(2, 2, image::Rgba([255, 0, 0, 255]));
+        let blue = image::RgbaImage::from_pixel(2, 2, image::Rgba([0, 0, 255, 255]));
+        let a = save_png_new(&dir, "貼上_20261121_120000", &red).unwrap();
+        let b = save_png_new(&dir, "貼上_20261121_120000", &blue).unwrap();
+        assert_ne!(a, b);
+        assert_eq!(image::open(&a).unwrap().to_rgba8(), red, "the first paste was replaced");
+        assert_eq!(image::open(&b).unwrap().to_rgba8(), blue);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

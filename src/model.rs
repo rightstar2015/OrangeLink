@@ -275,6 +275,12 @@ impl LibraryMeta {
     }
 }
 
+/// The invisible characters that change the direction text runs in: U+202E
+/// makes "evil\u{202E}gpj.exe" read "evilexe.jpg".
+pub fn is_bidi_control(c: char) -> bool {
+    matches!(c, '\u{061C}' | '\u{200E}' | '\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}')
+}
+
 pub fn now_ms() -> i64 {
     chrono::Utc::now().timestamp_millis()
 }

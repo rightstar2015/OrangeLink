@@ -189,11 +189,7 @@ const TAG_MAX: usize = 128;
 /// Longest item, folder or clip name the AI may set, in characters.
 const NAME_MAX: usize = 255;
 
-/// The invisible characters that change the direction text runs in: U+202E
-/// makes "evil\u{202E}gpj.exe" read "evilexe.jpg".
-fn is_bidi_control(c: char) -> bool {
-    matches!(c, '\u{061C}' | '\u{200E}' | '\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}')
-}
+use crate::model::is_bidi_control;
 
 /// `s` as a tag or name: tabs and line breaks become spaces, other control
 /// characters and direction overrides go, the edges are trimmed and it is cut

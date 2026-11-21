@@ -405,10 +405,8 @@ fn is_executable(name: &str) -> bool {
         "iso", "img", "vhd", "vhdx", "appref-ms", "settingcontent-ms", "library-ms", "search-ms", "diagcab", "msc", "ws",
         "wsc", "website", "cab",
     ];
-    Path::new(name)
-        .extension()
-        .map(|e| e.to_string_lossy().to_ascii_lowercase())
-        .is_some_and(|e| BLOCKED.contains(&e.as_str()))
+    // Not Path::extension: for ".exe" that is None, but Windows runs it as an exe.
+    name.rsplit_once('.').is_some_and(|(_, e)| BLOCKED.contains(&e.to_ascii_lowercase().as_str()))
 }
 
 fn ext_for_mime(mime: &str) -> Option<&'static str> {
@@ -440,7 +438,12 @@ fn ext_for_mime(mime: &str) -> Option<&'static str> {
 fn file_name(name: &str, mime: &str) -> String {
     // Keep only the last path part so a name can't leave the inbox folder.
     let base = name.rsplit(['/', '\\']).next().unwrap_or("");
-    let clean: String = base.chars().map(|c| if c.is_control() || "<>:\"|?*".contains(c) { '_' } else { c }).collect();
+    // Direction overrides go: "evil\u{202E}gpj.exe" shows as "evilexe.jpg".
+    let clean: String = base
+        .chars()
+        .filter(|&c| !crate::model::is_bidi_control(c))
+        .map(|c| if c.is_control() || "<>:\"|?*".contains(c) { '_' } else { c })
+        .collect();
     let clean = clean.trim().trim_end_matches(['.', ' ']);
     let path = Path::new(clean);
     let stem = path.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
@@ -535,7 +538,16 @@ mod tests {
         }
         // Served as an image: the real extension is what Windows acts on.
         assert!(!is_executable(&file_name("photo.exe", "image/png")));
-        assert_eq!(file_name("a.exe. ", ""), "a.exe");
+        assert_eq!(file_name("a.exe. ", ""), "a.exe");    }
+
+    #[test]
+    fn a_bare_extension_or_a_direction_override_cannot_sneak_an_executable_through() {
+        for name in [".exe", ".BAT", "..exe"] {
+            assert!(is_executable(&file_name(name, "")), "{name}");
+        }
+        let name = file_name("evil\u{202E}gpj.exe", "");
+        assert_eq!(name, "evilgpj.exe", "no direction override left to disguise it");
+        assert!(is_executable(&name));
     }
 
     #[test]

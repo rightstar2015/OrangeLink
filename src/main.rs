@@ -2,6 +2,8 @@
 
 mod app;
 mod clipboard;
+#[cfg(windows)]
+mod com;
 mod config;
 #[cfg(test)]
 mod fuzz;

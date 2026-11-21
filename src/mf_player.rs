@@ -233,7 +233,7 @@ use windows::{
             Dxgi::Common::{DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_SAMPLE_DESC},
         },
         Media::MediaFoundation::*,
-        System::Com::{CoCreateInstance, CoInitializeEx, CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED},
+        System::Com::{CoCreateInstance, CLSCTX_INPROC_SERVER},
     },
 };
 
@@ -260,10 +260,12 @@ fn run(
     frames: SyncSender<Frame>,
 ) {
     let fail = |msg: String| crate::lock(state).error = Some(msg);
+    // Left last, after MFShutdown: a thread still in the apartment at exit had COM
+    // tearing down under it (issue #4).
+    let _com = crate::com::Apartment::mta();
     // SAFETY: no pointers; this thread is the engine's own, set up once here and
     // shut down at the end of this function.
     unsafe {
-        let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
         if let Err(e) = MFStartup(MF_VERSION, MFSTARTUP_FULL) {
             fail(format!("Media Foundation 無法啟動：{}", e.message()));
             return;

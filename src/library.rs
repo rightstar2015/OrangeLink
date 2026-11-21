@@ -642,6 +642,8 @@ impl Library {
             self.dirty.insert(id.clone());
             self.unreadable.retain(|u| u.id != id);
         }
+        // The backup can be older than a folder's deletion.
+        self.drop_missing_folders();
         self.flush()?;
         self.refresh_missing();
         Ok((restored, wanted.len()))
@@ -1727,6 +1729,29 @@ mod tests {
         assert!(lib.meta.folders.iter().all(|f| f.id != new));
         assert_eq!(lib.items["b"].folders, std::slice::from_ref(&old), "the folder made after the backup is gone");
         assert_eq!(lib.items["a"].folders, [old]);
+        drop(lib);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn an_item_restored_from_a_backup_leaves_folders_deleted_since() {
+        let root = std::env::temp_dir().join(format!("orangelink-restore-{}", new_id()));
+        let mut lib = Library::create(&root).unwrap();
+        let gone = lib.add_folder("gone", None);
+        fs::create_dir_all(item_dir(&root, "a")).unwrap();
+        lib.insert_item(item("a"));
+        lib.items.get_mut("a").unwrap().folders = vec![gone.clone()];
+        lib.touch("a");
+        lib.flush().unwrap();
+        lib.write_backup("backup-20000101-000000.json").unwrap();
+        lib.delete_folder(&gone);
+        lib.flush().unwrap();
+        fs::write(item_dir(&root, "a").join(META_FILE), b"{ not json").unwrap();
+
+        let mut lib = Library::open(&root).unwrap();
+        assert_eq!(lib.unreadable.len(), 1);
+        assert_eq!(lib.restore_unreadable().unwrap(), (1, 0));
+        assert!(lib.items["a"].folders.is_empty(), "points at a folder that no longer exists");
         drop(lib);
         let _ = fs::remove_dir_all(&root);
     }

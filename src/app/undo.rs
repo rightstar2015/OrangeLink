@@ -126,20 +126,53 @@ impl App {
         };
         let Some(lib) = &mut self.lib else { return };
         let mut current = Vec::new();
+        let mut source_changed = false;
+        let step_ids: HashSet<String> = step.items.iter().map(|i| i.id.clone()).collect();
         for item in step.items {
             let id = item.id.clone();
             if let Some(slot) = lib.items.get_mut(&id) {
+                source_changed |= slot.source != item.source;
                 current.push(std::mem::replace(slot, item));
                 lib.touch(&id);
             }
         }
         let n = current.len();
+        // The items were deleted for good since: nothing to swap, and an empty step
+        // in the other stack would only pretend something changed.
+        if current.is_empty() && step.meta.is_none() {
+            self.toast(if redo { t!("這些項目已被永久刪除，無法重做") } else { t!("這些項目已被永久刪除，無法復原") });
+            return;
+        }
         let structural = step.meta.is_some();
         let meta = step.meta.map(|m| {
-            let old = std::mem::replace(&mut lib.meta, m);
+            let mut old = std::mem::replace(&mut lib.meta, m);
+            // Deleting for good isn't undoable, so what the watch folders must not
+            // bring back stays in force (like `restore_backup`).
+            let mut ignored = std::mem::take(&mut old.ignored_sources);
+            ignored.extend(std::mem::take(&mut lib.meta.ignored_sources));
+            ignored.sort();
+            ignored.dedup();
+            lib.meta.ignored_sources = ignored.clone();
+            old.ignored_sources = ignored;
             lib.touch_meta();
             old
         });
+        if structural {
+            // Folders that exist no longer must not be named by any item. Items outside
+            // the step are kept in the opposite step, so redo brings the folders back.
+            for id in lib.ids_in_missing_folders() {
+                if !step_ids.contains(&id) {
+                    if let Some(it) = lib.items.get(&id) {
+                        current.push(it.clone());
+                    }
+                }
+            }
+            lib.drop_missing_folders();
+        }
+        // A step that changed where linked files point leaves the old "missing" flags behind.
+        if source_changed {
+            lib.refresh_missing();
+        }
         // The restored structure is the new baseline, not a fresh edit.
         self.edits.meta_seen = Some((lib.meta_rev, lib.meta.clone()));
         let still_exists = match &self.view {

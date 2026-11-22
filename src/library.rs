@@ -438,6 +438,8 @@ impl Library {
             lib.meta_dirty = true;
         }
         if lib.recovered.is_some() {
+            // Folders made after the backup are gone; items must not name them.
+            lib.drop_missing_folders();
             lib.meta_dirty = true;
             lib.flush().context(t!("無法寫入還原的 library.json"))?;
         }
@@ -589,11 +591,16 @@ impl Library {
         self.meta.ignored_sources.extend(ignored);
         repair_folder_tree(&mut self.meta.folders);
         repair_folder_tree(&mut self.meta.smart_folders);
+        // Items added since the backup lose the vanished folders too; undo must bring them back.
+        let in_missing = self.ids_in_missing_folders();
+        self.capture(&in_missing);
         self.drop_missing_folders();
         self.touch_meta();
-        self.flush()?;
-        // Linked items now point where they did then, which may be gone (or back).
+        let flushed = self.flush();
+        // Linked items now point where they did then, which may be gone (or back); this
+        // runs even when the write failed, because the items are already swapped.
         self.refresh_missing();
+        flushed?;
         Ok(restored)
     }
 
@@ -620,6 +627,12 @@ impl Library {
     /// (items waiting to be written, whether library.json is too).
     pub fn unsaved(&self) -> (usize, bool) {
         (self.dirty.len(), self.meta_dirty)
+    }
+
+    /// Ids of the items `drop_missing_folders` would change.
+    pub fn ids_in_missing_folders(&self) -> Vec<String> {
+        let ids: HashSet<&str> = self.meta.folders.iter().map(|f| f.id.as_str()).collect();
+        self.items.values().filter(|i| i.folders.iter().any(|f| !ids.contains(f.as_str()))).map(|i| i.id.clone()).collect()
     }
 
     /// Removes folder ids that no folder has any more, e.g. folders made after the
@@ -1763,6 +1776,51 @@ mod tests {
         assert_eq!(lib.items["b"].folders, std::slice::from_ref(&old), "the folder made after the backup is gone");
         assert_eq!(lib.items["a"].folders, [old]);
         drop(lib);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn undo_can_bring_back_the_folders_a_restore_took_off_newer_items() {
+        let root = std::env::temp_dir().join(format!("orangelink-restore-undo-{}", new_id()));
+        let mut lib = Library::create(&root).unwrap();
+        lib.write_backup("backup-test.json").unwrap();
+        let backup = root.join("backups").join("backup-test.json");
+        let new = lib.add_folder("new", None);
+        fs::create_dir_all(item_dir(&root, "b")).unwrap();
+        lib.insert_item(item("b"));
+        lib.items.get_mut("b").unwrap().folders = vec![new.clone()];
+        lib.touch("b");
+        lib.flush().unwrap();
+        lib.captured.clear();
+
+        lib.restore_backup(&backup).unwrap();
+        assert!(lib.items["b"].folders.is_empty());
+        let kept = lib.captured.iter().find(|i| i.id == "b").expect("b was changed but not captured");
+        assert_eq!(kept.folders, [new]);
+        drop(lib);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_library_recovered_from_a_backup_has_no_items_in_vanished_folders() {
+        let root = std::env::temp_dir().join(format!("orangelink-recover-folders-{}", new_id()));
+        let mut lib = Library::create(&root).unwrap();
+        lib.flush().unwrap();
+        lib.touch_meta();
+        lib.flush().unwrap();
+        drop(Library::open(&root).unwrap()); // writes today's backup
+        let new = lib.add_folder("after the backup", None);
+        fs::create_dir_all(item_dir(&root, "b")).unwrap();
+        lib.insert_item(item("b"));
+        lib.items.get_mut("b").unwrap().folders = vec![new];
+        lib.touch("b");
+        lib.flush().unwrap();
+        fs::write(root.join("library.json"), b"{ broken").unwrap();
+        let back = Library::open(&root).unwrap();
+        assert!(back.recovered.is_some());
+        assert_eq!(back.missing_folder_refs(), 0);
+        assert!(back.items["b"].folders.is_empty());
+        drop(back);
         let _ = fs::remove_dir_all(&root);
     }
 

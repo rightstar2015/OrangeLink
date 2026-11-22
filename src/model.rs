@@ -294,13 +294,15 @@ pub struct LibraryMeta {
 }
 
 impl LibraryMeta {
-    /// Whether `other` differs in structure, ignoring expanded/collapsed state.
+    /// Whether `other` differs in structure, ignoring expanded/collapsed state and `ignored_sources`.
     pub fn same_structure(&self, other: &LibraryMeta) -> bool {
         fn plain(m: &LibraryMeta) -> LibraryMeta {
             let mut m = m.clone();
             m.folders.iter_mut().for_each(|f| f.collapsed = false);
             m.smart_folders.iter_mut().for_each(|f| f.collapsed = false);
             m.tag_groups.iter_mut().for_each(|g| g.collapsed = false);
+            // Not something the user edits: undo must not treat deleting for good as a structural step.
+            m.ignored_sources.clear();
             m
         }
         plain(self) == plain(other)

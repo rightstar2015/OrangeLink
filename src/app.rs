@@ -4641,6 +4641,60 @@ mod tests {
     }
 
     #[test]
+    fn deleting_for_good_is_not_an_undo_step_and_undo_keeps_what_it_ignores() {
+        let (mut app, root) = undo_test_app("ignoredundo");
+        app.lib.as_mut().unwrap().meta.ignored_sources.push("gone-1".into());
+        app.lib.as_mut().unwrap().touch_meta();
+        app.track_structure();
+        assert!(!app.can_undo(), "deleting for good made a step that undo would wipe the ignore list with");
+
+        // A real structural step undone later must not take earlier ignores with it.
+        app.lib.as_mut().unwrap().add_folder("F", None);
+        app.track_structure();
+        app.lib.as_mut().unwrap().meta.ignored_sources.push("gone-2".into());
+        app.lib.as_mut().unwrap().touch_meta();
+        app.restore_items(false);
+        let lib = app.lib.as_ref().unwrap();
+        assert!(lib.meta.folders.is_empty());
+        assert_eq!(lib.meta.ignored_sources, ["gone-1", "gone-2"]);
+        app.restore_items(true);
+        assert_eq!(app.lib.as_ref().unwrap().meta.ignored_sources, ["gone-1", "gone-2"]);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn undoing_a_new_folder_takes_it_off_the_items_and_redo_puts_it_back() {
+        let (mut app, root) = undo_test_app("folderundo");
+        let f = app.lib.as_mut().unwrap().add_folder("F", None);
+        app.track_structure();
+        // Put the item in F without an item step of its own.
+        let lib = app.lib.as_mut().unwrap();
+        lib.items.get_mut("a").unwrap().folders = vec![f.clone()];
+        lib.touch("a");
+        app.restore_items(false);
+        let lib = app.lib.as_ref().unwrap();
+        assert!(lib.meta.folders.is_empty());
+        assert!(lib.items["a"].folders.is_empty(), "the item still names a folder that is gone");
+        assert_eq!(lib.missing_folder_refs(), 0);
+        app.restore_items(true);
+        let lib = app.lib.as_ref().unwrap();
+        assert_eq!(lib.items["a"].folders, [f], "redo brought the folder back without its items");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn undoing_items_that_were_deleted_for_good_adds_no_empty_step() {
+        let (mut app, root) = undo_test_app("deletedundo");
+        app.edit_items(&["a".to_string()], |it| it.name = "b".into());
+        app.lib.as_mut().unwrap().items.remove("a");
+        assert!(app.can_undo());
+        app.restore_items(false);
+        assert!(!app.can_redo(), "an empty step was pushed to redo");
+        assert!(!app.can_undo());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn a_new_field_and_its_value_are_undone_with_one_ctrl_z() {
         let (mut app, root) = undo_test_app("fieldundo");
         let ctx = egui::Context::default();

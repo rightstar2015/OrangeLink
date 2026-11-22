@@ -688,6 +688,7 @@ impl Player {
     /// `seek` on release lands exactly. Only Media Foundation is quick enough:
     /// the FFmpeg engine waits for the release. Returns whether it moved.
     pub fn scrub(&mut self, pos: f64) -> bool {
+        let clamp = self.clamp_pos(pos);
         #[cfg(windows)]
         if let Backend::Mf(b) = &mut self.backend {
             self.stop_at = None;
@@ -699,7 +700,7 @@ impl Player {
                 self.resume_after_drag = true;
             }
             self.awaiting_frame = Some(Instant::now());
-            b.seek(self.clamp_pos(pos), true);
+            b.seek(clamp, true);
             return true;
         }
         let _ = pos;

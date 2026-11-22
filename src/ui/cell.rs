@@ -324,6 +324,7 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::elide;
+    use eframe::egui;
 
     #[test]
     fn long_names_are_cut_with_an_ellipsis() {

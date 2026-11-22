@@ -52,6 +52,13 @@ fn pill(
     rect
 }
 
+/// `widget` placed at `rect` on top of a cell, without moving `ui`'s cursor. The
+/// grid lays cells out left to right, so `ui.put` there would make the next cell
+/// start right after the widget, over the half of this cell to its right.
+pub(super) fn put_over(ui: &mut Ui, rect: Rect, widget: impl egui::Widget) -> egui::Response {
+    ui.new_child(egui::UiBuilder::new().max_rect(rect)).put(rect, widget)
+}
+
 /// Whether a thumbnail carries the item's name: audio whose thumbnail is a
 /// waveform (cover art gives the item a palette; a waveform doesn't).
 fn name_on_thumbnail(it: &crate::model::Item) -> bool {
@@ -105,7 +112,7 @@ impl App {
         };
         let at = Rect::from_min_size(rect.min - vec2(2.0, 2.0), vec2(rect.width() + 4.0, size + 8.0));
         let edit = egui::TextEdit::singleline(draft).font(FontId::proportional(size)).margin(vec2(2.0, 2.0));
-        let r = ui.put(at, edit);
+        let r = put_over(ui, at, edit);
         if !*focused {
             r.request_focus();
             // Select the whole name, as Explorer does.
@@ -231,7 +238,7 @@ impl App {
                 .fill(Color32::from_black_alpha(185))
                 .stroke(Stroke::new(1.0_f32, Color32::from_white_alpha(60)));
             let at = Rect::from_center_size(pos2(img.center().x, img.bottom() - 16.0), vec2(58.0, 20.0));
-            if ui.put(at, btn).on_hover_text(t!("開啟預覽／剪輯工作台")).clicked() {
+            if put_over(ui, at, btn).on_hover_text(t!("開啟預覽／剪輯工作台")).clicked() {
                 self.act(Action::OpenViewer(it.id.clone()));
             }
         }
@@ -250,7 +257,7 @@ impl App {
                     pos2(img.center().x, label.max.y + 14.0),
                     vec2(img.width().min(120.0), 20.0),
                 );
-                if ui.put(at, button).clicked() {
+                if put_over(ui, at, button).clicked() {
                     self.act(Action::RelinkItem(it.id.clone()));
                 }
             }
@@ -326,6 +333,27 @@ mod tests {
         assert_eq!(elide("a long file name", 8.0, w), "a long …");
         assert_eq!(elide("素材名稱很長很長", 5.0, w), "素材名稱…");
         assert_eq!(elide("abc", 0.5, w), "…");
+    }
+
+    /// Hovering a video cell showed its "✂ 剪輯" button, and the cell after it
+    /// moved left over the hovered one until the pointer left.
+    #[test]
+    fn a_button_on_a_hovered_cell_leaves_the_next_cell_in_place() {
+        let ctx = egui::Context::default();
+        let mut next = None;
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    let (cell, _) = ui.allocate_exact_size(egui::vec2(200.0, 200.0), egui::Sense::hover());
+                    let at = egui::Rect::from_center_size(cell.center(), egui::vec2(58.0, 20.0));
+                    super::put_over(ui, at, egui::Button::new("✂"));
+                    let (after, _) = ui.allocate_exact_size(egui::vec2(200.0, 200.0), egui::Sense::hover());
+                    next = Some((cell, after));
+                });
+            });
+        });
+        let (cell, after) = next.unwrap();
+        assert!(after.min.x >= cell.max.x, "next cell starts at {} inside the hovered cell ending at {}", after.min.x, cell.max.x);
     }
 
     /// 860 sound effects in a grid were 860 copies of one orange waveform.

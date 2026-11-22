@@ -7,7 +7,7 @@ OrangeLink 對使用者資料做出的保證,每一條都對應會檢查它的�
 執行全部持久化測試:
 
 ```bash
-cargo test --locked -- library:: importer:: config:: app::integrity:: app::tests::deleting app::tests::the_command_line app::tests::split_by_contents app::mcp_tools::
+cargo test --locked -- library:: importer:: config:: app::integrity:: app::tests::deleting app::tests::undoing_ app::tests::the_command_line app::tests::split_by_contents app::mcp_tools::
 ```
 
 ## 寫入
@@ -30,6 +30,8 @@ cargo test --locked -- library:: importer:: config:: app::integrity:: app::tests
 | R3 | 壞掉的 metadata.json 會被回報,可以從備份還原 | `importer::tests::damaged_metadata_is_reported_and_restored_from_backup` |
 | R4 | 資料夾樹有環或父資料夾不見時,仍然打得開,每個資料夾都看得到 | `library::tests::folder_loops_and_lost_parents_are_repaired` |
 | R5 | 從備份還原後,不會有項目指向已經不存在的資料夾 | `library::tests::a_restore_drops_folders_that_no_longer_exist`、`library::tests::an_item_restored_from_a_backup_leaves_folders_deleted_since` |
+| R5b | 復原(Ctrl+Z)不會清掉「忽略清單」:永久刪除的檔案不會被監看資料夾再匯入一次 | `app::tests::deleting_for_good_is_not_an_undo_step_and_undo_keeps_what_it_ignores` |
+| R5c | 結構性復原(新增、刪除資料夾)之後,不會有項目指向已經不存在的資料夾 | `app::tests::undoing_a_new_folder_takes_it_off_the_items_and_redo_puts_it_back` |
 | R6 | 匯入時某個檔案損壞、路徑太深或讓解碼器 panic,只有那個檔案失敗,整批匯入繼續 | `importer::tests::a_panic_becomes_a_failed_file`、`damaged_and_deeply_nested_files_do_not_stop_an_import` |
 
 ## 備份

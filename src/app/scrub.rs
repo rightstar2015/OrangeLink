@@ -36,6 +36,13 @@ pub fn step_secs(duration: f64) -> f64 {
     (duration / 300.0).max(2.0)
 }
 
+/// Where to take the picture for `step`: the middle of its slice, but inside the clip
+/// (the last slice of a 4.5 s clip would otherwise ask for 5.0 s and get no frame).
+fn grab_time(step: u32, duration: f64) -> f64 {
+    let t = (step as f64 + 0.5) * step_secs(duration);
+    if duration > 0.5 { t.min(duration - 0.25) } else { t.min(duration.max(0.0)) }
+}
+
 fn grab(ffmpeg_dir: &Path, input: &Path, t: f64) -> Option<egui::ColorImage> {
     let mut cmd = crate::process::hidden(ffmpeg_dir.join("ffmpeg"));
     let out = cmd
@@ -78,7 +85,7 @@ impl App {
         let (Some(lib), Some(ff)) = (&self.lib, self.ffmpeg_dir.clone()) else { return };
         let Some(it) = lib.items.get(&self.scrub.id) else { return };
         let input: PathBuf = lib.file_path(it);
-        let t = (step as f64 + 0.5) * step_secs(duration);
+        let t = grab_time(step, duration);
         let (tx, rx) = channel();
         let ctx = self.egui_ctx.clone();
         std::thread::spawn(move || {
@@ -117,6 +124,14 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_last_frame_is_taken_inside_a_short_clip() {
+        // 4.5 s, hovering at 4.2 s: step 2 used to ask for 5.0 s.
+        assert!(grab_time(2, 4.5) < 4.5);
+        assert_eq!(grab_time(0, 60.0), 1.0);
+        assert!(grab_time(0, 0.3) <= 0.3);
+    }
 
     #[test]
     fn steps_scale_with_length() {

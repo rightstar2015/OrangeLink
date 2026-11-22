@@ -144,6 +144,8 @@ struct FfmpegPlayer {
     /// The frame at a position sought to while paused, being decoded; the newest
     /// request wins.
     still: Option<Receiver<Vec<u8>>>,
+    /// The still-frame grab ended without a frame; the player stops waiting for one.
+    still_lost: bool,
 }
 
 impl FfmpegPlayer {
@@ -163,6 +165,7 @@ impl FfmpegPlayer {
             volume,
             spawn_error: None,
             still: None,
+            still_lost: false,
         }
     }
 
@@ -188,6 +191,10 @@ impl FfmpegPlayer {
 
     fn is_playing(&self) -> bool {
         self.started.is_some()
+    }
+
+    fn take_still_lost(&mut self) -> bool {
+        std::mem::take(&mut self.still_lost)
     }
 
     fn position(&self) -> f64 {
@@ -309,11 +316,20 @@ impl FfmpegPlayer {
     fn poll(&mut self) -> (Option<Vec<u8>>, Option<String>) {
         let error = self.spawn_error.as_ref().and_then(|rx| rx.try_recv().ok());
         let mut frame = None;
-        if let Some(rgba) = self.still.as_ref().and_then(|rx| rx.try_recv().ok()) {
-            self.still = None;
-            if !self.is_playing() {
-                frame = Some(rgba);
+        match self.still.as_ref().map(|rx| rx.try_recv()) {
+            Some(Ok(rgba)) => {
+                self.still = None;
+                if !self.is_playing() {
+                    frame = Some(rgba);
+                }
             }
+            // ffmpeg ended without a frame (a seek past the end, a file it can't decode):
+            // no point waiting out the timeout for one.
+            Some(Err(std::sync::mpsc::TryRecvError::Disconnected)) => {
+                self.still = None;
+                self.still_lost = true;
+            }
+            _ => {}
         }
         if !self.is_playing() {
             return (frame, error);
@@ -641,10 +657,20 @@ impl Player {
         self.range = Some((start, end));
     }
 
+    /// A time inside the clip. An unknown length (0) is no end, as in `position()`;
+    /// a time that is not a number goes to the start.
+    fn clamp_pos(&self, pos: f64) -> f64 {
+        if !pos.is_finite() {
+            return 0.0;
+        }
+        if self.duration > 0.0 { pos.clamp(0.0, self.duration) } else { pos.max(0.0) }
+    }
+
     pub fn seek(&mut self, pos: f64) {
         self.stop_at = None;
         self.range = None;
-        let pos = pos.clamp(0.0, self.duration.max(0.0));
+        self.reverse = None;
+        let pos = self.clamp_pos(pos);
         if !self.is_playing() {
             self.awaiting_frame = Some(Instant::now());
         }
@@ -666,13 +692,14 @@ impl Player {
         if let Backend::Mf(b) = &mut self.backend {
             self.stop_at = None;
             self.range = None;
+            self.reverse = None;
             // Paused, the engine lands each seek sooner (playing it decodes on).
             if b.is_playing() {
                 b.pause();
                 self.resume_after_drag = true;
             }
             self.awaiting_frame = Some(Instant::now());
-            b.seek(pos.clamp(0.0, self.duration.max(0.0)), true);
+            b.seek(self.clamp_pos(pos), true);
             return true;
         }
         let _ = pos;
@@ -705,6 +732,11 @@ impl Player {
                 (frame.map(|f| (f.rgba, f.size)), error)
             }
         };
+        if let Backend::Ffmpeg(b) = &mut self.backend {
+            if b.take_still_lost() {
+                self.awaiting_frame = None;
+            }
+        }
         if let Some(e) = error {
             if self.fall_back {
                 self.switch_to_ffmpeg(&e);
@@ -803,6 +835,32 @@ mod tests {
         let mut ff = FfmpegPlayer::new(PathBuf::new(), PathBuf::new(), 3.0, 30.0, None, 1.0);
         ff.base = 5.0;
         assert_eq!(ff.position(), 3.0);
+    }
+
+    #[test]
+    fn a_still_that_never_comes_ends_the_wait() {
+        let mut ff = FfmpegPlayer::new(PathBuf::new(), PathBuf::new(), 3.0, 30.0, None, 1.0);
+        let (tx, rx) = sync_channel::<Vec<u8>>(1);
+        ff.still = Some(rx);
+        ff.poll();
+        assert!(!ff.take_still_lost(), "the grab is still running");
+        drop(tx);
+        ff.poll();
+        assert!(ff.take_still_lost(), "the grab ended without a frame");
+        assert!(ff.still.is_none());
+    }
+
+    #[test]
+    fn seeking_a_clip_of_unknown_length_keeps_the_time_and_stops_reverse() {
+        let mut p = Player::new("t".into(), PlayEngine::Ffmpeg, None, PathBuf::from("x.mp4"), 0.0, Some(30.0), (320, 180), true, VIEWER_MAX_WIDTH).unwrap();
+        p.reverse = Some((1.0, Instant::now()));
+        p.seek(12.5);
+        assert!(p.reverse.is_none(), "reverse kept pulling the position back");
+        assert_eq!(p.clamp_pos(12.5), 12.5, "an unknown length clamped every time to 0");
+        assert_eq!(p.clamp_pos(f64::NAN), 0.0);
+        assert_eq!(p.clamp_pos(-3.0), 0.0);
+        p.duration = 4.0;
+        assert_eq!(p.clamp_pos(9.0), 4.0);
     }
 
     fn ff_engine(p: &Player) -> &FfmpegPlayer {

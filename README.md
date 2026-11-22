@@ -4,7 +4,7 @@
 
 *OrangeLink is a Windows desktop app for organizing images, video, audio and subtitles in one library, and for turning long recordings (such as live-stream archives) into short clips. It is a single executable written in Rust with [egui](https://github.com/emilk/egui), with no installer and no database. The interface is available in Traditional Chinese, Simplified Chinese, English, Japanese and Korean; the detailed documentation is in Traditional Chinese.*
 
-![OrangeLink 主視窗：左側是類型與智慧資料夾，中間是依比例排列的圖片，右側是選取素材的評分與標籤](docs/images/hero.png)
+![OrangeLink 主視窗：左側是類型與智慧資料夾，中間是縮圖格狀檢視（縮圖右下角顯示評分），右側是選取素材的評分與標籤](docs/images/hero.png)
 
 ## 這是什麼
 
@@ -16,8 +16,6 @@ OrangeLink 是 Windows 上的素材管理與影片剪輯工作流工具。你可
 - 資源庫是純檔案結構，沒有資料庫，隨時可以備份或用其他工具讀取。
 - 語音轉文字、播放和縮圖都在本機處理；程式不會自動上傳你的素材或記錄。
 - 介面有繁體中文、简体中文、English、日本語、한국어，可隨時切換（設定 →「一般」→「語言」）。
-
-> 下面的截圖拍自較早的版本；0.2 之後介面有調整（例如剪輯工作台、檢視器的資訊面板），畫面可能和你看到的略有不同，功能說明以文字為準。
 
 ## 主要功能
 
@@ -33,6 +31,10 @@ OrangeLink 是 Windows 上的素材管理與影片剪輯工作流工具。你可
 
 ![匯入前確認：顯示 30 個檔案共 32.1 MB，可選擇存放方式、資料夾與標籤](docs/images/import-dialog.png)
 
+![圖片檢視器：右側的資訊面板可以直接評分、加標籤、放進資料夾，也列出主要色彩與檔案資訊](docs/images/viewer-info.png)
+
+![按 Ctrl + K 輸入「燈」，找到標籤「燈籠」；Enter 就切到該標籤，也能把選取的素材直接加上這個標籤](docs/images/command-palette.png)
+
 ### 搜尋
 
 名稱、標籤、註解、網址和字幕台詞都能搜尋，並支援組合條件，例如 `ext:png rating:4`、`貓 OR 狗`、`-草稿`、`dur>10m`、`w>=1920`。完整語法在程式裡按 `?` 就能看到，也列在 [docs/FEATURES.md](docs/FEATURES.md)。
@@ -47,9 +49,11 @@ OrangeLink 是 Windows 上的素材管理與影片剪輯工作流工具。你可
 - 剪輯工作台的時間軸可以縮放、捲動，有時間刻度與總覽條，長影片也好操作。
 - 按 I／O 標記入點與出點，加入片段並輸出成檔案（含 Shorts 用的直式 1080×1920 預設組）。片段可以一鍵輸出，進度與剩餘時間顯示在背景工作，輸出過的片段會打勾；也能複製成 YouTube 章節。
 
-![影片預覽：右側是字幕與片段列表，進度條下方標出片段的位置](docs/images/preview-clips.png)
+![剪輯工作台：右側是片段列表，虛線框是自動找出的精華候選（可保留或刪除）；時間軸上方是聊天室熱度，下方標出片段的位置](docs/images/preview-clips.png)
 
 ![在影片上按 I 設入點、O 設出點，再按 Enter 加入片段](docs/images/clips.gif)
+
+![字幕分頁的校對工具：可以尋找並取代、整體位移時間，也能逐句修改](docs/images/subtitle-proofread.png)
 
 ### 直播精華候選與 Premiere XML
 
@@ -65,7 +69,7 @@ OrangeLink 是 Windows 上的素材管理與影片剪輯工作流工具。你可
 
 修改每 2 秒自動存檔，並每天自動備份，可以從資源庫選單還原；資料夾結構檔損壞時會自動從備份取回。永久刪除預設只移除資源庫資料、保留你的原始檔。
 
-![資源庫選單：開啟其他資源庫、監看資料夾、找出重複、檢查資源庫、從備份還原等](docs/images/library-menu.png)
+![資源庫選單：開啟其他資源庫、監看資料夾、檢查與重新連結遺失的檔案、找出重複、檢查資源庫、從備份還原等](docs/images/library-menu.png)
 
 更多功能（PDF 預覽、全域快捷鍵、批次重新命名、使用紀錄、深色與淺色主題等）見 [docs/FEATURES.md](docs/FEATURES.md)。
 

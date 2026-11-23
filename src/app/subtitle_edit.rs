@@ -151,6 +151,31 @@ mod tests {
     }
 
     #[test]
+    fn app_undo_of_a_subtitle_that_cannot_be_written_keeps_the_screen_and_the_step() {
+        let cue = |t: &str| vec![Cue { start: 0.0, end: 1.0, text: t.into() }];
+        let mut app = App::with_config(&eframe::egui::Context::default(), crate::config::Config::default());
+        // The folder is not there, so the write fails.
+        let gone = std::env::temp_dir().join(format!("orangelink-nodir-{}", crate::model::new_id())).join("v.srt");
+        app.subs = Some(crate::app::Subtitles {
+            id: "v".into(),
+            path: Some(gone),
+            cues: cue("S2"),
+            search: String::new(),
+            last_cue: None,
+            focus: None,
+            scroll_to_focus: false,
+            matches: None,
+            hit: 0,
+            edit: SubEdit { undo: vec![cue("S0"), cue("S1")], ..Default::default() },
+        });
+        app.undo_subtitles();
+        let subs = app.subs.as_ref().unwrap();
+        assert_eq!(subs.cues, cue("S2"), "still what is on disk");
+        assert_eq!(subs.edit.undo, vec![cue("S0"), cue("S1")], "one step back, not two lost");
+        assert!(!app.toast.list.is_empty(), "the failure is shown");
+    }
+
+    #[test]
     fn picking_lines_one_or_a_run() {
         let mut e = SubEdit::default();
         assert_eq!(e.picked(), None);

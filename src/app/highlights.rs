@@ -116,7 +116,7 @@ impl App {
         let result = match super::state::poll(&job.rx) {
             super::Reply::Pending => return,
             super::Reply::Done(result) => result,
-            super::Reply::Lost => Err(super::state::LOST.to_string()),
+            super::Reply::Lost => Err(crate::i18n::tr(super::state::LOST).to_string()),
         };
         s.loud_job = None;
         match result {
@@ -299,8 +299,8 @@ impl App {
                 // Analysis panicked: report it and go on with the queue.
                 let name = run.name.clone();
                 self.stream.run = None;
-                crate::log::error("highlights", format!("整場處理「{name}」：{}", super::state::LOST));
-                self.toast_error(t!("「{name}」整場處理失敗：{state}", name, state = super::state::LOST));
+                crate::log::error("highlights", format!("整場處理「{name}」：{}", crate::i18n::tr(super::state::LOST)));
+                self.toast_error(t!("「{name}」整場處理失敗：{state}", name, state = crate::i18n::tr(super::state::LOST)));
                 return self.start_next_stream();
             }
         };

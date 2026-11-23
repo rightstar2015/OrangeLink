@@ -258,7 +258,7 @@ impl App {
                     // Ended without Done (a panic): finish this download as failed.
                     super::Reply::Lost => {
                         if finished.is_none() {
-                            finished = Some(Err(super::state::LOST.to_string()));
+                            finished = Some(Err(crate::i18n::tr(super::state::LOST).to_string()));
                         }
                         break;
                     }

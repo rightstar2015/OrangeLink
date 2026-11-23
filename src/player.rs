@@ -853,10 +853,23 @@ mod tests {
 
     #[test]
     fn seeking_a_clip_of_unknown_length_keeps_the_time_and_stops_reverse() {
-        let mut p = Player::new("t".into(), PlayEngine::Ffmpeg, None, PathBuf::from("x.mp4"), 0.0, Some(30.0), (320, 180), true, VIEWER_MAX_WIDTH).unwrap();
+        let Some(ff) = crate::media::ffmpeg_for_test("seeking_a_clip_of_unknown_length_keeps_the_time_and_stops_reverse") else { return };
+        let dir = temp_dir("unknown-length");
+        let clip = dir.join("clip.mp4");
+        let ok = ffmpeg(&ff)
+            .args(["-y", "-f", "lavfi", "-i", "testsrc2=size=320x180:rate=30:duration=2", "-pix_fmt", "yuv420p", "-preset", "ultrafast"])
+            .arg(&clip)
+            .status()
+            .unwrap()
+            .success();
+        assert!(ok);
+        let mut p = Player::new("t".into(), PlayEngine::Ffmpeg, Some(ff), clip, 2.0, Some(30.0), (320, 180), true, VIEWER_MAX_WIDTH).unwrap();
+        p.fall_back = false;
+        p.set_volume(0.0);
         p.reverse = Some((1.0, Instant::now()));
-        p.seek(12.5);
+        p.seek(1.0);
         assert!(p.reverse.is_none(), "reverse kept pulling the position back");
+        p.duration = 0.0;
         assert_eq!(p.clamp_pos(12.5), 12.5, "an unknown length clamped every time to 0");
         assert_eq!(p.clamp_pos(f64::NAN), 0.0);
         assert_eq!(p.clamp_pos(-3.0), 0.0);

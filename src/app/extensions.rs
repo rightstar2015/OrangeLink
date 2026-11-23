@@ -232,8 +232,8 @@ impl App {
         match reply {
             super::Reply::Pending => {}
             super::Reply::Lost => {
-                crate::log::error("extension", format!("{label}「{name}」：{}", super::state::LOST));
-                self.toast_error(t!("「{name}」的「{label}」失敗：{state}", name, label, state = super::state::LOST));
+                crate::log::error("extension", format!("{label}「{name}」：{}", crate::i18n::tr(super::state::LOST)));
+                self.toast_error(t!("「{name}」的「{label}」失敗：{state}", name, label, state = crate::i18n::tr(super::state::LOST)));
             }
             super::Reply::Done(Err(e)) => {
                 crate::log::error("extension", format!("{label}「{name}」：{e}"));
@@ -362,7 +362,7 @@ impl App {
         let result = match super::state::poll(&check.rx) {
             super::Reply::Pending => return,
             super::Reply::Done(r) => r,
-            super::Reply::Lost => Err(super::state::LOST.to_string()),
+            super::Reply::Lost => Err(crate::i18n::tr(super::state::LOST).to_string()),
         };
         let dir = check.dir.clone();
         self.ext.check = None;

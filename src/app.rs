@@ -944,6 +944,8 @@ pub struct App {
     pub ffmpeg_dir: Option<PathBuf>,
     /// Set when OS drag-and-drop ended, so egui's stuck button state can be released.
     release_pointer: bool,
+    /// The release of a click that closed the palette is still to be eaten.
+    palette_swallow: bool,
     /// Smooth scrolling: where the view took the wheel from last frame, the wheel
     /// taken since, and the glide under way.
     pub wheel_area: Option<(egui::Rect, egui::LayerId)>,
@@ -1172,6 +1174,7 @@ impl App {
             similar_near: crate::similarity::NEAR,
             ffmpeg_dir: None,
             release_pointer: false,
+            palette_swallow: false,
             wheel_area: None,
             wheel_pending: 0.0,
             glide: None,
@@ -3595,6 +3598,10 @@ impl App {
 impl eframe::App for App {
     fn raw_input_hook(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput) {
         self.take_wheel(ctx, raw);
+        let rect = self.palette.as_ref().and_then(|p| p.rect);
+        if palette::eat_outside_click(&mut raw.events, rect, &mut self.palette_swallow) {
+            self.palette = None;
+        }
         // OLE's drag loop swallowed the mouse-up; tell egui the button is released.
         if std::mem::take(&mut self.release_pointer) {
             raw.events.push(egui::Event::PointerButton {
@@ -4794,6 +4801,33 @@ mod tests {
         assert!(app.viewer.is_none(), "the top bar with the search box is hidden while previewing");
         assert!(app.focus_search);
         assert_eq!(app.scroll_to.as_deref(), Some("v1"));
+    }
+
+    #[test]
+    fn ctrl_k_and_ctrl_f_work_while_previewing() {
+        let root = std::env::temp_dir().join(format!("orangelink-prevkeys-{}", crate::model::new_id()));
+        let lib = Library::create(&root).unwrap();
+        let ctrl = egui::Modifiers { ctrl: true, command: true, ..Default::default() };
+        let press = |app: &mut App, ctx: &egui::Context, key| {
+            let ev = egui::Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers: ctrl };
+            let _ = ctx.run(egui::RawInput { events: vec![ev], modifiers: ctrl, ..Default::default() }, |ctx| {
+                app.handle_keys(ctx);
+                app.process_actions(ctx);
+            });
+        };
+        let ctx = egui::Context::default();
+        let mut app = App::with_config(&ctx, Config::default());
+        app.lib = Some(lib);
+        app.viewer = Some(Viewer { id: "v1".into(), zoom: 1.0, pan: egui::Vec2::ZERO });
+        press(&mut app, &ctx, egui::Key::K);
+        assert!(app.palette.is_some(), "Ctrl+K opens the palette over the preview");
+        assert!(app.viewer.is_some(), "and the preview stays");
+        app.palette = None;
+        press(&mut app, &ctx, egui::Key::F);
+        assert!(app.viewer.is_none(), "Ctrl+F leaves the preview for the search box");
+        assert!(app.focus_search);
+        drop(app);
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

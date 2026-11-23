@@ -321,11 +321,17 @@ fn meta_from_backup(root: &Path) -> Option<(LibraryMeta, PathBuf)> {
     }
     backup_files(root).into_iter().find_map(|p| {
         let b = fs::read(&p).ok()?;
-        serde_json::from_slice::<MetaOnly>(&b).ok().map(|m| (m.meta, p))
+        serde_json::from_slice::<MetaOnly>(strip_bom(&b)).ok().map(|m| (m.meta, p))
     })
 }
 
 /// Renames a damaged file to `<name>.broken` (numbered when that is taken).
+/// A file saved by Notepad and the like starts with a UTF-8 byte order mark,
+/// which JSON parsing refuses.
+fn strip_bom(bytes: &[u8]) -> &[u8] {
+    bytes.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(bytes)
+}
+
 fn keep_aside(path: &Path) -> Result<PathBuf> {
     let name = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
     for n in 0..100 {
@@ -370,7 +376,7 @@ impl Library {
         // Damaged (a disk error, a hand edit): the folders, smart folders, tags and
         // fields come from the newest backup that has them, and the damaged file
         // is kept. Items live in their own files and are read as usual.
-        let (meta, recovered) = match serde_json::from_slice::<LibraryMeta>(&bytes) {
+        let (meta, recovered) = match serde_json::from_slice::<LibraryMeta>(strip_bom(&bytes)) {
             Ok(meta) => (meta, None),
             Err(e) => {
                 let Some((meta, from)) = meta_from_backup(root) else {
@@ -398,7 +404,7 @@ impl Library {
                 let id = d.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
                 fs::read(d.join(META_FILE))
                     .map_err(|e| e.to_string())
-                    .and_then(|b| serde_json::from_slice::<Item>(&b).map_err(|e| e.to_string()))
+                    .and_then(|b| serde_json::from_slice::<Item>(strip_bom(&b)).map_err(|e| e.to_string()))
                     .map_err(|error| Unreadable { id, error })
             })
             .collect();
@@ -549,7 +555,7 @@ impl Library {
             .map(|p| {
                 let n = fs::read(&p)
                     .ok()
-                    .and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok())
+                    .and_then(|b| serde_json::from_slice::<serde_json::Value>(strip_bom(&b)).ok())
                     .and_then(|j| j.get("items").and_then(|i| i.as_array()).map(|a| a.len()))
                     .unwrap_or(0);
                 (p, n)
@@ -572,7 +578,7 @@ impl Library {
             meta: LibraryMeta,
             items: Vec<Item>,
         }
-        let backup: Backup = serde_json::from_slice(&fs::read(path)?).context(t!("備份檔格式錯誤"))?;
+        let backup: Backup = serde_json::from_slice(strip_bom(&fs::read(path)?)).context(t!("備份檔格式錯誤"))?;
         self.write_backup(&format!("backup-{}-before-restore.json", chrono::Local::now().format("%Y%m%d-%H%M%S")))?;
         rotate_backups(&self.root);
         let affected: Vec<String> = backup.items.iter().filter(|i| self.items.contains_key(&i.id)).map(|i| i.id.clone()).collect();
@@ -667,7 +673,7 @@ impl Library {
             }
             let Some(items) = fs::read(&path)
                 .ok()
-                .and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok())
+                .and_then(|b| serde_json::from_slice::<serde_json::Value>(strip_bom(&b)).ok())
                 .and_then(|mut j| j.get_mut("items").map(serde_json::Value::take))
                 .and_then(|v| serde_json::from_value::<Vec<Item>>(v).ok())
             else {
@@ -682,7 +688,12 @@ impl Library {
         let restored = found.len();
         for item in found {
             let meta = item_dir(&self.root, &item.id).join(META_FILE);
-            keep_aside(&meta).context(t!("無法保留損壞的檔案"))?;
+            if let Err(e) = keep_aside(&meta).context(t!("無法保留損壞的檔案")) {
+                // Items already brought back are in the library now: write them out
+                // rather than leave them for some later flush.
+                let _ = self.flush();
+                return Err(e);
+            }
             let id = item.id.clone();
             self.insert_item(item);
             self.dirty.insert(id.clone());
@@ -746,8 +757,9 @@ impl Library {
 
     /// Keeps the current state of `ids` in `captured` before they are edited.
     fn capture(&mut self, ids: &[String]) {
+        let mut have: HashSet<String> = self.captured.iter().map(|c| c.id.clone()).collect();
         for id in ids {
-            if !self.captured.iter().any(|c| c.id == *id) {
+            if have.insert(id.clone()) {
                 if let Some(it) = self.items.get(id) {
                     self.captured.push(it.clone());
                 }
@@ -1821,6 +1833,40 @@ mod tests {
         assert_eq!(back.missing_folder_refs(), 0);
         assert!(back.items["b"].folders.is_empty());
         drop(back);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_library_json_with_a_byte_order_mark_opens_without_recovery() {
+        let root = std::env::temp_dir().join(format!("orangelink-bom-{}", crate::model::new_id()));
+        let mut lib = Library::create(&root).unwrap();
+        let folder = lib.add_folder("keep me", None);
+        lib.flush().unwrap();
+        drop(lib);
+        let mut bytes = b"\xEF\xBB\xBF".to_vec();
+        bytes.extend(fs::read(root.join("library.json")).unwrap());
+        fs::write(root.join("library.json"), bytes).unwrap();
+        let back = Library::open(&root).unwrap();
+        assert!(back.recovered.is_none(), "a BOM is not damage");
+        assert!(back.meta.folders.iter().any(|f| f.id == folder));
+        drop(back);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn capture_keeps_one_copy_per_item_however_often_it_is_asked() {
+        let root = std::env::temp_dir().join(format!("orangelink-capture-{}", crate::model::new_id()));
+        let mut lib = Library::create(&root).unwrap();
+        for id in ["a", "b"] {
+            lib.insert_item(item(id));
+        }
+        let ids: Vec<String> = ["a", "b", "a", "missing", "b"].iter().map(|s| s.to_string()).collect();
+        lib.capture(&ids);
+        lib.capture(&ids);
+        let mut got: Vec<&str> = lib.captured.iter().map(|i| i.id.as_str()).collect();
+        got.sort();
+        assert_eq!(got, ["a", "b"]);
+        drop(lib);
         let _ = fs::remove_dir_all(&root);
     }
 

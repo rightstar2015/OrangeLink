@@ -691,8 +691,9 @@ impl Player {
         // Dragging the timeline ends a reverse play on either engine, as `seek` does.
         self.reverse = None;
         #[cfg(windows)]
+        let clamp = self.clamp_pos(pos);
+        #[cfg(windows)]
         if let Backend::Mf(b) = &mut self.backend {
-            let clamp = self.clamp_pos(pos);
             self.stop_at = None;
             self.range = None;
             // Paused, the engine lands each seek sooner (playing it decodes on).

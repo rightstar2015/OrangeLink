@@ -11,6 +11,8 @@ pub struct Palette {
     pub pick: usize,
     /// The box has been focused once.
     focused: bool,
+    /// Where the box was drawn last frame; a click outside it closes it.
+    pub rect: Option<egui::Rect>,
 }
 
 pub struct Entry {
@@ -169,8 +171,9 @@ impl App {
                         ui.label(RichText::new(t!("↑↓ 選擇　Enter 執行　Esc 關閉")).small().weak());
                     });
                 });
-            let press = ctx.input(|i| i.pointer.primary_pressed().then(|| i.pointer.interact_pos()).flatten());
-            close |= clicked_outside(press, area.response.rect);
+            // A click outside closes it in `raw_input_hook` (which also eats that click);
+            // this is where the hook finds the box.
+            p.rect = Some(area.response.rect);
             (close, picked.and_then(|i| found.into_iter().nth(i)).map(|e| e.action))
         });
         if !close {
@@ -182,9 +185,28 @@ impl App {
     }
 }
 
-/// A click that landed away from the palette closes it, like Esc.
-fn clicked_outside(press: Option<egui::Pos2>, palette: egui::Rect) -> bool {
-    press.is_some_and(|p| !palette.contains(p))
+/// A click that lands away from the open palette closes it, like Esc, and is
+/// removed from `events` along with its release, so it does not also press
+/// whatever is underneath. `swallow` carries "the release is still to come"
+/// between frames. Returns whether the palette closes.
+pub fn eat_outside_click(events: &mut Vec<egui::Event>, palette: Option<egui::Rect>, swallow: &mut bool) -> bool {
+    let mut open = palette;
+    let mut closed = false;
+    events.retain(|e| {
+        let egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, .. } = e else { return true };
+        if *pressed && open.is_some_and(|r| !r.contains(*pos)) {
+            open = None;
+            closed = true;
+            *swallow = true;
+            return false;
+        }
+        if !*pressed && *swallow {
+            *swallow = false;
+            return false;
+        }
+        true
+    });
+    closed
 }
 
 #[cfg(test)]
@@ -192,11 +214,27 @@ mod tests {
     use super::*;
 
     #[test]
-    fn clicking_outside_the_palette_closes_it() {
+    fn clicking_outside_the_palette_closes_it_and_the_click_goes_no_further() {
         let r = egui::Rect::from_min_size(pos2(100.0, 100.0), egui::vec2(520.0, 300.0));
-        assert!(clicked_outside(Some(pos2(10.0, 10.0)), r));
-        assert!(!clicked_outside(Some(pos2(200.0, 200.0)), r), "inside stays open");
-        assert!(!clicked_outside(None, r), "no click, no close");
+        let click = |p: egui::Pos2, pressed| egui::Event::PointerButton { pos: p, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
+        let mut swallow = false;
+        let mut ev = vec![click(pos2(10.0, 10.0), true)];
+        assert!(eat_outside_click(&mut ev, Some(r), &mut swallow));
+        assert!(ev.is_empty(), "the press must not reach the button underneath");
+        // The release comes a frame later, with the palette already gone.
+        let mut ev = vec![click(pos2(10.0, 10.0), false)];
+        assert!(!eat_outside_click(&mut ev, None, &mut swallow));
+        assert!(ev.is_empty(), "and neither must the release");
+        assert!(!swallow);
+        // Later clicks are the app's again.
+        let mut ev = vec![click(pos2(10.0, 10.0), true), click(pos2(10.0, 10.0), false)];
+        assert!(!eat_outside_click(&mut ev, None, &mut swallow));
+        assert_eq!(ev.len(), 2);
+        // Inside the box stays open and untouched.
+        let mut ev = vec![click(pos2(200.0, 200.0), true)];
+        assert!(!eat_outside_click(&mut ev, Some(r), &mut swallow));
+        assert_eq!(ev.len(), 1);
+        assert!(!eat_outside_click(&mut Vec::new(), Some(r), &mut swallow), "no click, no close");
     }
 
     fn src<'a>(folders: &'a [(String, String, usize)], tags: &'a [(String, usize)], selected: &[&str]) -> Sources<'a> {

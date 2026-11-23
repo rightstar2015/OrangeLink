@@ -675,7 +675,10 @@ impl App {
                     return ToolOutput::error("需要 start 與 end（秒）");
                 };
                 let max = known_length(it.duration);
-                let (start, end) = (a.min(b), a.max(b));
+                if a > b {
+                    return ToolOutput::error("start 要小於 end");
+                }
+                let (start, end) = (a, b);
                 if let Err(e) = within_length(start, max).and(within_length(end, max)) {
                     return ToolOutput::error(e);
                 }
@@ -1036,6 +1039,26 @@ mod tests {
             let out = app.mcp_call(tool, &args);
             assert!(out.is_error, "{tool} {args}");
         }
+        drop(app);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn add_clip_with_start_after_end_is_an_error_not_a_swap() {
+        let root = std::env::temp_dir().join(format!("orangelink-mcp-swap-{}", crate::model::new_id()));
+        let mut lib = Library::create(&root).unwrap();
+        let it: Item = serde_json::from_value(json!({
+            "id": "v", "name": "v", "file_name": "v.mp4", "ext": "mp4", "kind": "video", "size": 1, "width": 1, "height": 1, "duration": 60.0, "added_at": 0, "modified_at": 0
+        }))
+        .unwrap();
+        lib.insert_item(it);
+        let config = crate::config::Config { mcp_allow_write: true, ..Default::default() };
+        let mut app = App::with_config(&eframe::egui::Context::default(), config);
+        app.lib = Some(lib);
+        let out = app.mcp_call("add_clip", &json!({ "id": "v", "start": 9, "end": 3 }));
+        assert!(out.is_error);
+        assert!(app.lib.as_ref().unwrap().items["v"].clips.is_empty());
+        assert!(!app.mcp_call("add_clip", &json!({ "id": "v", "start": 3, "end": 9 })).is_error);
         drop(app);
         let _ = std::fs::remove_dir_all(&root);
     }

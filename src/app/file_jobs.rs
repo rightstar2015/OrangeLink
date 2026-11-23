@@ -59,6 +59,14 @@ fn copy_files(files: Vec<(PathBuf, PathBuf)>, tx: Sender<bool>, cancel: Arc<Atom
     }
 }
 
+/// Files a finished copy job never reported on, as `(cancelled, lost)`.
+/// Left over after the user cancelled they were skipped on purpose; left over
+/// without a cancel the worker died, and they count as failures.
+fn copy_leftover(total: usize, ok: usize, failed: usize, cancelled: bool) -> (usize, usize) {
+    let left = total.saturating_sub(ok + failed);
+    if cancelled { (left, 0) } else { (0, left) }
+}
+
 /// Makes the frame at `pos` of `input` the thumbnail at `thumb`, by way of
 /// the full-size frame in `tmp` (removed after); returns the new palette.
 fn frame_to_thumbnail(ffmpeg: &Path, input: &Path, pos: f64, tmp: &Path, thumb: &Path, cancel: &AtomicBool) -> Result<Vec<crate::model::PaletteColor>, String> {
@@ -203,13 +211,14 @@ impl App {
             }
         }
         let job = self.files.copy.take().expect("checked");
-        let skipped = job.total - job.ok - job.failed;
+        let (skipped, lost) = copy_leftover(job.total, job.ok, job.failed, job.cancel.load(Ordering::Relaxed));
+        let job_failed = job.failed + lost;
         let mut msg = t!("已匯出 {job} 個檔案", job = job.ok);
         if skipped > 0 {
             msg += &t!("，取消了 {skipped} 個", skipped);
         }
-        if job.failed > 0 {
-            msg += &t!("，{failed} 個失敗", failed = job.failed);
+        if job_failed > 0 {
+            msg += &t!("，{failed} 個失敗", failed = job_failed);
             self.toast_error(msg);
         } else {
             self.toast_with(msg, t!("開啟資料夾"), Action::OpenPath(job.dest));
@@ -291,7 +300,7 @@ impl App {
                     continue;
                 }
                 Reply::Done(r) => r,
-                Reply::Lost => Err(state::LOST.to_string()),
+                Reply::Lost => Err(crate::i18n::tr(state::LOST).to_string()),
             };
             let cap = self.files.captures.remove(i);
             match result {
@@ -350,6 +359,13 @@ impl App {
 mod tests {
     use super::*;
     use std::fs;
+
+    #[test]
+    fn a_copy_job_that_ended_early_without_a_cancel_counts_as_failed() {
+        assert_eq!(copy_leftover(10, 4, 1, false), (0, 5), "the worker died: not 'cancelled'");
+        assert_eq!(copy_leftover(10, 4, 1, true), (5, 0), "the user cancelled");
+        assert_eq!(copy_leftover(10, 10, 0, false), (0, 0));
+    }
 
     #[test]
     fn a_cancelled_capture_is_not_reported_as_failed() {

@@ -688,12 +688,13 @@ impl Player {
     /// `seek` on release lands exactly. Only Media Foundation is quick enough:
     /// the FFmpeg engine waits for the release. Returns whether it moved.
     pub fn scrub(&mut self, pos: f64) -> bool {
-        let clamp = self.clamp_pos(pos);
+        // Dragging the timeline ends a reverse play on either engine, as `seek` does.
+        self.reverse = None;
         #[cfg(windows)]
         if let Backend::Mf(b) = &mut self.backend {
+            let clamp = self.clamp_pos(pos);
             self.stop_at = None;
             self.range = None;
-            self.reverse = None;
             // Paused, the engine lands each seek sooner (playing it decodes on).
             if b.is_playing() {
                 b.pause();
@@ -875,6 +876,9 @@ mod tests {
         assert_eq!(p.clamp_pos(-3.0), 0.0);
         p.duration = 4.0;
         assert_eq!(p.clamp_pos(9.0), 4.0);
+        p.reverse = Some((1.0, Instant::now()));
+        p.scrub(1.0);
+        assert!(p.reverse.is_none(), "dragging the timeline on the FFmpeg engine left reverse running");
     }
 
     fn ff_engine(p: &Player) -> &FfmpegPlayer {

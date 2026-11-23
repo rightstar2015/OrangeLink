@@ -19,12 +19,17 @@ pub const DEFAULT: &str = "Ctrl+Alt+Shift+O";
 /// "Ctrl+Alt+Space", "Ctrl+Shift+F" and the like, in the crate's terms: modifiers are
 /// Ctrl/Alt/Shift/Win, keys are letters, digits, F1..F24, Space and so on.
 pub fn parse(spec: &str) -> Result<HotKey, String> {
-    let spec = spec.trim().replace("Win+", "Super+").replace("win+", "super+");
+    let spec = replace_win(spec.trim());
     let key = HotKey::from_str(&spec).map_err(|e| t!("看不懂快捷鍵「{spec}」：{e}", spec, e))?;
     if key.mods.is_empty() {
         return Err(t!("快捷鍵要包含 Ctrl、Alt、Shift 或 Win，否則一般打字也會觸發").into());
     }
     Ok(key)
+}
+
+/// Spells every "Win" modifier, in any case, the way the key crate wants it ("Super").
+fn replace_win(spec: &str) -> String {
+    spec.split('+').map(|p| if p.trim().eq_ignore_ascii_case("win") { "Super" } else { p }).collect::<Vec<_>>().join("+")
 }
 
 /// The registered shortcut; dropping it unregisters.
@@ -75,6 +80,8 @@ mod tests {
         assert!(parse(DEFAULT).is_ok());
         assert!(parse(" ctrl+shift+F ").is_ok());
         assert_eq!(parse("Win+Alt+K").unwrap(), parse("Super+Alt+K").unwrap());
+        assert_eq!(parse("WIN+Alt+K").unwrap(), parse("Super+Alt+K").unwrap());
+        assert_eq!(parse("Ctrl+Win+K").unwrap(), parse("Ctrl+Super+K").unwrap());
         assert!(parse("Space").is_err(), "no modifier");
         assert!(parse("Ctrl+Nope").is_err());
     }

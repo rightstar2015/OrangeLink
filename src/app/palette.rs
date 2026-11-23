@@ -130,7 +130,7 @@ impl App {
             let mut picked = enter.then_some(p.pick).filter(|i| *i < found.len());
             let mut close = esc || picked.is_some();
             let screen = ctx.screen_rect();
-            egui::Area::new(egui::Id::new("command-palette"))
+            let area = egui::Area::new(egui::Id::new("command-palette"))
                 .order(egui::Order::Foreground)
                 .fixed_pos(pos2(screen.center().x - 260.0, screen.top() + 90.0))
                 .show(ctx, |ui| {
@@ -169,6 +169,8 @@ impl App {
                         ui.label(RichText::new(t!("↑↓ 選擇　Enter 執行　Esc 關閉")).small().weak());
                     });
                 });
+            let press = ctx.input(|i| i.pointer.primary_pressed().then(|| i.pointer.interact_pos()).flatten());
+            close |= clicked_outside(press, area.response.rect);
             (close, picked.and_then(|i| found.into_iter().nth(i)).map(|e| e.action))
         });
         if !close {
@@ -180,9 +182,22 @@ impl App {
     }
 }
 
+/// A click that landed away from the palette closes it, like Esc.
+fn clicked_outside(press: Option<egui::Pos2>, palette: egui::Rect) -> bool {
+    press.is_some_and(|p| !palette.contains(p))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn clicking_outside_the_palette_closes_it() {
+        let r = egui::Rect::from_min_size(pos2(100.0, 100.0), egui::vec2(520.0, 300.0));
+        assert!(clicked_outside(Some(pos2(10.0, 10.0)), r));
+        assert!(!clicked_outside(Some(pos2(200.0, 200.0)), r), "inside stays open");
+        assert!(!clicked_outside(None, r), "no click, no close");
+    }
 
     fn src<'a>(folders: &'a [(String, String, usize)], tags: &'a [(String, usize)], selected: &[&str]) -> Sources<'a> {
         Sources { folders, smart: vec![("s1".into(), "待處理的直播".into())], tags, selected: selected.iter().map(|s| s.to_string()).collect(), extensions: Vec::new(), ext_targets: Vec::new() }

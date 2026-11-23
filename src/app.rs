@@ -2050,8 +2050,12 @@ impl App {
         if ctx.wants_keyboard_input() {
             return;
         }
-        if self.lib.is_some() && self.viewer.is_none() && !self.has_floating_window() && ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, Key::K)) {
+        if self.lib.is_some() && !self.has_floating_window() && ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, Key::K)) {
             return self.open_palette();
+        }
+        // The search box is in the top bar, which the preview hides: Ctrl+F leaves the preview for it.
+        if self.lib.is_some() && self.viewer.is_some() && !self.has_floating_window() && ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, Key::F)) {
+            return self.focus_search_box(true);
         }
         // ? (Shift+/ on most layouts, so read as typed text) or F1: the shortcuts window.
         let help = ctx.input(|i| i.key_pressed(Key::F1) || i.events.iter().any(|e| matches!(e, egui::Event::Text(t) if t == "?" || t == "？")));
@@ -3291,9 +3295,18 @@ impl App {
         ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
         ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
         self.summoned = true;
-        self.focus_search = true;
+        self.focus_search_box(false);
         self.selected.clear();
         self.anchor = None;
+    }
+
+    /// Asks for the search box to be focused. The preview hides the top bar, so
+    /// it is closed first; otherwise the request would wait until it closed.
+    fn focus_search_box(&mut self, scroll_back: bool) {
+        if self.viewer.is_some() {
+            self.close_viewer(scroll_back);
+        }
+        self.focus_search = true;
     }
 
     /// Enter in the search box: the selection, or else the first result, onto the
@@ -4771,6 +4784,16 @@ mod tests {
         assert!(!app.show_shortcuts && app.show_ai_log);
         assert!(app.close_top_floating_window());
         assert!(!app.has_floating_window());
+    }
+
+    #[test]
+    fn focusing_the_search_box_leaves_the_preview() {
+        let mut app = App::with_config(&egui::Context::default(), Config::default());
+        app.viewer = Some(Viewer { id: "v1".into(), zoom: 1.0, pan: egui::Vec2::ZERO });
+        app.focus_search_box(true);
+        assert!(app.viewer.is_none(), "the top bar with the search box is hidden while previewing");
+        assert!(app.focus_search);
+        assert_eq!(app.scroll_to.as_deref(), Some("v1"));
     }
 
     #[test]

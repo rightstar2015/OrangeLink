@@ -42,6 +42,19 @@ impl SubEdit {
         }
     }
 
+    /// Steps back one change: `cues` become the ones before it. Returns the
+    /// cues it replaced, for `put_back` if the file can't be written.
+    fn take_back(&mut self, cues: &mut Vec<Cue>) -> Option<Vec<Cue>> {
+        let before = self.undo.pop()?;
+        Some(std::mem::replace(cues, before))
+    }
+
+    /// Undoes `take_back` when the change could not be saved: the screen goes
+    /// back to what is on disk and the step stays available.
+    fn put_back(&mut self, cues: &mut Vec<Cue>, undone: Vec<Cue>) {
+        self.undo.push(std::mem::replace(cues, undone));
+    }
+
     fn forget_picks(&mut self, len: usize) {
         if self.picked().is_none_or(|(_, b)| b >= len) {
             self.anchor = None;
@@ -65,24 +78,37 @@ impl App {
         if subs.edit.undo.len() > UNDO_STEPS {
             subs.edit.undo.remove(0);
         }
-        self.write_subtitles(&path);
+        if !self.write_subtitles(&path) {
+            // The change stays on screen but not on disk: take it back.
+            if let Some(subs) = self.subs.as_mut() {
+                if let Some(before) = subs.edit.undo.pop() {
+                    subs.cues = before;
+                }
+            }
+        }
     }
 
     /// Takes back the last subtitle change.
     pub(crate) fn undo_subtitles(&mut self) {
         let Some(subs) = self.subs.as_mut() else { return };
-        let (Some(path), Some(before)) = (subs.path.clone(), subs.edit.undo.pop()) else { return };
-        subs.cues = before;
-        self.write_subtitles(&path);
+        let Some(path) = subs.path.clone() else { return };
+        let Some(undone) = subs.edit.take_back(&mut subs.cues) else { return };
+        if !self.write_subtitles(&path) {
+            // Still what is on disk: keep the step so 復原 can be tried again.
+            if let Some(subs) = self.subs.as_mut() {
+                subs.edit.put_back(&mut subs.cues, undone);
+            }
+        }
     }
 
-    fn write_subtitles(&mut self, path: &std::path::Path) {
-        let Some(subs) = self.subs.as_mut() else { return };
+    /// Writes the shown cues to `path`; false (after a toast) when that failed.
+    fn write_subtitles(&mut self, path: &std::path::Path) -> bool {
+        let Some(subs) = self.subs.as_mut() else { return false };
         subs.matches = None;
         subs.edit.forget_picks(subs.cues.len());
         let id = subs.id.clone();
         match save_cues(path, &subs.cues) {
-            Ok(false) => {}
+            Ok(false) => true,
             Ok(true) => {
                 // A subtitle that is itself in the library: its size and hash
                 // follow, so the library check doesn't call it changed.
@@ -98,15 +124,11 @@ impl App {
                     }
                 }
                 self.index_subtitles(&id, path);
+                true
             }
             Err(e) => {
-                // The change stays on screen but not on disk: say so, and take it back.
                 self.toast_error(t!("無法儲存字幕：{e}", e));
-                if let Some(subs) = self.subs.as_mut() {
-                    if let Some(before) = subs.edit.undo.pop() {
-                        subs.cues = before;
-                    }
-                }
+                false
             }
         }
     }
@@ -115,6 +137,18 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn failed_undo_write_keeps_the_screen_and_the_step() {
+        let cue = |t: &str| vec![Cue { start: 0.0, end: 1.0, text: t.into() }];
+        let mut e = SubEdit { undo: vec![cue("S0"), cue("S1")], ..Default::default() };
+        let mut cues = cue("S2");
+        let undone = e.take_back(&mut cues).unwrap();
+        assert_eq!(cues, cue("S1"));
+        e.put_back(&mut cues, undone);
+        assert_eq!(cues, cue("S2"), "still what is on disk");
+        assert_eq!(e.undo, vec![cue("S0"), cue("S1")], "one step back, not two lost");
+    }
 
     #[test]
     fn picking_lines_one_or_a_run() {

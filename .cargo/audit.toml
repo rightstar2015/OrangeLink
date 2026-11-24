@@ -7,4 +7,14 @@ ignore = [
     # only). Goes away when eframe is upgraded.
     "RUSTSEC-2026-0194",
     "RUSTSEC-2026-0195",
+    # Linux-only (not in the Windows build), no fixed release exists: glib 0.18
+    # (unsound, through gtk3 in the drag crate), proc-macro-error (through
+    # gtk3-macros), zbus_names / zvariant / zvariant_derive (unmaintained, through
+    # accesskit_unix and rfd's portal). They go away with the upstream
+    # crates; the Windows-built chrono, paste and ttf-parser warnings stay visible.
+    "RUSTSEC-2024-0429",
+    "RUSTSEC-2024-0370",
+    "RUSTSEC-2026-0371",
+    "RUSTSEC-2026-0370",
+    "RUSTSEC-2026-0372",
 ]

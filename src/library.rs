@@ -325,13 +325,13 @@ fn meta_from_backup(root: &Path) -> Option<(LibraryMeta, PathBuf)> {
     })
 }
 
-/// Renames a damaged file to `<name>.broken` (numbered when that is taken).
 /// A file saved by Notepad and the like starts with a UTF-8 byte order mark,
 /// which JSON parsing refuses.
 fn strip_bom(bytes: &[u8]) -> &[u8] {
     bytes.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(bytes)
 }
 
+/// Renames a damaged file to `<name>.broken` (numbered when that is taken).
 fn keep_aside(path: &Path) -> Result<PathBuf> {
     let name = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
     for n in 0..100 {
@@ -1945,6 +1945,67 @@ mod tests {
         let dir = item_dir(&root, "a");
         assert_eq!(fs::read_to_string(dir.join("metadata.json.broken")).unwrap(), "first damage");
         assert_eq!(fs::read_to_string(dir.join("metadata.json.broken-1")).unwrap(), "second damage");
+        drop(lib);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_backup_and_an_item_file_with_a_byte_order_mark_still_read() {
+        let root = std::env::temp_dir().join(format!("orangelink-bom2-{}", new_id()));
+        let mut lib = Library::create(&root).unwrap();
+        fs::create_dir_all(item_dir(&root, "a")).unwrap();
+        lib.insert_item(item("a"));
+        lib.touch("a");
+        lib.flush().unwrap();
+        lib.write_backup("backup-20000101-000000.json").unwrap();
+        let with_bom = |p: &Path| {
+            let mut bytes = b"\xEF\xBB\xBF".to_vec();
+            bytes.extend(fs::read(p).unwrap());
+            fs::write(p, bytes).unwrap();
+        };
+        let backup = root.join("backups").join("backup-20000101-000000.json");
+        with_bom(&backup);
+        with_bom(&item_dir(&root, "a").join(META_FILE));
+        assert!(lib.list_backups().iter().any(|(p, n)| p == &backup && *n == 1), "the backup still counts its items");
+        drop(lib);
+        let mut lib = Library::open(&root).unwrap();
+        assert!(lib.unreadable.is_empty(), "a BOM on an item file is not damage");
+        assert!(lib.items.contains_key("a"));
+        assert_eq!(lib.restore_backup(&backup).unwrap(), 1);
+        drop(lib);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn restoring_unreadable_items_writes_the_ones_brought_back_when_a_later_one_fails() {
+        let root = std::env::temp_dir().join(format!("orangelink-restore-{}", new_id()));
+        let mut lib = Library::create(&root).unwrap();
+        for id in ["a", "b"] {
+            fs::create_dir_all(item_dir(&root, id)).unwrap();
+            lib.insert_item(item(id));
+            lib.touch(id);
+        }
+        lib.flush().unwrap();
+        // Items in a fixed order, so "a" is brought back before "b" fails.
+        fs::create_dir_all(root.join("backups")).unwrap();
+        let ordered = serde_json::json!({ "meta": lib.meta, "items": [&lib.items["a"], &lib.items["b"]] });
+        fs::write(root.join("backups").join("backup-20000101-000000.json"), serde_json::to_vec(&ordered).unwrap()).unwrap();
+        for id in ["a", "b"] {
+            fs::write(item_dir(&root, id).join(META_FILE), b"{ damaged").unwrap();
+        }
+        let mut lib = Library::open(&root).unwrap();
+        assert_eq!(lib.unreadable.len(), 2);
+        // Leave no free `.broken` name for one of them, so setting it aside fails.
+        let dir = item_dir(&root, "b");
+        for n in 0..100 {
+            let name = if n == 0 { "metadata.json.broken".to_string() } else { format!("metadata.json.broken-{n}") };
+            fs::write(dir.join(name), b"x").unwrap();
+        }
+        assert!(lib.restore_unreadable().is_err());
+        drop(lib);
+        let lib = Library::open(&root).unwrap();
+        assert!(lib.items.contains_key("a"), "the item that was brought back is on disk, not only in memory");
+        assert_eq!(lib.unreadable.len(), 1);
         drop(lib);
         let _ = fs::remove_dir_all(&root);
     }

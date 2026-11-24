@@ -204,6 +204,10 @@ pub fn eat_outside_click(events: &mut Vec<egui::Event>, palette: Option<egui::Re
             *swallow = false;
             return false;
         }
+        if *pressed {
+            // A release that never came (let go outside the window) must not eat a later one.
+            *swallow = false;
+        }
         true
     });
     closed
@@ -230,6 +234,12 @@ mod tests {
         let mut ev = vec![click(pos2(10.0, 10.0), true), click(pos2(10.0, 10.0), false)];
         assert!(!eat_outside_click(&mut ev, None, &mut swallow));
         assert_eq!(ev.len(), 2);
+        // A release that never arrived does not eat the next click's release.
+        let mut ev = vec![click(pos2(10.0, 10.0), true)];
+        assert!(eat_outside_click(&mut ev, Some(r), &mut swallow));
+        let mut ev = vec![click(pos2(500.0, 200.0), true), click(pos2(500.0, 200.0), false)];
+        assert!(!eat_outside_click(&mut ev, Some(r), &mut swallow));
+        assert_eq!(ev.len(), 2, "the lost release is forgotten at the next press");
         // Inside the box stays open and untouched.
         let mut ev = vec![click(pos2(200.0, 200.0), true)];
         assert!(!eat_outside_click(&mut ev, Some(r), &mut swallow));
